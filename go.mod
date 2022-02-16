@@ -80,6 +80,8 @@ require (
 	gopkg.in/urfave/cli.v1 v1.20.0
 )
 
+require github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5
+
 require (
 	github.com/cockroachdb/pebble v0.0.0-20230928194634-aa077af62593
 	golang.org/x/exp v0.0.0-20230626212559-97b1e661b5df
@@ -206,7 +208,6 @@ require (
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 // indirect
-	github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.14.0 // indirect
 	github.com/prometheus/client_model v0.3.0 // indirect
