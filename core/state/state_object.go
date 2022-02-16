@@ -24,12 +24,29 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/cachemetrics"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie/trienode"
+)
+
+var (
+	emptyCodeHash         = crypto.Keccak256(nil)
+	syncPreloadCost       = metrics.NewRegisteredTimer("state/preload/sync/delay", nil)
+	minerPreloadCost      = metrics.NewRegisteredTimer("state/preload/miner/delay", nil)
+	syncPreloadCounter    = metrics.NewRegisteredCounter("state/preload/sync/counter", nil)
+	minerPreloadCounter   = metrics.NewRegisteredCounter("state/preload/miner/counter", nil)
+	syncSignatureCounter  = metrics.NewRegisteredCounter("state/sign/sync/counter", nil)
+	minerSignatureCounter = metrics.NewRegisteredCounter("state/sign/miner/counter", nil)
+
+	syncOverheadCost     = metrics.NewRegisteredTimer("state/overhead/sync/delay", nil)
+	minerOverheadCost    = metrics.NewRegisteredTimer("state/overhead/miner/delay", nil)
+	syncOverheadCounter  = metrics.NewRegisteredCounter("state/overhead/sync/counter", nil)
+	minerOverheadCounter = metrics.NewRegisteredCounter("state/overhead/miner/counter", nil)
 )
 
 type Code []byte
@@ -284,8 +301,28 @@ func (s *stateObject) setState(key, value common.Hash) {
 // committed later. It is invoked at the end of every transaction.
 func (s *stateObject) finalise(prefetch bool) {
 	slotsToPrefetch := make([][]byte, 0, len(s.dirtyStorage))
+	var overheadCost time.Duration
+	defer func() {
+		goid := cachemetrics.Goid()
+		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
+		isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(goid)
+		// record metrics of syncing main process
+		if isSyncMainProcess {
+			syncOverheadCost.Update(overheadCost)
+			syncOverheadCounter.Inc(overheadCost.Nanoseconds())
+		}
+		// record metrics of mining main process
+		if isMinerMainProcess {
+			minerOverheadCost.Update(overheadCost)
+			minerOverheadCounter.Inc(overheadCost.Nanoseconds())
+		}
+	}()
+
 	for key, value := range s.dirtyStorage {
 		s.pendingStorage[key] = value
+	}
+	start := time.Now()
+	for key, value := range s.dirtyStorage {
 		if value != s.originStorage[key] {
 			slotsToPrefetch = append(slotsToPrefetch, common.CopyBytes(key[:])) // Copy needed for closure
 		}
@@ -293,6 +330,7 @@ func (s *stateObject) finalise(prefetch bool) {
 	if s.db.prefetcher != nil && prefetch && len(slotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
 		s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, slotsToPrefetch)
 	}
+	overheadCost = time.Since(start)
 	if len(s.dirtyStorage) > 0 {
 		s.dirtyStorage = make(Storage)
 	}
