@@ -35,6 +35,9 @@ const (
 var (
 	// triePrefetchMetricsPrefix is the prefix under which to publis the metrics.
 	triePrefetchMetricsPrefix = "trie/prefetch/"
+	trieSubPrefetchTimer      = metrics.NewRegisteredTimer("trie/subprefetch/delay", nil)
+	trieSubPrefetchCounter    = metrics.NewRegisteredCounter("trie/prefetch/total", nil)
+	triePrefetchTimer         = metrics.NewRegisteredTimer("trie/prefetch/delay", nil)
 )
 
 type prefetchMsg struct {
@@ -374,6 +377,7 @@ func newSubfetcher(db Database, root common.Hash, accountHash common.Hash) *subf
 		seen:        make(map[string]struct{}),
 		accountHash: accountHash,
 	}
+
 	go sf.loop()
 	return sf
 }
@@ -465,7 +469,6 @@ func (sf *subfetcher) abort() {
 func (sf *subfetcher) loop() {
 	// No matter how the loop stops, signal anyone waiting that it's terminated
 	defer close(sf.term)
-
 	// Start by opening the trie and stop processing if it fails
 	var trie Trie
 	var err error
