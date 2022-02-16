@@ -21,7 +21,13 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
+)
+
+var (
+	statePrefetchTimer   = metrics.NewRegisteredTimer("state/prefetch/delay", nil)
+	statePrefetchCounter = metrics.NewRegisteredCounter("state/prefetch/total", nil)
 )
 
 const prefetchThread = 3
@@ -53,6 +59,7 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, c
 		header = block.Header()
 		signer = types.MakeSigner(p.config, header.Number)
 	)
+
 	transactions := block.Transactions()
 	txChan := make(chan int, prefetchThread)
 	// No need to execute the first batch, since the main processor will do it.
@@ -128,6 +135,7 @@ func (p *statePrefetcher) PrefetchMining(txs *types.TransactionsByPriceAndNonce,
 			}
 		}(txCh, interruptCh)
 	}
+
 	go func(txset *types.TransactionsByPriceAndNonce) {
 		count := 0
 		for {
@@ -153,6 +161,7 @@ func (p *statePrefetcher) PrefetchMining(txs *types.TransactionsByPriceAndNonce,
 			}
 		}
 	}(txs)
+
 }
 
 // precacheTransaction attempts to apply a transaction to the given state database
