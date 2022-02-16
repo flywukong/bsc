@@ -28,6 +28,7 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
 
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
@@ -992,6 +993,8 @@ func (w *worker) prepareWork(genParams *generateParams, witness bool) (*environm
 	w.confMu.RLock()
 	defer w.confMu.RUnlock()
 
+	routeid := cachemetrics.Goid()
+	cachemetrics.UpdateMiningRoutineID(routeid)
 	// Find the parent block for sealing task
 	parent := w.chain.CurrentBlock()
 	if genParams.parentHash != (common.Hash{}) {
@@ -1505,6 +1508,9 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 		case w.taskCh <- &task{receipts: receipts, state: env.state, block: block, createdAt: time.Now(), miningStartAt: start}:
 			log.Info("Commit new sealing work", "number", block.Number(), "sealhash", w.engine.SealHash(block.Header()),
 				"txs", env.tcount, "blobs", env.blobs, "gas", block.GasUsed(), "fees", feesInEther, "elapsed", common.PrettyDuration(time.Since(start)))
+
+			// mark mingTime as a metrics
+			totalMiningTimer.Update(time.Since(start))
 
 		case <-w.exitCh:
 			log.Info("Worker has exited")

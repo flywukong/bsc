@@ -19,6 +19,7 @@ package state
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
@@ -35,6 +36,9 @@ const (
 var (
 	// triePrefetchMetricsPrefix is the prefix under which to publish the metrics.
 	triePrefetchMetricsPrefix = "trie/prefetch/"
+	trieSubPrefetchTimer      = metrics.NewRegisteredTimer("trie/subprefetch/delay", nil)
+	trieSubPrefetchCounter    = metrics.NewRegisteredCounter("trie/prefetch/total", nil)
+	triePrefetchTimer         = metrics.NewRegisteredTimer("trie/prefetch/delay", nil)
 )
 
 type prefetchMsg struct {
@@ -400,6 +404,9 @@ func newSubfetcher(db Database, state common.Hash, owner common.Hash, root commo
 		copy:  make(chan chan Trie),
 		seen:  make(map[string]struct{}),
 	}
+	defer func() {
+		sf.preDataRead += time.Since(start)
+	}()
 	go sf.loop()
 	return sf
 }
@@ -523,7 +530,6 @@ func (sf *subfetcher) openTrie() error {
 func (sf *subfetcher) loop() {
 	// No matter how the loop stops, signal anyone waiting that it's terminated
 	defer close(sf.term)
-
 	var err error
 	if err := sf.openTrie(); err != nil {
 		return

@@ -26,6 +26,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum/cachemetrics"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -264,11 +266,40 @@ func (dl *diffLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	}
 	// Check the bloom filter first whether there's even a point in reaching into
 	// all the maps in all the layers below
+
 	var origin *diskLayer
 	hit := dl.diffed.ContainsHash(accountBloomHash(hash))
 	if !hit {
 		origin = dl.origin // extract origin while holding the lock
 	}
+
+	start := time.Now()
+	hitInDifflayer := false
+	defer func() {
+		routeid := cachemetrics.Goid()
+		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+		isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(routeid)
+		if isSyncMainProcess {
+			// l1 miss
+			syncL1MissAccountMeter.Mark(1)
+			if hitInDifflayer {
+				syncL2AccountHitMeter.Mark(1)
+				cachemetrics.RecordCacheDepth("CACHE_L2_ACCOUNT")
+				cachemetrics.RecordCacheMetrics("CACHE_L2_ACCOUNT", start)
+				cachemetrics.RecordTotalCosts("CACHE_L2_ACCOUNT", start)
+			}
+		}
+		if isMinerMainProcess {
+			// l1 miss
+			minerL1MissAccountMeter.Mark(1)
+			if hitInDifflayer {
+				minerL2AccountHitMeter.Mark(1)
+				cachemetrics.RecordMinerCacheDepth("MINER_L2_ACCOUNT")
+				cachemetrics.RecordMinerCacheMetrics("MINER_L2_ACCOUNT", start)
+				cachemetrics.RecordMinerTotalCosts("MINER_L2_ACCOUNT", start)
+			}
+		}
+	}()
 	dl.lock.RUnlock()
 
 	// If the bloom filter misses, don't even bother with traversing the memory
@@ -278,13 +309,13 @@ func (dl *diffLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 		return origin.AccountRLP(hash)
 	}
 	// The bloom filter hit, start poking in the internal maps
-	return dl.accountRLP(hash, 0)
+	return dl.accountRLP(hash, 0, &hitInDifflayer)
 }
 
 // accountRLP is an internal version of AccountRLP that skips the bloom filter
 // checks and uses the internal maps to try and retrieve the data. It's meant
 // to be used if a higher layer's bloom filter hit already.
-func (dl *diffLayer) accountRLP(hash common.Hash, depth int) ([]byte, error) {
+func (dl *diffLayer) accountRLP(hash common.Hash, depth int, hit *bool) ([]byte, error) {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
 
@@ -303,11 +334,12 @@ func (dl *diffLayer) accountRLP(hash common.Hash, depth int) ([]byte, error) {
 			snapshotDirtyAccountInexMeter.Mark(1)
 		}
 		snapshotBloomAccountTrueHitMeter.Mark(1)
+		*hit = true
 		return data, nil
 	}
 	// Account unknown to this diff, resolve from parent
 	if diff, ok := dl.parent.(*diffLayer); ok {
-		return diff.accountRLP(hash, depth+1)
+		return diff.accountRLP(hash, depth+1, hit)
 	}
 	// Failed to resolve through diff layers, mark a bloom error and use the disk
 	snapshotBloomAccountFalseHitMeter.Mark(1)
@@ -322,6 +354,31 @@ func (dl *diffLayer) accountRLP(hash common.Hash, depth int) ([]byte, error) {
 func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, error) {
 	// Check the bloom filter first whether there's even a point in reaching into
 	// all the maps in all the layers below
+	start := time.Now()
+	routeid := cachemetrics.Goid()
+	hitInDifflayer := false
+	defer func() {
+		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+		isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(routeid)
+		if isSyncMainProcess {
+			syncL1MissStorageMeter.Mark(1)
+			if hitInDifflayer {
+				syncL2StorageHitMeter.Mark(1)
+				cachemetrics.RecordCacheDepth("CACHE_L2_STORAGE")
+				cachemetrics.RecordCacheMetrics("CACHE_L2_STORAGE", start)
+				cachemetrics.RecordTotalCosts("CACHE_L2_STORAGE", start)
+			}
+		}
+		if isMinerMainProcess {
+			minerL1MissStorageMeter.Mark(1)
+			if hitInDifflayer {
+				minerL2StorageHitMeter.Mark(1)
+				cachemetrics.RecordMinerCacheDepth("MINER_L2_STORAGE")
+				cachemetrics.RecordMinerCacheMetrics("MINER_L2_STORAGE", start)
+				cachemetrics.RecordMinerTotalCosts("MINER_L2_STORAGE", start)
+			}
+		}
+	}()
 	dl.lock.RLock()
 	// Check staleness before reaching further.
 	if dl.Stale() {
@@ -342,13 +399,13 @@ func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 		return origin.Storage(accountHash, storageHash)
 	}
 	// The bloom filter hit, start poking in the internal maps
-	return dl.storage(accountHash, storageHash, 0)
+	return dl.storage(accountHash, storageHash, 0, &hitInDifflayer)
 }
 
 // storage is an internal version of Storage that skips the bloom filter checks
 // and uses the internal maps to try and retrieve the data. It's meant  to be
 // used if a higher layer's bloom filter hit already.
-func (dl *diffLayer) storage(accountHash, storageHash common.Hash, depth int) ([]byte, error) {
+func (dl *diffLayer) storage(accountHash, storageHash common.Hash, depth int, hit *bool) ([]byte, error) {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
 
@@ -360,6 +417,7 @@ func (dl *diffLayer) storage(accountHash, storageHash common.Hash, depth int) ([
 	// If the account is known locally, try to resolve the slot locally
 	if storage, ok := dl.storageData[accountHash]; ok {
 		if data, ok := storage[storageHash]; ok {
+			*hit = true
 			snapshotDirtyStorageHitMeter.Mark(1)
 			//snapshotDirtyStorageHitDepthHist.Update(int64(depth))
 			if n := len(data); n > 0 {
@@ -373,7 +431,7 @@ func (dl *diffLayer) storage(accountHash, storageHash common.Hash, depth int) ([
 	}
 	// Storage slot unknown to this diff, resolve from parent
 	if diff, ok := dl.parent.(*diffLayer); ok {
-		return diff.storage(accountHash, storageHash, depth+1)
+		return diff.storage(accountHash, storageHash, depth+1, hit)
 	}
 	// Failed to resolve through diff layers, mark a bloom error and use the disk
 	snapshotBloomStorageFalseHitMeter.Mark(1)

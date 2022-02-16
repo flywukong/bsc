@@ -115,6 +115,7 @@ func readRuntimeStats(v *runtimeStats) {
 		case "/sched/latencies:seconds":
 			v.SchedLatency = s.Value.Float64Histogram()
 		}
+
 	}
 }
 

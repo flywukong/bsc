@@ -17,10 +17,18 @@
 package core
 
 import (
+	"time"
+
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
+)
+
+var (
+	statePrefetchTimer   = metrics.NewRegisteredTimer("state/prefetch/delay", nil)
+	statePrefetchCounter = metrics.NewRegisteredCounter("state/prefetch/total", nil)
 )
 
 const prefetchThread = 3
@@ -50,6 +58,7 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, c
 		header = block.Header()
 		signer = types.MakeSigner(p.config, header.Number, header.Time)
 	)
+	start := time.Now()
 	transactions := block.Transactions()
 	txChan := make(chan int, prefetchThread)
 	// No need to execute the first batch, since the main processor will do it.
@@ -95,6 +104,8 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, c
 			return
 		}
 	}
+	statePrefetchTimer.Update(time.Since(start))
+	statePrefetchCounter.Inc(int64(time.Since(start)))
 }
 
 // PrefetchMining processes the state changes according to the Ethereum rules by running
