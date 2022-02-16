@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -54,6 +55,21 @@ var (
 	emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 	emptyAddr = crypto.Keccak256Hash(common.Address{}.Bytes())
+
+	l1AccountMeter      = metrics.NewRegisteredMeter("state/cache/account/total", nil)
+	minerL1AccountMeter = metrics.NewRegisteredMeter("state/minercache/account/total", nil)
+	l1StorageMeter      = metrics.NewRegisteredMeter("state/cache/storage/total", nil)
+	minerL1StorageMeter = metrics.NewRegisteredMeter("state/minercache/storage/total", nil)
+
+	getStatetSyncIOCost     = metrics.NewRegisteredTimer("state/getcache/sync/delay", nil)
+	getStatetMinerIOCost    = metrics.NewRegisteredTimer("state/getcache/miner/delay", nil)
+	getStatetSyncIOCounter  = metrics.NewRegisteredCounter("state/getcache/sync/counter", nil)
+	getStatetMinerIOCounter = metrics.NewRegisteredCounter("state/getcache/miner/counter", nil)
+
+	totalSyncIOCost     = metrics.NewRegisteredTimer("state/cache/sync/delay", nil)
+	totalMinerIOCost    = metrics.NewRegisteredTimer("state/cache/miner/delay", nil)
+	totalSyncIOCounter  = metrics.NewRegisteredCounter("state/cache/sync/counter", nil)
+	totalMinerIOCounter = metrics.NewRegisteredCounter("state/cache/miner/counter", nil)
 )
 
 type proofList [][]byte
@@ -137,6 +153,8 @@ type StateDB struct {
 	StorageHashes        time.Duration
 	StorageUpdates       time.Duration
 	StorageCommits       time.Duration
+	L1CacheAccountReads  time.Duration
+	L1CacheStorageReads  time.Duration
 	SnapshotAccountReads time.Duration
 	SnapshotStorageReads time.Duration
 	SnapshotCommits      time.Duration
@@ -335,6 +353,8 @@ func (s *StateDB) Empty(addr common.Address) bool {
 
 // GetBalance retrieves the balance from the given address or 0 if object not found
 func (s *StateDB) GetBalance(addr common.Address) *big.Int {
+	start := time.Now()
+	defer s.markMetrics(start, false)
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.Balance()
@@ -343,11 +363,12 @@ func (s *StateDB) GetBalance(addr common.Address) *big.Int {
 }
 
 func (s *StateDB) GetNonce(addr common.Address) uint64 {
+	start := time.Now()
+	defer s.markMetrics(start, false)
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.Nonce()
 	}
-
 	return 0
 }
 
@@ -362,6 +383,8 @@ func (s *StateDB) BlockHash() common.Hash {
 }
 
 func (s *StateDB) GetCode(addr common.Address) []byte {
+	start := time.Now()
+	defer s.markMetrics(start, false)
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.Code(s.db)
@@ -370,6 +393,8 @@ func (s *StateDB) GetCode(addr common.Address) []byte {
 }
 
 func (s *StateDB) GetCodeSize(addr common.Address) int {
+	start := time.Now()
+	defer s.markMetrics(start, false)
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.CodeSize(s.db)
@@ -378,6 +403,8 @@ func (s *StateDB) GetCodeSize(addr common.Address) int {
 }
 
 func (s *StateDB) GetCodeHash(addr common.Address) common.Hash {
+	start := time.Now()
+	defer s.markMetrics(start, false)
 	stateObject := s.getStateObject(addr)
 	if stateObject == nil {
 		return common.Hash{}
@@ -385,10 +412,62 @@ func (s *StateDB) GetCodeHash(addr common.Address) common.Hash {
 	return common.BytesToHash(stateObject.CodeHash())
 }
 
+func (s *StateDB) markMetrics(start time.Time, reachStorage bool) {
+	goid := cachemetrics.Goid()
+	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
+	isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(goid)
+	// record metrics of syncing main process
+	if isSyncMainProcess {
+		totalSyncIOCounter.Inc(time.Since(start).Nanoseconds())
+		l1AccountMeter.Mark(1)
+		if reachStorage {
+			l1StorageMeter.Mark(1)
+		}
+	}
+	// record metrics of mining main process
+	if isMinerMainProcess {
+		totalMinerIOCounter.Inc(time.Since(start).Nanoseconds())
+		minerL1AccountMeter.Mark(1)
+		if reachStorage {
+			minerL1StorageMeter.Mark(1)
+		}
+	}
+
+}
+
 // GetState retrieves a value from the given account's storage trie.
 func (s *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
+	start := time.Now()
+	goid := cachemetrics.Goid()
+	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
+	isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(goid)
+	defer func() {
+		// record metrics of syncing main process
+		if isSyncMainProcess {
+			syncGetDelay := time.Since(start)
+			totalSyncIOCounter.Inc(time.Since(start).Nanoseconds())
+			getStatetSyncIOCost.Update(syncGetDelay)
+			getStatetSyncIOCounter.Inc(syncGetDelay.Nanoseconds())
+			l1AccountMeter.Mark(1)
+		}
+		// record metrics of mining main process
+		if isMinerMainProcess {
+			minerIOCost := time.Since(start)
+			totalMinerIOCounter.Inc(time.Since(start).Nanoseconds())
+			getStatetMinerIOCost.Update(minerIOCost)
+			getStatetMinerIOCounter.Inc(minerIOCost.Nanoseconds())
+			minerL1AccountMeter.Mark(1)
+		}
+	}()
+
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
+		if isSyncMainProcess {
+			l1StorageMeter.Mark(1)
+		}
+		if isMinerMainProcess {
+			minerL1StorageMeter.Mark(1)
+		}
 		return stateObject.GetState(s.db, hash)
 	}
 	return common.Hash{}
@@ -433,9 +512,15 @@ func (s *StateDB) GetStorageProofByHash(a common.Address, key common.Hash) ([][]
 
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 func (s *StateDB) GetCommittedState(addr common.Address, hash common.Hash) common.Hash {
+	start := time.Now()
+	needStorage := false
+	defer s.markMetrics(start, needStorage)
 	stateObject := s.getStateObject(addr)
+	hit := false
+
 	if stateObject != nil {
-		return stateObject.GetCommittedState(s.db, hash)
+		needStorage = true
+		return stateObject.GetCommittedState(s.db, hash, &hit, false)
 	}
 	return common.Hash{}
 }
@@ -471,6 +556,8 @@ func (s *StateDB) HasSuicided(addr common.Address) bool {
 
 // AddBalance adds amount to the account associated with addr.
 func (s *StateDB) AddBalance(addr common.Address, amount *big.Int) {
+	start := time.Now()
+	defer s.markMetrics(start, false)
 	stateObject := s.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.AddBalance(amount)
@@ -479,6 +566,8 @@ func (s *StateDB) AddBalance(addr common.Address, amount *big.Int) {
 
 // SubBalance subtracts amount from the account associated with addr.
 func (s *StateDB) SubBalance(addr common.Address, amount *big.Int) {
+	start := time.Now()
+	defer s.markMetrics(start, false)
 	stateObject := s.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SubBalance(amount)
@@ -486,6 +575,8 @@ func (s *StateDB) SubBalance(addr common.Address, amount *big.Int) {
 }
 
 func (s *StateDB) SetBalance(addr common.Address, amount *big.Int) {
+	start := time.Now()
+	defer s.markMetrics(start, false)
 	stateObject := s.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetBalance(amount)
@@ -493,6 +584,8 @@ func (s *StateDB) SetBalance(addr common.Address, amount *big.Int) {
 }
 
 func (s *StateDB) SetNonce(addr common.Address, nonce uint64) {
+	start := time.Now()
+	defer s.markMetrics(start, false)
 	stateObject := s.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetNonce(nonce)
@@ -500,6 +593,8 @@ func (s *StateDB) SetNonce(addr common.Address, nonce uint64) {
 }
 
 func (s *StateDB) SetCode(addr common.Address, code []byte) {
+	start := time.Now()
+	defer s.markMetrics(start, false)
 	stateObject := s.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetCode(crypto.Keccak256Hash(code), code)
@@ -507,8 +602,12 @@ func (s *StateDB) SetCode(addr common.Address, code []byte) {
 }
 
 func (s *StateDB) SetState(addr common.Address, key, value common.Hash) {
+	start := time.Now()
+	markStorage := false
+	defer s.markMetrics(start, markStorage)
 	stateObject := s.GetOrNewStateObject(addr)
 	if stateObject != nil {
+		markStorage = true
 		stateObject.SetState(s.db, key, value)
 	}
 }
@@ -594,6 +693,7 @@ func (s *StateDB) getStateObject(addr common.Address) *StateObject {
 func (s *StateDB) TryPreload(block *types.Block, signer types.Signer) {
 	accounts := make(map[common.Address]bool, block.Transactions().Len())
 	accountsSlice := make([]common.Address, 0, block.Transactions().Len())
+	startSign := time.Now()
 	for _, tx := range block.Transactions() {
 		from, err := types.Sender(signer, tx)
 		if err != nil {
@@ -604,9 +704,31 @@ func (s *StateDB) TryPreload(block *types.Block, signer types.Signer) {
 			accounts[*tx.To()] = true
 		}
 	}
+	signOverhead := time.Since(startSign)
+	var overheadCost time.Duration
+	defer func() {
+		goid := cachemetrics.Goid()
+		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
+		isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(goid)
+		// record metrics of syncing main process
+		if isSyncMainProcess {
+			syncPreloadCost.Update(overheadCost)
+			syncPreloadCounter.Inc(overheadCost.Nanoseconds())
+			syncSignatureCounter.Inc(signOverhead.Nanoseconds())
+		}
+		// record metrics of mining main process
+		if isMinerMainProcess {
+			minerPreloadCost.Update(overheadCost)
+			minerPreloadCounter.Inc(overheadCost.Nanoseconds())
+			minerSignatureCounter.Inc(signOverhead.Nanoseconds())
+		}
+	}()
+
+	start := time.Now()
 	for account := range accounts {
 		accountsSlice = append(accountsSlice, account)
 	}
+
 	if len(accountsSlice) >= preLoadLimit && len(accountsSlice) > runtime.NumCPU() {
 		objsChan := make(chan []*StateObject, runtime.NumCPU())
 		for i := 0; i < runtime.NumCPU(); i++ {
@@ -627,6 +749,7 @@ func (s *StateDB) TryPreload(block *types.Block, signer types.Signer) {
 			}
 		}
 	}
+	overheadCost = time.Since(start)
 }
 
 func (s *StateDB) preloadStateObject(address []common.Address) []*StateObject {
@@ -669,9 +792,30 @@ func (s *StateDB) preloadStateObject(address []common.Address) []*StateObject {
 // destructed object instead of wiping all knowledge about the state object.
 func (s *StateDB) getDeletedStateObject(addr common.Address) *StateObject {
 	// Prefer live objects if any is available
+	start := time.Now()
+	hit := false
+	defer func() {
+		routeid := cachemetrics.Goid()
+		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+		isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(routeid)
+		if isSyncMainProcess && hit {
+			cachemetrics.RecordCacheDepth("CACHE_L1_ACCOUNT")
+			cachemetrics.RecordCacheMetrics("CACHE_L1_ACCOUNT", start)
+			cachemetrics.RecordTotalCosts("CACHE_L1_ACCOUNT", start)
+		}
+
+		if isMinerMainProcess && hit {
+			cachemetrics.RecordMinerCacheDepth("MINER_L1_ACCOUNT")
+			cachemetrics.RecordMinerCacheMetrics("MINER_L1_ACCOUNT", start)
+			cachemetrics.RecordMinerTotalCosts("MINER_L1_ACCOUNT", start)
+		}
+	}()
+
 	if obj := s.stateObjects[addr]; obj != nil {
+		hit = true
 		return obj
 	}
+
 	// If no live objects are available, attempt to use snapshots
 	var (
 		data *Account
@@ -783,6 +927,8 @@ func (s *StateDB) createObject(addr common.Address) (newobj, prev *StateObject) 
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (s *StateDB) CreateAccount(addr common.Address) {
+	start := time.Now()
+	defer s.markMetrics(start, false)
 	newObj, prev := s.createObject(addr)
 	if prev != nil {
 		newObj.setBalance(prev.data.Balance)
@@ -964,6 +1110,22 @@ func (s *StateDB) WaitPipeVerification() error {
 // the journal as well as the refunds. Finalise, however, will not push any updates
 // into the tries just yet. Only IntermediateRoot or Commit will do that.
 func (s *StateDB) Finalise(deleteEmptyObjects bool) {
+	var overheadCost time.Duration
+	defer func() {
+		goid := cachemetrics.Goid()
+		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
+		isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(goid)
+		// record metrics of syncing main process
+		if isSyncMainProcess {
+			syncOverheadCost.Update(overheadCost)
+			syncOverheadCounter.Inc(overheadCost.Nanoseconds())
+		}
+		// record metrics of mining main process
+		if isMinerMainProcess {
+			minerOverheadCost.Update(overheadCost)
+			minerOverheadCounter.Inc(overheadCost.Nanoseconds())
+		}
+	}()
 	addressesToPrefetch := make([][]byte, 0, len(s.journal.dirties))
 	for addr := range s.journal.dirties {
 		obj, exist := s.stateObjects[addr]
@@ -1002,9 +1164,11 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 			addressesToPrefetch = append(addressesToPrefetch, common.CopyBytes(addr[:])) // Copy needed for closure
 		}
 	}
+	start := time.Now()
 	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
 		s.prefetcher.prefetch(s.originalRoot, addressesToPrefetch, emptyAddr)
 	}
+	overheadCost = time.Since(start)
 	// Invalidate journal because reverting across transactions is not allowed.
 	s.clearJournalAndRefund()
 }
