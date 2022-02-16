@@ -24,6 +24,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/cachemetrics"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/metrics"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -205,13 +208,35 @@ func (s *stateObject) getState(key common.Hash) (common.Hash, common.Hash) {
 
 // GetCommittedState retrieves the value associated with the specific key
 // without any mutations caused in the current execution.
-func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
+func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetState bool) common.Hash {
+	start := time.Now()
+	defer func() {
+		if !calledByGetState {
+			routeid := cachemetrics.Goid()
+			isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+			isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(routeid)
+			if isSyncMainProcess && *hit {
+				cachemetrics.RecordCacheDepth("CACHE_L1_STORAGE")
+				cachemetrics.RecordCacheMetrics("CACHE_L1_STORAGE", start)
+				cachemetrics.RecordTotalCosts("CACHE_L1_STORAGE", start)
+			}
+
+			if isMinerMainProcess && *hit {
+				cachemetrics.RecordMinerCacheDepth("MINER_L1_STORAGE")
+				cachemetrics.RecordMinerCacheMetrics("MINER_L1_STORAGE", start)
+				cachemetrics.RecordMinerTotalCosts("MINER_L1_STORAGE", start)
+			}
+		}
+	}()
+
 	// If we have a pending write or clean cached, return that
 	if value, pending := s.pendingStorage[key]; pending {
+		*hit = true
 		return value
 	}
 
 	if value, cached := s.getOriginStorage(key); cached {
+		*hit = true
 		return value
 	}
 	// If the object was destructed in *this* block (and potentially resurrected),
@@ -306,6 +331,7 @@ func (s *stateObject) finalise() {
 			log.Error("Failed to prefetch slots", "addr", s.address, "slots", len(slotsToPrefetch), "err", err)
 		}
 	}
+	overheadCost = time.Since(start)
 	if len(s.dirtyStorage) > 0 {
 		s.dirtyStorage = make(Storage)
 	}

@@ -58,6 +58,7 @@ require (
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/panjf2000/ants/v2 v2.4.5
 	github.com/peterh/liner v1.2.0
+	github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5
 	github.com/pion/stun/v2 v2.0.0
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/tsdb v0.10.0
@@ -229,7 +230,6 @@ require (
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 // indirect
-	github.com/petermattis/goid v0.0.0-20180202154549-b0b1615b78e5 // indirect
 	github.com/pion/datachannel v1.5.10 // indirect
 	github.com/pion/dtls/v2 v2.2.12 // indirect
 	github.com/pion/ice/v2 v2.3.37 // indirect
