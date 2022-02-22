@@ -17,12 +17,15 @@
 package core
 
 import (
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
+	"strconv"
 	"sync/atomic"
 	"time"
 )
@@ -56,6 +59,13 @@ func NewStatePrefetcher(config *params.ChainConfig, bc *BlockChain, engine conse
 // the transaction messages using the statedb, but any changes are discarded. The
 // only goal is to pre-cache transaction signatures and snapshot clean state.
 func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, cfg vm.Config, interrupt *uint32) {
+	goid, err := cachemetrics.Goid()
+	if err != nil {
+		log.Error("Prefetch routine error:" + err.Error())
+	} else {
+		str := strconv.FormatUint(goid, 10)
+		log.Info("Prefetch routine id:" + str)
+	}
 	if metrics.DisablePrefetch {
 		return
 	}
@@ -106,6 +116,13 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, c
 // and uses the input parameters for its environment. The goal is not to execute
 // the transaction successfully, rather to warm up touched data slots.
 func precacheTransaction(msg types.Message, config *params.ChainConfig, gaspool *GasPool, statedb *state.StateDB, header *types.Header, evm *vm.EVM) {
+	goid, err := cachemetrics.Goid()
+	if err != nil {
+		log.Error("Prefetch routine error:" + err.Error())
+	} else {
+		str := strconv.FormatUint(goid, 10)
+		log.Info("Prefetch routine id:" + str)
+	}
 	// Update the evm with the new transaction context.
 	evm.Reset(NewEVMTxContext(msg), statedb)
 	// Add addresses to access list if applicable

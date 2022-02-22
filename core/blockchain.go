@@ -20,11 +20,13 @@ package core
 import (
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	"github.com/ethereum/go-ethereum/perf"
 	"io"
 	"math/big"
 	mrand "math/rand"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1945,6 +1947,22 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
 	signer := types.MakeSigner(bc.chainConfig, chain[0].Number())
 	go senderCacher.recoverFromBlocks(signer, chain)
+
+	goid, err := cachemetrics.Goid()
+	if err != nil {
+		log.Error("insertChain routine error:" + err.Error())
+	} else {
+		str := strconv.FormatUint(goid, 10)
+		log.Info("insertChain routine id:" + str)
+	}
+
+	goid2 := cachemetrics.Goid2()
+	if err != nil {
+		log.Error("insertChain routine error:" + err.Error())
+	} else {
+		str := strconv.FormatUint(uint64(goid2), 10)
+		log.Info("insertChain2 routine id:" + str)
+	}
 
 	var (
 		stats     = insertStats{startTime: mclock.Now()}

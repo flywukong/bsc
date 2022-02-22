@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"runtime"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -604,6 +605,7 @@ func (s *StateDB) TryPreload(block *types.Block, signer types.Signer) {
 	if metrics.DisablePrefetch {
 		return
 	}
+
 	accounts := make(map[common.Address]bool, block.Transactions().Len())
 	accountsSlice := make([]common.Address, 0, block.Transactions().Len())
 	for _, tx := range block.Transactions() {
@@ -642,6 +644,14 @@ func (s *StateDB) TryPreload(block *types.Block, signer types.Signer) {
 }
 
 func (s *StateDB) preloadStateObject(address []common.Address) []*StateObject {
+	goid, err := cachemetrics.Goid()
+	if err != nil {
+		log.Error("preloadStateObject routine error:" + err.Error())
+	} else {
+		str := strconv.FormatUint(goid, 10)
+		log.Info("preloadStateObject routine id:" + str)
+	}
+
 	// Prefer live objects if any is available
 	if s.snap == nil {
 		return nil
@@ -682,6 +692,13 @@ func (s *StateDB) preloadStateObject(address []common.Address) []*StateObject {
 func (s *StateDB) getDeletedStateObject(addr common.Address) *StateObject {
 	// Prefer live objects if any is available
 	start := time.Now()
+	goid, err2 := cachemetrics.Goid()
+	if err2 != nil {
+		log.Error("getDeletedStateObject routine error:" + err2.Error())
+	} else {
+		str := strconv.FormatUint(goid, 10)
+		log.Info("getDeletedStateObject routine id:" + str)
+	}
 	if obj := s.stateObjects[addr]; obj != nil {
 		cacheL1AccountHitMeter.Mark(1)
 		cachemetrics.RecordCacheDepth("CACHE_L1_ACCOUNT")

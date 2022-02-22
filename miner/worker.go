@@ -19,8 +19,10 @@ package miner
 import (
 	"bytes"
 	"errors"
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	"github.com/ethereum/go-ethereum/perf"
 	"math/big"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -469,6 +471,13 @@ func (w *worker) mainLoop() {
 			w.commitNewWork(req.interrupt, req.noempty, req.timestamp)
 			perf.RecordMPMetrics(perf.MpMiningTotal, start)
 
+			goid, err := cachemetrics.Goid()
+			if err != nil {
+				log.Error("mining mainloop routine error:" + err.Error())
+			} else {
+				str := strconv.FormatUint(goid, 10)
+				log.Info("mining mainloop routine id:" + str)
+			}
 		case ev := <-w.chainSideCh:
 			// Short circuit for duplicate side blocks
 			if _, ok := w.engine.(*parlia.Parlia); ok {
