@@ -57,6 +57,8 @@ var (
 	emptyAddr               = crypto.Keccak256Hash(common.Address{}.Bytes())
 	cacheL1AccountHitMeter  = metrics.NewRegisteredMeter("state/cache/account/hit", nil)
 	cacheL1AccountMissMeter = metrics.NewRegisteredMeter("state/cache/account/miss", nil)
+	AccountMeter            = metrics.NewRegisteredMeter("state/cache/account/total", nil)
+	StorageMeter            = metrics.NewRegisteredMeter("state/cache/storage/total", nil)
 )
 
 type proofList [][]byte
@@ -393,7 +395,9 @@ func (s *StateDB) GetCodeHash(addr common.Address) common.Hash {
 // GetState retrieves a value from the given account's storage trie.
 func (s *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
 	stateObject := s.getStateObject(addr)
+	AccountMeter.Mark(1)
 	if stateObject != nil {
+		StorageMeter.Mark(1)
 		return stateObject.GetState(s.db, hash)
 	}
 	return common.Hash{}
@@ -598,7 +602,6 @@ func (s *StateDB) getStateObject(addr common.Address) *StateObject {
 
 func (s *StateDB) TryPreload(block *types.Block, signer types.Signer) {
 	if metrics.DisablePrefetch {
-		log.Info("disable prefetch", "123")
 		return
 	}
 	accounts := make(map[common.Address]bool, block.Transactions().Len())
