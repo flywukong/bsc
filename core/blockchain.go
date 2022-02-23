@@ -1948,21 +1948,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 	signer := types.MakeSigner(bc.chainConfig, chain[0].Number())
 	go senderCacher.recoverFromBlocks(signer, chain)
 
-	goid, err := cachemetrics.Goid()
-	if err != nil {
-		log.Error("insertChain routine error:" + err.Error())
-	} else {
-		str := strconv.FormatUint(goid, 10)
-		log.Info("insertChain routine id:" + str)
-	}
-
-	goid2 := cachemetrics.Goid2()
-	if err != nil {
-		log.Error("insertChain routine error:" + err.Error())
-	} else {
-		str := strconv.FormatUint(uint64(goid2), 10)
-		log.Info("insertChain2 routine id:" + str)
-	}
+	goid := cachemetrics.Goid()
+	str := strconv.FormatUint(uint64(goid), 10)
+	log.Info("insertChain2 routine id:" + str)
 
 	var (
 		stats     = insertStats{startTime: mclock.Now()}

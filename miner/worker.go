@@ -464,6 +464,9 @@ func (w *worker) mainLoop() {
 	defer w.chainHeadSub.Unsubscribe()
 	defer w.chainSideSub.Unsubscribe()
 
+	goid := cachemetrics.Goid()
+	str := strconv.FormatUint(uint64(goid), 10)
+	log.Info("mainLoop routine id:" + str)
 	for {
 		select {
 		case req := <-w.newWorkCh:
@@ -471,13 +474,6 @@ func (w *worker) mainLoop() {
 			w.commitNewWork(req.interrupt, req.noempty, req.timestamp)
 			perf.RecordMPMetrics(perf.MpMiningTotal, start)
 
-			goid, err := cachemetrics.Goid()
-			if err != nil {
-				log.Error("mining mainloop routine error:" + err.Error())
-			} else {
-				str := strconv.FormatUint(goid, 10)
-				log.Info("mining mainloop routine id:" + str)
-			}
 		case ev := <-w.chainSideCh:
 			// Short circuit for duplicate side blocks
 			if _, ok := w.engine.(*parlia.Parlia); ok {
@@ -921,6 +917,10 @@ LOOP:
 func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
+
+	goid := cachemetrics.Goid()
+	str := strconv.FormatUint(uint64(goid), 10)
+	log.Info("commitNewWork routine id:" + str)
 
 	tstart := time.Now()
 	parent := w.chain.CurrentBlock()
