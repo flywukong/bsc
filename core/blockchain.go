@@ -20,6 +20,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/perf"
 	"io"
 	"math/big"
 	mrand "math/rand"
@@ -2073,7 +2074,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 		//Process block using the parent state as reference point
 		substart := time.Now()
 		statedb, receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
-		//atomic.StoreUint32(&followupInterrupmat, 1)
 		perf.RecordMPMetrics(perf.MpImportingProcess, substart)
 
 		activeState = statedb
@@ -2852,6 +2852,9 @@ func (bc *BlockChain) maintainTxIndex(ancients uint64) {
 
 // reportBlock logs a bad block error.
 func (bc *BlockChain) reportBlock(block *types.Block, receipts types.Receipts, err error) {
+	//record bad block count
+	perf.RecordMPMetrics(perf.MpBadBlock, time.Now())
+
 	rawdb.WriteBadBlock(bc.db, block)
 
 	var receiptString string

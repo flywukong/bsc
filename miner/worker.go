@@ -19,6 +19,7 @@ package miner
 import (
 	"bytes"
 	"errors"
+	"github.com/ethereum/go-ethereum/perf"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -642,9 +643,9 @@ func (w *worker) resultLoop() {
 				logs = append(logs, receipt.Logs...)
 			}
 			// Commit block and state to database.
-			//	task.state.SetExpectedStateRoot(block.Root())
-
+			start := time.Now()
 			_, err := w.chain.WriteBlockWithState(block, receipts, logs, task.state, true)
+			perf.RecordMPMetrics(perf.MpMiningWrite, start)
 
 			if err != nil {
 				log.Error("Failed writing block to chain", "err", err)
@@ -1023,8 +1024,10 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 // and commits new work if consensus engine is running.
 func (w *worker) commit(uncles []*types.Header, interval func(), update bool, start time.Time) error {
 	s := w.current.state
+	startFinalize := time.Now()
 	block, receipts, err := w.engine.FinalizeAndAssemble(w.chain, types.CopyHeader(w.current.header), s, w.current.txs, uncles, w.current.receipts)
-	//	perf.RecordMPMetrics(perf.MpMiningFinalize, startFinalize)
+	perf.RecordMPMetrics(perf.MpMiningFinalize, startFinalize)
+  
 	if err != nil {
 		return err
 	}
