@@ -80,6 +80,10 @@ var (
 	blockReorgDropMeter     = metrics.NewRegisteredMeter("chain/reorg/drop", nil)
 	blockReorgInvalidatedTx = metrics.NewRegisteredMeter("chain/reorg/invalidTx", nil)
 
+	blockDiffPerfeth               = metrics.NewRegisteredGauge("chain/prefetch/diff", nil)
+	blockPrefetchFail              = metrics.NewRegisteredCounter("chain/prefetch/fail", nil)
+	blockPrefetchStart             = metrics.NewRegisteredCounter("chain/prefetch/start", nil)
+	blockPrefetchAll               = metrics.NewRegisteredCounter("chain/prefetch/all", nil)
 	errInsertionInterrupted        = errors.New("insertion is interrupted")
 	errStateRootVerificationFailed = errors.New("state root verification failed")
 )
@@ -2125,13 +2129,16 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 
 		// Enable prefetching to pull in trie node paths while processing transactions
 		statedb.StartPrefetcher("chain")
+		prefetchFinish := false
 		var followupInterrupt uint32
 		// For diff sync, it may fallback to full sync, so we still do prefetch
+		blockPrefetchAll.Inc(1)
 		if len(block.Transactions()) >= prefetchTxNumber {
+			blockPrefetchStart.Inc(1)
 			throwaway := statedb.Copy()
-			go func(start time.Time, followup *types.Block, throwaway *state.StateDB, interrupt *uint32) {
-				bc.prefetcher.Prefetch(followup, throwaway, bc.vmConfig, &followupInterrupt)
-			}(time.Now(), block, throwaway, &followupInterrupt)
+			go func(start time.Time, followup *types.Block, throwaway *state.StateDB, interrupt *uint32, finish *bool) {
+				bc.prefetcher.Prefetch(followup, throwaway, bc.vmConfig, &followupInterrupt, finish)
+			}(time.Now(), block, throwaway, &followupInterrupt, &prefetchFinish)
 		}
 		//Process block using the parent state as reference point
 		substart := time.Now()
@@ -2141,6 +2148,20 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 		statedb.SetExpectedStateRoot(block.Root())
 		statedb, receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
 		atomic.StoreUint32(&followupInterrupt, 1)
+		// process finish
+		statePrefetchFinishTimer.Update(time.Now().UnixNano())
+		cachemetrics.UpdateBlockTime(time.Now().UnixNano())
+
+		if len(block.Transactions()) >= prefetchTxNumber {
+			if !prefetchFinish {
+				blockPrefetchFail.Inc(1)
+			} else {
+				prefetchBlock, err := cachemetrics.GetDiffPrefetchBlock(prefetchFinish)
+				if err == nil {
+					blockDiffPerfeth.Update(prefetchBlock)
+				}
+			}
+		}
 		perf.RecordMPMetrics(perf.MpImportingProcess, substart)
 
 		activeState = statedb

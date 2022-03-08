@@ -18,20 +18,27 @@ package core
 
 import (
 	"context"
-	"sync/atomic"
-	"time"
-
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
+	"strconv"
+	"sync/atomic"
+	"time"
 )
 
 var (
-	statePrefetchTimer   = metrics.NewRegisteredTimer("state/prefetch/delay", nil)
-	statePrefetchCounter = metrics.NewRegisteredCounter("state/prefetch/total", nil)
+	statePrefetchTimer       = metrics.NewRegisteredTimer("state/prefetch/delay", nil)
+	statePrefetchCounter     = metrics.NewRegisteredCounter("state/prefetch/total", nil)
+	statePrefetchFinishGauge = metrics.NewRegisteredGaugeFloat64("state/prefetch/txn/finish", nil)
+	statePrefetchTotalGauge  = metrics.NewRegisteredGaugeFloat64("state/prefetch/txn/total", nil)
+	statePrefetchFinishTimer = metrics.NewRegisteredGauge("state/prefetch/finish", nil)
+	statePrefetchFail        = metrics.NewRegisteredGaugeFloat64("state/prefetch/fail/ratio", nil)
+	//	statePrefetchFinishMeter  = metrics.NewRegisteredMeter("state/snapshot/dirty/storage/hit", nil)
 )
 
 const prefetchThread = 2
@@ -57,12 +64,11 @@ func NewStatePrefetcher(config *params.ChainConfig, bc *BlockChain, engine conse
 // Prefetch processes the state changes according to the Ethereum rules by running
 // the transaction messages using the statedb, but any changes are discarded. The
 // only goal is to pre-cache transaction signatures and snapshot clean state.
-func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, cfg vm.Config, interrupt *uint32) {
+func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, cfg vm.Config, interrupt *uint32, done *bool) {
 	var (
 		header = block.Header()
 		signer = types.MakeSigner(p.config, header.Number)
 	)
-	start := time.Now()
 	transactions := block.Transactions()
 	sortTransactions := make([][]*types.Transaction, prefetchThread)
 	for i := 0; i < prefetchThread; i++ {
@@ -74,30 +80,48 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, c
 	}
 	// No need to execute the first batch, since the main processor will do it.
 	for i := 0; i < prefetchThread; i++ {
-		go func(idx int) {
+		go func(idx int, succ *bool) {
 			newStatedb := statedb.Copy()
 			newStatedb.EnableWriteOnSharedStorage()
 			gaspool := new(GasPool).AddGas(block.GasLimit())
 			blockContext := NewEVMBlockContext(header, p.bc, nil)
 			evm := vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
+			finish := 0
+			// Calculate the current txn finish rate
+			defer func() {
+				toalTaskNum := float64(len(sortTransactions[idx]))
+				statePrefetchFinishGauge.Update(float64(finish))
+				statePrefetchTotalGauge.Update(toalTaskNum)
+				statePrefetchFinishTimer.Update(time.Now().UnixNano())
+			}()
+
 			// Iterate over and process the individual transactions
 			for i, tx := range sortTransactions[idx] {
 				// If block precaching was interrupted, abort
 				if interrupt != nil && atomic.LoadUint32(interrupt) == 1 {
+					log.Info("interrupt, finish task:" + strconv.Itoa(finish) + "unfinish," +
+						strconv.Itoa(len(sortTransactions[idx])-finish))
+					statePrefetchFail.Update(float64(finish) / float64(len(sortTransactions[idx])))
+					// cachemetrics.UpdatePrefetchTime(time.Now().UnixNano())
+					*done = false
 					return
 				}
 				// Convert the transaction into an executable message and pre-cache its sender
 				msg, err := tx.AsMessage(signer)
 				if err != nil {
+					*done = false
+					// cachemetrics.UpdatePrefetchTime(time.Now().UnixNano())
 					return // Also invalid block, bail out
 				}
 				newStatedb.Prepare(tx.Hash(), header.Hash(), i)
 				precacheTransaction(msg, p.config, gaspool, newStatedb, header, evm)
+				finish++
 			}
-		}(i)
+			*done = true
+			cachemetrics.UpdatePrefetchTime(time.Now().UnixNano())
+		}(i, done)
 	}
-	statePrefetchTimer.Update(time.Since(start))
-	statePrefetchCounter.Inc(int64(time.Since(start)))
+
 }
 
 // precacheTransaction attempts to apply a transaction to the given state database
@@ -106,6 +130,9 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, c
 func precacheTransaction(msg types.Message, config *params.ChainConfig, gaspool *GasPool, statedb *state.StateDB, header *types.Header, evm *vm.EVM) {
 	// Update the evm with the new transaction context.
 	evm.Reset(NewEVMTxContext(msg), statedb)
+	start := time.Now()
 	// Add addresses to access list if applicable
 	ApplyMessage(context.TODO(), evm, msg, gaspool)
+	statePrefetchTimer.Update(time.Since(start))
+	statePrefetchCounter.Inc(int64(time.Since(start)))
 }
