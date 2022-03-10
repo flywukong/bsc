@@ -21,11 +21,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/perf"
 	"math/big"
 	"math/rand"
 	"sync"
 	"time"
+
+	"github.com/ethereum/go-ethereum/perf"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/gopool"
@@ -387,10 +388,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		gp      = new(GasPool).AddGas(block.GasLimit())
 	)
 
-	preloadStart := time.Now()
 	signer := types.MakeSigner(p.bc.chainConfig, block.Number())
-	statedb.TryPreload(block, signer)
-	perf.RecordMPMetrics(perf.MpImportingProcessPreload, preloadStart)
 
 	executeStart := time.Now()
 	var receipts = make([]*types.Receipt, 0)
