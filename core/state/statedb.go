@@ -40,10 +40,7 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 )
 
-const (
-	preLoadLimit      = 128
-	defaultNumOfSlots = 100
-)
+const defaultNumOfSlots = 100
 
 type revision struct {
 	id           int
@@ -117,6 +114,8 @@ type StateDB struct {
 	stateObjectsPending map[common.Address]struct{} // State objects finalized but not yet written to the trie
 	stateObjectsDirty   map[common.Address]struct{} // State objects modified in the current execution
 
+	storagePool          *StoragePool // sharedPool to store L1 originStorage of stateObjects
+	writeOnSharedStorage bool         // Write to the shared origin storage of a stateObject while reading from the underlying storage layer.
 	// DB error.
 	// State objects are used by the consensus core and VM which are
 	// unable to deal with database-level errors. Any error that occurs
@@ -165,6 +164,16 @@ func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) 
 	return newStateDB(root, db, snaps)
 }
 
+// NewWithSharedPool creates a new state with sharedStorge on layer 1.5
+func NewWithSharedPool(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) {
+	statedb, err := newStateDB(root, db, snaps)
+	if err != nil {
+		return nil, err
+	}
+	statedb.storagePool = NewStoragePool()
+	return statedb, nil
+}
+
 func newStateDB(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) {
 	sdb := &StateDB{
 		db:                  db,
@@ -194,6 +203,10 @@ func newStateDB(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, 
 	}
 	sdb.trie = tr
 	return sdb, nil
+}
+
+func (s *StateDB) EnableWriteOnSharedStorage() {
+	s.writeOnSharedStorage = true
 }
 
 // StartPrefetcher initializes a new trie prefetcher to pull in nodes from the
@@ -706,102 +719,6 @@ func (s *StateDB) getStateObject(addr common.Address) *StateObject {
 	return nil
 }
 
-func (s *StateDB) TryPreload(block *types.Block, signer types.Signer) {
-	accounts := make(map[common.Address]bool, block.Transactions().Len())
-	accountsSlice := make([]common.Address, 0, block.Transactions().Len())
-	startSign := time.Now()
-	for _, tx := range block.Transactions() {
-		from, err := types.Sender(signer, tx)
-		if err != nil {
-			break
-		}
-		accounts[from] = true
-		if tx.To() != nil {
-			accounts[*tx.To()] = true
-		}
-	}
-	signOverhead := time.Since(startSign)
-	var overheadCost time.Duration
-	defer func() {
-		goid := cachemetrics.Goid()
-		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
-		isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(goid)
-		// record metrics of syncing main process
-		if isSyncMainProcess {
-			syncPreloadCost.Update(overheadCost)
-			syncPreloadCounter.Inc(overheadCost.Nanoseconds())
-			syncSignatureCounter.Inc(signOverhead.Nanoseconds())
-		}
-		// record metrics of mining main process
-		if isMinerMainProcess {
-			minerPreloadCost.Update(overheadCost)
-			minerPreloadCounter.Inc(overheadCost.Nanoseconds())
-			minerSignatureCounter.Inc(signOverhead.Nanoseconds())
-		}
-	}()
-
-	start := time.Now()
-	for account := range accounts {
-		accountsSlice = append(accountsSlice, account)
-	}
-
-	if len(accountsSlice) >= preLoadLimit && len(accountsSlice) > runtime.NumCPU() {
-		objsChan := make(chan []*StateObject, runtime.NumCPU())
-		for i := 0; i < runtime.NumCPU(); i++ {
-			start := i * len(accountsSlice) / runtime.NumCPU()
-			end := (i + 1) * len(accountsSlice) / runtime.NumCPU()
-			if i+1 == runtime.NumCPU() {
-				end = len(accountsSlice)
-			}
-			go func(start, end int) {
-				objs := s.preloadStateObject(accountsSlice[start:end])
-				objsChan <- objs
-			}(start, end)
-		}
-		for i := 0; i < runtime.NumCPU(); i++ {
-			objs := <-objsChan
-			for _, obj := range objs {
-				s.SetStateObject(obj)
-			}
-		}
-	}
-	overheadCost = time.Since(start)
-}
-
-func (s *StateDB) preloadStateObject(address []common.Address) []*StateObject {
-	// Prefer live objects if any is available
-	if s.snap == nil {
-		return nil
-	}
-	hasher := crypto.NewKeccakState()
-	objs := make([]*StateObject, 0, len(address))
-	for _, addr := range address {
-		// If no live objects are available, attempt to use snapshots
-		if acc, err := s.snap.Account(crypto.HashData(hasher, addr.Bytes())); err == nil {
-			if acc == nil {
-				continue
-			}
-			data := &Account{
-				Nonce:    acc.Nonce,
-				Balance:  acc.Balance,
-				CodeHash: acc.CodeHash,
-				Root:     common.BytesToHash(acc.Root),
-			}
-			if len(data.CodeHash) == 0 {
-				data.CodeHash = emptyCodeHash
-			}
-			if data.Root == (common.Hash{}) {
-				data.Root = emptyRoot
-			}
-			// Insert into the live set
-			obj := newObject(s, addr, *data)
-			objs = append(objs, obj)
-		}
-		// Do not enable this feature when snapshot is not enabled.
-	}
-	return objs
-}
-
 // getDeletedStateObject is similar to getStateObject, but instead of returning
 // nil for a deleted state object, it returns the actual object with the deleted
 // flag set. This is needed by the state journal to revert to the correct s-
@@ -991,6 +908,7 @@ func (s *StateDB) Copy() *StateDB {
 		stateObjects:        make(map[common.Address]*StateObject, len(s.journal.dirties)),
 		stateObjectsPending: make(map[common.Address]struct{}, len(s.stateObjectsPending)),
 		stateObjectsDirty:   make(map[common.Address]struct{}, len(s.journal.dirties)),
+		storagePool:         s.storagePool,
 		refund:              s.refund,
 		logs:                make(map[common.Hash][]*types.Log, len(s.logs)),
 		logSize:             s.logSize,
@@ -1813,4 +1731,8 @@ func (s *StateDB) GetDirtyAccounts() []common.Address {
 		accounts = append(accounts, account)
 	}
 	return accounts
+}
+
+func (s *StateDB) GetStorage(address common.Address) *sync.Map {
+	return s.storagePool.getStorage(address)
 }
