@@ -2,6 +2,7 @@ package cachemetrics
 
 import (
 	"github.com/ethereum/go-ethereum/metrics"
+	"sync/atomic"
 	"time"
 )
 
@@ -19,6 +20,13 @@ const (
 )
 
 var (
+	ReadBytesCount  uint64 // total read bytes in a block
+	WriteBytesCount uint64 // total write bytes in a block
+	ReadBytesTime   int64  // total write bytes in a block
+
+	diskReadBlockCount  = metrics.NewRegisteredGauge("cache/cost/read/layer4", nil)
+	diskWriteBlockCount = metrics.NewRegisteredGauge("cache/cost/write/layer4", nil)
+
 	cacheL1AccountTimer = metrics.NewRegisteredTimer("cache/cost/account/layer1", nil)
 	cacheL2AccountTimer = metrics.NewRegisteredTimer("cache/cost/account/layer2", nil)
 	cacheL3AccountTimer = metrics.NewRegisteredTimer("cache/cost/account/layer3", nil)
@@ -27,6 +35,8 @@ var (
 	cacheL2StorageTimer = metrics.NewRegisteredTimer("cache/cost/storage/layer2", nil)
 	cacheL3StorageTimer = metrics.NewRegisteredTimer("cache/cost/storage/layer3", nil)
 	diskL4StorageTimer  = metrics.NewRegisteredTimer("cache/cost/storage/layer4", nil)
+
+	diskBlockStorageTimer = metrics.NewRegisteredTimer("cache/cost/block/layer4", nil)
 
 	cacheL1AccountCounter = metrics.NewRegisteredCounter("cache/count/account/layer1", nil)
 	cacheL2AccountCounter = metrics.NewRegisteredCounter("cache/count/account/layer2", nil)
@@ -46,6 +56,42 @@ var (
 	cacheL3StorageCostCounter = metrics.NewRegisteredCounter("cache/totalcost/storage/layer3", nil)
 	diskL4StorageCostCounter  = metrics.NewRegisteredCounter("cache/totalcost/storage/layer4", nil)
 )
+
+func AddReadByte(count int) {
+	atomic.AddUint64(&ReadBytesCount, uint64(count))
+}
+
+func AddWriteByte(count int) {
+	atomic.AddUint64(&WriteBytesCount, uint64(count))
+}
+
+func ResetReadByte() {
+	atomic.StoreUint64(&ReadBytesCount, 0)
+}
+
+func ResetReadTime() {
+	ReadBytesTime = 0
+}
+
+func AddBlockDiskTime(duration int64) {
+	ReadBytesTime += duration
+}
+
+func RecordBlockDiskTime() {
+	diskBlockStorageTimer.Update(time.Duration(ReadBytesTime))
+}
+
+func ResetWriteByte() {
+	atomic.StoreUint64(&WriteBytesCount, 0)
+}
+
+func RecordReadByte() {
+	diskReadBlockCount.Update(int64(atomic.LoadUint64(&ReadBytesCount)))
+}
+
+func recordWriteByte() {
+	diskWriteBlockCount.Update(int64(atomic.LoadUint64(&WriteBytesCount)))
+}
 
 // mark the info of total hit counts of each layers
 func RecordCacheDepth(metricsName cacheLayerName) {
@@ -88,7 +134,6 @@ func RecordCacheMetrics(metricsName cacheLayerName, start time.Time) {
 		recordCost(cacheL3StorageTimer, start)
 	case DiskL4STORAGE:
 		recordCost(diskL4StorageTimer, start)
-
 	}
 }
 

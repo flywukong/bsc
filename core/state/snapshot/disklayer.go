@@ -149,6 +149,7 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 				cachemetrics.RecordMinerCacheDepth("MINER_L4_ACCOUNT")
 				cachemetrics.RecordMinerCacheMetrics("MINER_L4_ACCOUNT", startGetInDisk)
 				cachemetrics.RecordMinerTotalCosts("MINER_L4_ACCOUNT", startGetInDisk)
+				cachemetrics.AddBlockDiskTime(time.Since(startGetInDisk).Nanoseconds())
 			}
 		}
 	}()
@@ -164,6 +165,7 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	startGetInDisk = time.Now()
 	// Cache doesn't contain account, pull from disk and cache for later
 	blob := rawdb.ReadAccountSnapshot(dl.diskdb, hash)
+	cachemetrics.AddReadByte(len(blob))
 	dl.cache.Set(hash[:], blob)
 	hitInDisk = true
 
@@ -205,6 +207,7 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 				cachemetrics.RecordCacheDepth("DISK_L4_STORAGE")
 				cachemetrics.RecordCacheMetrics("DISK_L4_STORAGE", startGetInDisk)
 				cachemetrics.RecordTotalCosts("DISK_L4_STORAGE", startGetInDisk)
+				cachemetrics.AddBlockDiskTime(time.Since(startGetInDisk).Nanoseconds())
 			}
 		}
 		if isMinerMainProcess {
@@ -250,6 +253,7 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	startGetInDisk = time.Now()
 	// Cache doesn't contain storage slot, pull from disk and cache for later
 	blob := rawdb.ReadStorageSnapshot(dl.diskdb, accountHash, storageHash)
+	cachemetrics.AddReadByte(len(blob))
 	dl.cache.Set(key, blob)
 	hitInDisk = true
 	snapshotCleanStorageMissMeter.Mark(1)

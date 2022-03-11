@@ -1951,6 +1951,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 
 	goid := cachemetrics.Goid()
 	cachemetrics.UpdateSyncingRoutineID(goid)
+	cachemetrics.ResetReadByte()
+	cachemetrics.ResetReadTime()
 
 	var (
 		stats     = insertStats{startTime: mclock.Now()}
@@ -2143,7 +2145,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 		statedb, receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
 		atomic.StoreUint32(&followupInterrupt, 1)
 		perf.RecordMPMetrics(perf.MpImportingProcess, substart)
-
+		cachemetrics.RecordReadByte()
+		cachemetrics.RecordBlockDiskTime()
 		activeState = statedb
 		if err != nil {
 			bc.reportBlock(block, receipts, err)
