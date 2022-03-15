@@ -18,7 +18,6 @@ package core
 
 import (
 	"context"
-	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -94,7 +93,6 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, c
 				}
 				newStatedb.Prepare(tx.Hash(), header.Hash(), i)
 				precacheTransaction(msg, p.config, gaspool, newStatedb, header, evm)
-				fmt.Println("prefetch procsss statedb sharedStorage size %v\n", newStatedb.GetSharedStorageSize())
 			}
 		}(i)
 	}
