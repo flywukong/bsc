@@ -140,18 +140,17 @@ func newObject(db *StateDB, address common.Address, data Account) *StateObject {
 	var storageMap *sync.Map
 	// Check whether the storage exist in pool, new originStorage if not exist
 	if db != nil {
-		storageMap = db.insertStorage(address)
+		storageMap = db.GetOrInsertStorage(address)
 	}
 
 	return &StateObject{
-		db:       db,
-		address:  address,
-		addrHash: crypto.Keccak256Hash(address[:]),
-		data:     data,
-		//	originStorage:  &storageMap,
+		db:             db,
+		address:        address,
+		addrHash:       crypto.Keccak256Hash(address[:]),
+		data:           data,
+		originStorage:  storageMap,
 		pendingStorage: make(Storage),
 		dirtyStorage:   make(Storage),
-		originStorage:  storageMap,
 	}
 }
 
@@ -272,6 +271,14 @@ func (s *StateObject) GetCommittedState(db Database, key common.Hash, hit *bool,
 	}
 
 	if value, cached := s.originStorage.Load(key); cached {
+		routeid := cachemetrics.Goid()
+		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+		if isSyncMainProcess {
+			fmt.Println("main process get value from mem stateObject %s key , %s ", s.address, key)
+		} else {
+			fmt.Println("prefetch process get value from mem stateObject %s  key , %s ", s.address, key)
+		}
+
 		return value.(common.Hash)
 	}
 
@@ -333,6 +340,13 @@ func (s *StateObject) GetCommittedState(db Database, key common.Hash, hit *bool,
 	}
 	//s.db.setOriginStorage(s.address, key, value)
 	s.originStorage.Store(key, value)
+	routeid := cachemetrics.Goid()
+	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+	if isSyncMainProcess {
+		fmt.Println("main process get value from disk  stateObject %s, key , %s ， time %d", s.address, key, time.Now().UnixNano())
+	} else {
+		fmt.Println("prefetch process get value from disk stateObject %s key , %s , time %d", s.address, key, time.Now().UnixNano())
+	}
 	return value
 }
 
