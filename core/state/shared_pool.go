@@ -1,7 +1,6 @@
 package state
 
 import (
-	"fmt"
 	"github.com/ethereum/go-ethereum/log"
 	"sync"
 
@@ -25,7 +24,6 @@ func NewSharedStorage() *SharedStorage {
 func (storage *SharedStorage) getStorage(address common.Address, key common.Hash) (interface{}, bool) {
 	storage.poolLock.RLock()
 	storageMap, ok := storage.shared_map[address]
-	fmt.Println("get map on address:", address.String())
 	storage.poolLock.RUnlock()
 	if !ok {
 		log.Error("can not find originStorage on:" + address.String())
