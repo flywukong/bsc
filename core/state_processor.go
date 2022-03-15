@@ -434,7 +434,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		if err != nil {
 			return statedb, nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
-		fmt.Println("main procsss statedb sharedStorage size %v\n", statedb.GetSharedStorageSize())
+		//	fmt.Println("main procsss statedb sharedStorage size %v\n", statedb.GetSharedStorageSize())
 		commonTxs = append(commonTxs, tx)
 		receipts = append(receipts, receipt)
 	}

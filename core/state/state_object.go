@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"reflect"
-	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/cachemetrics"
@@ -258,27 +256,6 @@ func (s *StateObject) GetCommittedState(db Database, key common.Hash, hit *bool,
 				cachemetrics.RecordMinerTotalCosts("MINER_L1_STORAGE", start)
 			}
 		}
-		var testMap sync.Map
-		testKey := common.HexToHash("0x75808d711721ca136a472157da58f24790bdf36249c43af0a279803a3f4794e334")
-		testValue := common.HexToHash("0x75808d11721ca136a472157da58f24790bdf36249c43af0a279321321321233")
-		testMap.Store(testKey, testValue)
-		v, cacahed := testMap.Load(testKey)
-		if cacahed {
-			fmt.Println("test map get value succ , key ,value", testKey, testValue)
-			fmt.Println("test map key tepe", reflect.TypeOf(v))
-		} else {
-			fmt.Println("test map get value fail")
-		}
-
-		s.db.setOriginStorage(s.address, testKey, testValue)
-		v2, cacahed2 := s.db.getOriginStorage(s.address, testKey)
-		if cacahed2 {
-			fmt.Println("test map2 get value succ , key ,value", testKey, testValue)
-			fmt.Println("test map2 key tepe", reflect.TypeOf(v2))
-		} else {
-			fmt.Println("test map2 get value fail")
-		}
-
 	}()
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
 	if s.fakeStorage != nil {
@@ -291,13 +268,6 @@ func (s *StateObject) GetCommittedState(db Database, key common.Hash, hit *bool,
 	}
 
 	if value, cached := s.db.getOriginStorage(s.address, key); cached {
-		routeid := cachemetrics.Goid()
-		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-		if isSyncMainProcess {
-			fmt.Println("main process get value from mem stateObject %s key , %s ", s.address, key)
-		} else {
-			fmt.Println("prefetch process get value from mem stateObject %s  key , %s ", s.address, key)
-		}
 		*hit = true
 		return value.(common.Hash)
 	}
@@ -359,14 +329,6 @@ func (s *StateObject) GetCommittedState(db Database, key common.Hash, hit *bool,
 		value.SetBytes(content)
 	}
 	s.db.setOriginStorage(s.address, key, value)
-	routeid := cachemetrics.Goid()
-	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-	if isSyncMainProcess {
-		fmt.Println("main process get value from disk  stateObject %s, key , %s ， time %d", s.address, key, time.Now().UnixNano())
-	} else {
-		fmt.Println("prefetch process get value from disk stateObject %s key , %s , time %d", s.address, key, time.Now().UnixNano())
-	}
-
 	return value
 }
 
