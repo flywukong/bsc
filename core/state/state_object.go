@@ -270,16 +270,6 @@ func (s *StateObject) GetCommittedState(db Database, key common.Hash, hit *bool,
 			fmt.Println("test map get value fail")
 		}
 
-		testMap.Range(func(key, value interface{}) bool {
-			k := key.(common.Hash)
-			v := value.(int)
-			fmt.Println("test map range value:", k, v)
-			//fmt.Println("test map range value:", k, v)
-			fmt.Println("test map range type", reflect.TypeOf(k))
-			fmt.Println("test map range type", reflect.TypeOf(v))
-			return true
-		})
-
 		s.db.setOriginStorage(s.address, testKey, testValue)
 		v2, cacahed2 := s.db.getOriginStorage(s.address, testKey)
 		if cacahed2 {

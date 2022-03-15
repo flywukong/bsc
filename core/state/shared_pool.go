@@ -1,6 +1,7 @@
 package state
 
 import (
+	"fmt"
 	"github.com/ethereum/go-ethereum/log"
 	"sync"
 
@@ -10,11 +11,11 @@ import (
 // sharedStorage is used to store maps of originStorage of stateObjects
 type SharedStorage struct {
 	poolLock   *sync.RWMutex
-	shared_map map[common.Address]sync.Map
+	shared_map map[common.Address]*sync.Map
 }
 
 func NewSharedStorage() *SharedStorage {
-	sharedMap := make(map[common.Address]sync.Map)
+	sharedMap := make(map[common.Address]*sync.Map, 1500)
 	return &SharedStorage{
 		poolLock:   &sync.RWMutex{},
 		shared_map: sharedMap,
@@ -24,6 +25,7 @@ func NewSharedStorage() *SharedStorage {
 func (storage *SharedStorage) getStorage(address common.Address, key common.Hash) (interface{}, bool) {
 	storage.poolLock.RLock()
 	storageMap, ok := storage.shared_map[address]
+	fmt.Println("get map on address:", address.String())
 	storage.poolLock.RUnlock()
 	if !ok {
 		log.Error("can not find originStorage on:" + address.String())
@@ -49,7 +51,7 @@ func (storage *SharedStorage) checkSharedStorage(address common.Address) {
 	_, ok := storage.shared_map[address]
 	storage.poolLock.RUnlock()
 	if !ok {
-		m := sync.Map{}
+		m := new(sync.Map)
 		storage.poolLock.Lock()
 		storage.shared_map[address] = m
 		storage.poolLock.Unlock()
