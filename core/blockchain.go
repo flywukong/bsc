@@ -20,7 +20,6 @@ package core
 import (
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/perf"
 	"io"
 	"math/big"
 	mrand "math/rand"
@@ -28,6 +27,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/ethereum/go-ethereum/perf"
 
 	"github.com/ethereum/go-ethereum/cachemetrics"
 
@@ -2128,8 +2129,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 		var followupInterrupt uint32
 		// For diff sync, it may fallback to full sync, so we still do prefetch
 		if len(block.Transactions()) >= prefetchTxNumber {
-			//throwaway := statedb.Copy()
-			//fmt.Println("main procsss statedb sharedStorage address %p", statedb.GetSharedStorageAddr())
 			go func(start time.Time, followup *types.Block, throwaway *state.StateDB, interrupt *uint32) {
 				bc.prefetcher.Prefetch(followup, throwaway, bc.vmConfig, &followupInterrupt)
 			}(time.Now(), block, statedb, &followupInterrupt)

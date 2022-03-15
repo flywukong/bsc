@@ -1,8 +1,9 @@
 package state
 
 import (
-	"github.com/ethereum/go-ethereum/log"
 	"sync"
+
+	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -56,8 +57,16 @@ func (storage *SharedStorage) checkSharedStorage(address common.Address) {
 	}
 }
 
-func (storage *SharedStorage) getSize() int {
+func (storage *SharedStorage) getOrInertStorage(address common.Address) *sync.Map {
 	storage.poolLock.RLock()
-	defer storage.poolLock.RUnlock()
-	return len(storage.shared_map)
+	storageMap, ok := storage.shared_map[address]
+	storage.poolLock.RUnlock()
+	if !ok {
+		m := new(sync.Map)
+		storage.poolLock.Lock()
+		storage.shared_map[address] = m
+		storage.poolLock.Unlock()
+		return storage.shared_map[address]
+	}
+	return storageMap
 }
