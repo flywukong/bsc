@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/cachemetrics"
@@ -95,7 +94,7 @@ type StateObject struct {
 	trie Trie // storage trie, which becomes non-nil on first access
 	code Code // contract bytecode, which gets set when code is loaded
 
-	originStorage  *sync.Map // Storage cache of original entries to dedup rewrites, reset for every transaction
+	originStorage  *MutexMap // Storage cache of original entries to dedup rewrites, reset for every transaction
 	pendingStorage Storage   // Storage entries that need to be flushed to disk, at the end of an entire block
 	dirtyStorage   Storage   // Storage entries that have been modified in the current transaction execution
 	fakeStorage    Storage   // Fake storage which constructed by caller for debugging purpose.
@@ -136,8 +135,7 @@ func newObject(db *StateDB, address common.Address, data Account) *StateObject {
 	if data.Root == (common.Hash{}) {
 		data.Root = emptyRoot
 	}
-
-	var storageMap *sync.Map
+	var storageMap *MutexMap
 	// Check whether the storage exist in pool, new originStorage if not exist
 	if db != nil {
 		storageMap = db.GetOrInsertStorage(address)
@@ -270,7 +268,7 @@ func (s *StateObject) GetCommittedState(db Database, key common.Hash, hit *bool,
 		return value
 	}
 
-	if value, cached := s.originStorage.Load(key); cached {
+	if value, cached := s.originStorage.get(key); cached {
 		routeid := cachemetrics.Goid()
 		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
 		if isSyncMainProcess {
@@ -278,8 +276,7 @@ func (s *StateObject) GetCommittedState(db Database, key common.Hash, hit *bool,
 		} else {
 			fmt.Println("prefetch process get value from mem stateObject %s  key , %s ", s.address, key)
 		}
-
-		return value.(common.Hash)
+		return value
 	}
 
 	// If no live objects are available, attempt to use snapshots
@@ -338,8 +335,7 @@ func (s *StateObject) GetCommittedState(db Database, key common.Hash, hit *bool,
 		}
 		value.SetBytes(content)
 	}
-	//s.db.setOriginStorage(s.address, key, value)
-	s.originStorage.Store(key, value)
+	s.originStorage.set(key, value)
 	routeid := cachemetrics.Goid()
 	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
 	if isSyncMainProcess {
@@ -419,8 +415,8 @@ func (s *StateObject) finalise(prefetch bool) {
 	}
 	start := time.Now()
 	for key, value := range s.dirtyStorage {
-		originValue, cached := s.originStorage.Load(key)
-		if cached && value != originValue.(common.Hash) {
+		originValue, cached := s.originStorage.get(key)
+		if cached && value != originValue {
 			slotsToPrefetch = append(slotsToPrefetch, common.CopyBytes(key[:])) // Copy needed for closure
 		}
 	}
@@ -458,11 +454,11 @@ func (s *StateObject) updateTrie(db Database) Trie {
 	usedStorage := make([][]byte, 0, len(s.pendingStorage))
 	for key, value := range s.pendingStorage {
 		// Skip noop changes, persist actual changes
-		originValue, cached := s.originStorage.Load(key)
-		if cached && value == originValue.(common.Hash) {
+		originValue, cached := s.originStorage.get(key)
+		if cached && value == originValue {
 			continue
 		}
-		s.originStorage.Store(key, value)
+		s.originStorage.set(key, value)
 
 		var v []byte
 		if (value == common.Hash{}) {
