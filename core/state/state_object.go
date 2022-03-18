@@ -290,6 +290,14 @@ func (s *StateObject) GetCommittedState(db Database, key common.Hash, hit *bool,
 	}
 
 	if value, cached := s.getStorageKey(key); cached {
+		*hit = true
+		routeid := cachemetrics.Goid()
+		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+		if isSyncMainProcess {
+			fmt.Println("main process get value from mem stateObject %s key , %s ", s.address, key)
+		} else {
+			fmt.Println("prefetch process get value from mem stateObject %s  key , %s ", s.address, key)
+		}
 		return value
 	}
 
