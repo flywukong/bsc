@@ -246,15 +246,17 @@ func (s *StateObject) getStorageKey(key common.Hash) (common.Hash, bool) {
 	}
 	// if L1 cache miss, try to get it from shared pool
 	val, ok := s.sharedOriginMap.Load(key)
+	if !ok {
+		return common.HexToHash(""), false
+	}
 	return val.(common.Hash), ok
 }
 
 func (s *StateObject) setStorgeKey(key common.Hash, value common.Hash) {
 	if s.db.isPrefetchDb {
 		s.sharedOriginMap.Store(key, value)
-	} else {
-		s.originStorage[key] = value
 	}
+	s.originStorage[key] = value
 }
 
 // GetCommittedState retrieves a value from the committed account storage trie.
@@ -290,14 +292,6 @@ func (s *StateObject) GetCommittedState(db Database, key common.Hash, hit *bool,
 	}
 
 	if value, cached := s.getStorageKey(key); cached {
-		*hit = true
-		routeid := cachemetrics.Goid()
-		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-		if isSyncMainProcess {
-			fmt.Println("main process get value from mem stateObject %s key , %s ", s.address, key)
-		} else {
-			fmt.Println("prefetch process get value from mem stateObject %s  key , %s ", s.address, key)
-		}
 		return value
 	}
 
