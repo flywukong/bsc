@@ -2122,9 +2122,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 			return it.index, err
 		}
 		bc.updateHighestVerifiedHeader(block.Header())
-
-		// Enable prefetching to pull in trie node paths while processing transactions
-		statedb.StartPrefetcher("chain")
 		var followupInterrupt uint32
 		// For diff sync, it may fallback to full sync, so we still do prefetch
 		if len(block.Transactions()) >= prefetchTxNumber {
@@ -2133,12 +2130,16 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 				bc.prefetcher.Prefetch(followup, throwaway, bc.vmConfig, &followupInterrupt)
 			}(time.Now(), block, throwaway, &followupInterrupt)
 		}
+		// Enable prefetching to pull in trie node paths while processing transactions
+		statedb.StartPrefetcher("chain")
+
 		//Process block using the parent state as reference point
 		substart := time.Now()
 		if bc.pipeCommit {
 			statedb.EnablePipeCommit()
 		}
 		statedb.SetExpectedStateRoot(block.Root())
+		time.Sleep(10 * time.Millisecond)
 		statedb, receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
 		atomic.StoreUint32(&followupInterrupt, 1)
 		perf.RecordMPMetrics(perf.MpImportingProcess, substart)
