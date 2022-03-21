@@ -3,6 +3,7 @@ package cachemetrics
 import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
+	"strconv"
 	"sync/atomic"
 	"time"
 )
@@ -24,6 +25,7 @@ var (
 	ReadBytesCount  uint64 // total read bytes in a block
 	WriteBytesCount uint64 // total write bytes in a block
 	ReadBytesTime   int64  // total write bytes in a block
+	DiskIOCount     int64  // total write bytes in a block
 
 	diskReadBlockCount  = metrics.NewRegisteredGauge("cache/cost/read/layer4", nil)
 	diskWriteBlockCount = metrics.NewRegisteredGauge("cache/cost/write/layer4", nil)
@@ -37,7 +39,7 @@ var (
 	cacheL3StorageTimer = metrics.NewRegisteredTimer("cache/cost/storage/layer3", nil)
 	diskL4StorageTimer  = metrics.NewRegisteredTimer("cache/cost/storage/layer4", nil)
 
-	diskBlockStorageTimer = metrics.NewRegisteredTimer("cache/cost/block/layer4", nil)
+	diskBlockStorageTimer = metrics.NewRegisteredGauge("cache/cost/block/layer4", nil)
 
 	cacheL1AccountCounter = metrics.NewRegisteredCounter("cache/count/account/layer1", nil)
 	cacheL2AccountCounter = metrics.NewRegisteredCounter("cache/count/account/layer2", nil)
@@ -76,13 +78,13 @@ func ResetReadTime() {
 }
 
 func AddBlockDiskTime(duration int64) {
-	log.Info("block disktime is %d, add %d", ReadBytesTime, duration/1000000)
+	log.Info("block disktime is:" + strconv.FormatInt(ReadBytesTime/1000, 10) + ", add:" + strconv.FormatInt(duration, 10))
 	ReadBytesTime += duration
 }
 
 func RecordBlockDiskTime() {
-	log.Info("block disktime is %d", ReadBytesTime)
-	diskBlockStorageTimer.Update(time.Duration(ReadBytesTime))
+	log.Info("block disktime is" + strconv.FormatInt(ReadBytesTime/1000, 10))
+	diskBlockStorageTimer.Update(ReadBytesTime)
 }
 
 func ResetWriteByte() {
