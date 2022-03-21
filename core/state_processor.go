@@ -389,7 +389,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 
 	preloadStart := time.Now()
 	signer := types.MakeSigner(p.bc.chainConfig, block.Number())
-	statedb.TryPreload(block, signer)
+	// statedb.TryPreload(block, signer)
 	perf.RecordMPMetrics(perf.MpImportingProcessPreload, preloadStart)
 
 	executeStart := time.Now()

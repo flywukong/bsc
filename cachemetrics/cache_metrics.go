@@ -3,7 +3,6 @@ package cachemetrics
 import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
-	"strconv"
 	"sync/atomic"
 	"time"
 )
@@ -78,12 +77,12 @@ func ResetReadTime() {
 }
 
 func AddBlockDiskTime(duration int64) {
-	log.Info("block disktime is:" + strconv.FormatInt(ReadBytesTime/1000, 10) + ", add:" + strconv.FormatInt(duration, 10))
+	//log.Info("block disktime is:" + strconv.FormatInt(ReadBytesTime/1000, 10) + ", add:" + strconv.FormatInt(duration, 10))
 	ReadBytesTime += duration
 }
 
 func RecordBlockDiskTime() {
-	log.Info("block disktime is" + strconv.FormatInt(ReadBytesTime/1000, 10))
+	//log.Info("block disktime is" + strconv.FormatInt(ReadBytesTime/1000, 10))
 	diskBlockStorageTimer.Update(ReadBytesTime)
 }
 
