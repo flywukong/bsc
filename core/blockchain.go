@@ -25,6 +25,7 @@ import (
 	"math/big"
 	mrand "math/rand"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -2061,7 +2062,10 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 		}
 	}()
 
+	blockNum := 0
 	for ; block != nil && err == nil || err == ErrKnownBlock; block, err = it.next() {
+		blockNum++
+		log.Info("blockNum:" + strconv.Itoa(blockNum))
 		// If the chain is terminating, stop processing blocks
 		if bc.insertStopped() {
 			log.Debug("Abort during block processing")
