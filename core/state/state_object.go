@@ -349,8 +349,7 @@ func (s *StateObject) finalise(prefetch bool) {
 	slotsToPrefetch := make([][]byte, 0, len(s.dirtyStorage))
 	for key, value := range s.dirtyStorage {
 		s.pendingStorage[key] = value
-		originValue, cached := s.getOriginStorage(key)
-		if cached && value != originValue {
+		if value != s.originStorage[key] {
 			slotsToPrefetch = append(slotsToPrefetch, common.CopyBytes(key[:])) // Copy needed for closure
 		}
 	}
@@ -387,10 +386,11 @@ func (s *StateObject) updateTrie(db Database) Trie {
 	usedStorage := make([][]byte, 0, len(s.pendingStorage))
 	for key, value := range s.pendingStorage {
 		// Skip noop changes, persist actual changes
-		if value == s.originStorage[key] {
+		originValue, cached := s.getOriginStorage(key)
+		if cached && value == originValue {
 			continue
 		}
-		s.originStorage[key] = value
+		s.setOriginStorage(key, value)
 		var v []byte
 		if (value == common.Hash{}) {
 			s.setError(tr.TryDelete(key[:]))
