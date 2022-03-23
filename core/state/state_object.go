@@ -387,11 +387,10 @@ func (s *StateObject) updateTrie(db Database) Trie {
 	usedStorage := make([][]byte, 0, len(s.pendingStorage))
 	for key, value := range s.pendingStorage {
 		// Skip noop changes, persist actual changes
-		originValue, cached := s.getOriginStorage(key)
-		if cached && value == originValue {
+		if value == s.originStorage[key] {
 			continue
 		}
-		s.setOriginStorage(key, value)
+		s.originStorage[key] = value
 		var v []byte
 		if (value == common.Hash{}) {
 			s.setError(tr.TryDelete(key[:]))
