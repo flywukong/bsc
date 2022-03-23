@@ -466,7 +466,9 @@ func (s *StateObject) updateTrie(db Database) Trie {
 	usedStorage := make([][]byte, 0, len(s.pendingStorage))
 	for key, value := range s.pendingStorage {
 		// Skip noop changes, persist actual changes
-		if value == s.originStorage[key] {
+		// Skip noop changes, persist actual changes
+		originValue, cached := s.getOriginStorage(key)
+		if cached && value == originValue {
 			continue
 		}
 		s.originStorage[key] = value
