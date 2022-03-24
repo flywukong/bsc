@@ -1,0 +1,20 @@
+[Unit]
+Description=bsc
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/server/data-seed/chaind.sh -start
+ExecReload=/server/data-seed/chaind.sh -restart
+ExecStop=/server/data-seed/chaind.sh -stop
+PrivateTmp=true
+Restart=always
+LimitNOFILE=500000
+RestartSec=5
+TimeoutStopSec=300
+StartLimitInterval=0
+
+[Install]
+WantedBy=multi-user.target
