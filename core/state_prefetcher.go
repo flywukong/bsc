@@ -34,7 +34,7 @@ var (
 	statePrefetchCounter = metrics.NewRegisteredCounter("state/prefetch/total", nil)
 )
 
-const prefetchThread = 2
+const prefetchThread = 0
 
 // statePrefetcher is a basic Prefetcher, which blindly executes a block on top
 // of an arbitrary state with the goal of prefetching potentially useful state
