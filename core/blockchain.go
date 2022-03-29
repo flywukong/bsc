@@ -2062,6 +2062,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 	}()
 
 	for ; block != nil && err == nil || err == ErrKnownBlock; block, err = it.next() {
+		start1 := time.Now()
 		// If the chain is terminating, stop processing blocks
 		if bc.insertStopped() {
 			log.Debug("Abort during block processing")
@@ -2112,7 +2113,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 		}
 		// Retrieve the parent block and it's state to execute on top
 		start := time.Now()
-
+		costTime1 := time.Since(start1)
 		parent := it.previous()
 		if parent == nil {
 			parent = bc.GetHeader(block.ParentHash(), block.NumberU64()-1)
@@ -2122,9 +2123,14 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 			return it.index, err
 		}
 		bc.updateHighestVerifiedHeader(block.Header())
-
+		costTime2 := time.Since(start1)
 		// Enable prefetching to pull in trie node paths while processing transactions
 		statedb.StartPrefetcher("chain")
+		costTime3 := time.Since(start1)
+
+		log.Info("cost time1", "time1", costTime1.Nanoseconds()/1000, "time2:", costTime2.Nanoseconds()/1000,
+			"time3,", costTime3.Nanoseconds()/1000)
+
 		var followupInterrupt uint32
 		// For diff sync, it may fallback to full sync, so we still do prefetch
 		if len(block.Transactions()) >= prefetchTxNumber {
