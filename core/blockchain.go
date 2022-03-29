@@ -95,7 +95,7 @@ const (
 	maxFutureBlocks        = 256
 	maxTimeFutureBlocks    = 30
 	maxBeyondBlocks        = 2048
-	prefetchTxNumber       = 100
+	prefetchTxNumber       = 40
 
 	diffLayerFreezerRecheckInterval = 3 * time.Second
 	diffLayerPruneRecheckInterval   = 1 * time.Second // The interval to prune unverified diff layers
