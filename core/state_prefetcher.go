@@ -63,15 +63,9 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, c
 		signer = types.MakeSigner(p.config, header.Number)
 	)
 	start := time.Now()
-	transactions := block.Transactions()
+	//transactions := block.Transactions()
 	sortTransactions := make([][]*types.Transaction, prefetchThread)
-	for i := 0; i < prefetchThread; i++ {
-		sortTransactions[i] = make([]*types.Transaction, 0, len(transactions)/prefetchThread)
-	}
-	for idx := range transactions {
-		threadIdx := idx % prefetchThread
-		sortTransactions[threadIdx] = append(sortTransactions[threadIdx], transactions[idx])
-	}
+
 	// No need to execute the first batch, since the main processor will do it.
 	for i := 0; i < prefetchThread; i++ {
 		go func(idx int) {
