@@ -18,9 +18,6 @@ package core
 
 import (
 	"context"
-	"sync/atomic"
-	"time"
-
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -58,40 +55,7 @@ func NewStatePrefetcher(config *params.ChainConfig, bc *BlockChain, engine conse
 // the transaction messages using the statedb, but any changes are discarded. The
 // only goal is to pre-cache transaction signatures and snapshot clean state.
 func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, cfg vm.Config, interrupt *uint32) {
-	var (
-		header = block.Header()
-		signer = types.MakeSigner(p.config, header.Number)
-	)
-	start := time.Now()
-	//transactions := block.Transactions()
-	sortTransactions := make([][]*types.Transaction, prefetchThread)
-
-	// No need to execute the first batch, since the main processor will do it.
-	for i := 0; i < prefetchThread; i++ {
-		go func(idx int) {
-			newStatedb := statedb.Copy()
-			newStatedb.EnableWriteOnSharedStorage()
-			gaspool := new(GasPool).AddGas(block.GasLimit())
-			blockContext := NewEVMBlockContext(header, p.bc, nil)
-			evm := vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
-			// Iterate over and process the individual transactions
-			for i, tx := range sortTransactions[idx] {
-				// If block precaching was interrupted, abort
-				if interrupt != nil && atomic.LoadUint32(interrupt) == 1 {
-					return
-				}
-				// Convert the transaction into an executable message and pre-cache its sender
-				msg, err := tx.AsMessage(signer)
-				if err != nil {
-					return // Also invalid block, bail out
-				}
-				newStatedb.Prepare(tx.Hash(), header.Hash(), i)
-				precacheTransaction(msg, p.config, gaspool, newStatedb, header, evm)
-			}
-		}(i)
-	}
-	statePrefetchTimer.Update(time.Since(start))
-	statePrefetchCounter.Inc(int64(time.Since(start)))
+	return
 }
 
 // precacheTransaction attempts to apply a transaction to the given state database
