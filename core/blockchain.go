@@ -80,6 +80,7 @@ var (
 	blockReorgDropMeter     = metrics.NewRegisteredMeter("chain/reorg/drop", nil)
 	blockReorgInvalidatedTx = metrics.NewRegisteredMeter("chain/reorg/invalidTx", nil)
 
+	statePrefetchSpeed             = metrics.NewRegisteredGaugeFloat64("state/prefetch/speed/ratio", nil)
 	blockDiffPerfeth               = metrics.NewRegisteredGauge("chain/prefetch/diff", nil)
 	blockPrefetchFail              = metrics.NewRegisteredCounter("chain/prefetch/fail", nil)
 	blockPrefetchStart             = metrics.NewRegisteredCounter("chain/prefetch/start", nil)
@@ -2146,6 +2147,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 			statedb.EnablePipeCommit()
 		}
 		statedb.SetExpectedStateRoot(block.Root())
+		cachemetrics.UpdateBlockStartTime(time.Now().UnixNano())
 		statedb, receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
 		atomic.StoreUint32(&followupInterrupt, 1)
 		// process finish
@@ -2159,6 +2161,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 				prefetchBlock, err := cachemetrics.GetDiffPrefetchBlock(prefetchFinish)
 				if err == nil {
 					blockDiffPerfeth.Update(prefetchBlock)
+					cost1 := cachemetrics.GetBlockCost()
+					cost2 := cachemetrics.GetPrefetchCost()
+					statePrefetchSpeed.Update(float64(cost1-cost2) / float64(cost1))
 				}
 			}
 		}

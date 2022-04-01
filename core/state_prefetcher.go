@@ -78,6 +78,7 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, c
 		threadIdx := idx % prefetchThread
 		sortTransactions[threadIdx] = append(sortTransactions[threadIdx], transactions[idx])
 	}
+	cachemetrics.UpdatePrefetchStartTime(time.Now().UnixNano())
 	// No need to execute the first batch, since the main processor will do it.
 	for i := 0; i < prefetchThread; i++ {
 		go func(idx int, succ *bool) {
