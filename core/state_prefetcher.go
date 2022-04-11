@@ -18,15 +18,13 @@ package core
 
 import (
 	"context"
-	"sync/atomic"
-	"time"
-
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
+	"sync/atomic"
 )
 
 var (
@@ -63,7 +61,6 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, c
 		header = block.Header()
 		signer = types.MakeSigner(p.config, header.Number)
 	)
-	start := time.Now()
 	transactions := block.Transactions()
 	sortTransactions := make([][]*types.Transaction, prefetchThread)
 	for i := 0; i < prefetchThread; i++ {
@@ -127,8 +124,6 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, c
 			}
 		}(i)
 	}
-	statePrefetchTimer.Update(time.Since(start))
-	statePrefetchCounter.Inc(int64(time.Since(start)))
 }
 
 // PrefetchMining processes the state changes according to the Ethereum rules by running
