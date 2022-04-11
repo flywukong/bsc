@@ -60,10 +60,40 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, c
 	for i := 0; i < prefetchThread; i++ {
 		sortTransactions[i] = make([]*types.Transaction, 0, len(transactions)/prefetchThread)
 	}
-	for idx := range transactions {
-		threadIdx := idx % prefetchThread
-		sortTransactions[threadIdx] = append(sortTransactions[threadIdx], transactions[idx])
+	// 0 1 2 3 4 5 6 7 8 9 10
+	// --》0 2 4 6 8 10
+	// --》 1 3 5 7 9
+	/*
+		for idx := range transactions {
+			threadIdx := idx % prefetchThread
+			sortTransactions[threadIdx] = append(sortTransactions[threadIdx], transactions[idx])
+		}
+	*/
+
+	// 0 1 2 3 4 5 6 7 8 9 10
+	// --》0 2 3 6 7 10
+	// --》1 4 5 8 9
+	for i := 0; i < prefetchThread; i++ {
+		sortTransactions[i] = append(sortTransactions[i], transactions[i])
 	}
+
+	len := transactions.Len()
+	start := 0
+	for j := prefetchThread; j < len; j += 3 {
+		idx := start % prefetchThread
+		for t := 0; t < 3; t++ {
+			if j+t < len {
+				sortTransactions[idx] = append(sortTransactions[idx], transactions[j+t])
+			}
+		}
+		start += 1
+	}
+	/*
+		for idx := range transactions {
+			threadIdx := idx%prefetchThread + 1
+			sortTransactions[threadIdx] = append(sortTransactions[threadIdx], transactions[idx])
+		}
+	*/
 	// No need to execute the first batch, since the main processor will do it.
 	for i := 0; i < prefetchThread; i++ {
 		go func(idx int) {
@@ -93,7 +123,8 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, c
 // PrefetchMining processes the state changes according to the Ethereum rules by running
 // the transaction messages using the statedb, but any changes are discarded. The
 // only goal is to pre-cache transaction signatures and snapshot clean state. Only used for mining stage
-func (p *statePrefetcher) PrefetchMining(txs *types.TransactionsByPriceAndNonce, header *types.Header, gasLimit uint64, statedb *state.StateDB, cfg vm.Config, interruptCh <-chan struct{}, txCurr **types.Transaction) {
+func (p *statePrefetcher) PrefetchMining(txs *types.TransactionsByPriceAndNonce, header *types.Header,
+	gasLimit uint64, statedb *state.StateDB, cfg vm.Config, interruptCh <-chan struct{}, txCurr **types.Transaction) {
 	var signer = types.MakeSigner(p.config, header.Number)
 
 	txCh := make(chan *types.Transaction, 2*prefetchThread)
