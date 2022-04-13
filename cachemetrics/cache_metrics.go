@@ -16,6 +16,10 @@ const (
 	CacheL2STORAGE cacheLayerName = "CACHE_L2_STORAGE"
 	CacheL3STORAGE cacheLayerName = "CACHE_L3_STORAGE"
 	DiskL4STORAGE  cacheLayerName = "DISK_L4_STORAGE"
+
+	CacheL1DIRTY  cacheLayerName = "CACHE_L1_DIRTY"
+	CacheL1PEND   cacheLayerName = "CACHE_L1_PEND"
+	CacheL1ORIGIN cacheLayerName = "CACHE_L1_ORIGIN"
 )
 
 var (
@@ -37,6 +41,10 @@ var (
 	cacheL3StorageCounter = metrics.NewRegisteredCounter("cache/count/storage/layer3", nil)
 	diskL4StorageCounter  = metrics.NewRegisteredCounter("cache/count/storage/layer4", nil)
 
+	cacheL1StorageCounter1 = metrics.NewRegisteredCounter("cache/count/storage1/layer1", nil)
+	cacheL1StorageCounter2 = metrics.NewRegisteredCounter("cache/count/storage2/layer1", nil)
+	cacheL1StorageCounter3 = metrics.NewRegisteredCounter("cache/count/storage3/layer1", nil)
+
 	cacheL1AccountCostCounter = metrics.NewRegisteredCounter("cache/totalcost/account/layer1", nil)
 	cacheL2AccountCostCounter = metrics.NewRegisteredCounter("cache/totalcost/account/layer2", nil)
 	cacheL3AccountCostCounter = metrics.NewRegisteredCounter("cache/totalcost/account/layer3", nil)
@@ -45,6 +53,10 @@ var (
 	cacheL2StorageCostCounter = metrics.NewRegisteredCounter("cache/totalcost/storage/layer2", nil)
 	cacheL3StorageCostCounter = metrics.NewRegisteredCounter("cache/totalcost/storage/layer3", nil)
 	diskL4StorageCostCounter  = metrics.NewRegisteredCounter("cache/totalcost/storage/layer4", nil)
+
+	cacheL1StorageCostCounter1 = metrics.NewRegisteredCounter("cache/totalcost/storage1/layer1", nil)
+	cacheL1StorageCostCounter2 = metrics.NewRegisteredCounter("cache/totalcost/storage2/layer1", nil)
+	cacheL1StorageCostCounter3 = metrics.NewRegisteredCounter("cache/totalcost/storage3/layer1", nil)
 )
 
 // mark the info of total hit counts of each layers
@@ -60,6 +72,12 @@ func RecordCacheDepth(metricsName cacheLayerName) {
 		diskL4AccountCounter.Inc(1)
 	case CacheL1STORAGE:
 		cacheL1StorageCounter.Inc(1)
+	case CacheL1DIRTY:
+		cacheL1StorageCounter1.Inc(1)
+	case CacheL1PEND:
+		cacheL1StorageCounter2.Inc(1)
+	case CacheL1ORIGIN:
+		cacheL1StorageCounter3.Inc(1)
 	case CacheL2STORAGE:
 		cacheL2StorageCounter.Inc(1)
 	case CacheL3STORAGE:
@@ -105,6 +123,12 @@ func RecordTotalCosts(metricsName cacheLayerName, start time.Time) {
 		accumulateCost(diskL4AccountCostCounter, start)
 	case CacheL1STORAGE:
 		accumulateCost(cacheL1StorageCostCounter, start)
+	case CacheL1DIRTY:
+		accumulateCost(cacheL1StorageCostCounter1, start)
+	case CacheL1PEND:
+		accumulateCost(cacheL1StorageCostCounter2, start)
+	case CacheL1ORIGIN:
+		accumulateCost(cacheL1StorageCostCounter3, start)
 	case CacheL2STORAGE:
 		accumulateCost(cacheL2StorageCostCounter, start)
 	case CacheL3STORAGE:
