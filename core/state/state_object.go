@@ -209,8 +209,10 @@ func (s *StateObject) getTrie(db Database) Trie {
 func (s *StateObject) GetState(db Database, key common.Hash) common.Hash {
 	hitInCache := false
 	hitInDirty := false
+	hitInNotDirty := false
 	start := time.Now()
 	start1 := time.Now()
+	end1 := time.Now()
 	defer func() {
 		routeid := cachemetrics.Goid()
 		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
@@ -225,6 +227,9 @@ func (s *StateObject) GetState(db Database, key common.Hash) common.Hash {
 			cachemetrics.RecordTotalCosts("CacheL1DIRTY", start1)
 		}
 
+		if isSyncMainProcess && hitInNotDirty {
+			cachemetrics.CacheL1StorageCostCounter1.Inc(end1.Sub(start1).Nanoseconds())
+		}
 		if isMinerMainProcess && hitInCache {
 			cachemetrics.RecordMinerCacheDepth("MINER_L1_STORAGE")
 			cachemetrics.RecordMinerCacheMetrics("MINER_L1_STORAGE", start)
@@ -244,6 +249,8 @@ func (s *StateObject) GetState(db Database, key common.Hash) common.Hash {
 		hitInDirty = true
 		return value
 	}
+	hitInNotDirty = true
+	end1 = time.Now()
 	// Otherwise return the entry's original value
 	return s.GetCommittedState(db, key, &hitInCache, true)
 }
@@ -279,11 +286,14 @@ func (s *StateObject) GetCommittedState(db Database, key common.Hash, hit *bool,
 	hitInOrigin := false
 	start1 := time.Now()
 	start2 := time.Now()
+	end1 := time.Now()
+	end2 := time.Now()
 	defer func() {
 		if !calledByGetState {
 			routeid := cachemetrics.Goid()
 			isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
 			isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(routeid)
+
 			if isSyncMainProcess && *hit {
 				cachemetrics.RecordCacheDepth("CACHE_L1_STORAGE")
 				cachemetrics.RecordCacheMetrics("CACHE_L1_STORAGE", start)
@@ -299,11 +309,22 @@ func (s *StateObject) GetCommittedState(db Database, key common.Hash, hit *bool,
 				cachemetrics.RecordCacheDepth("CACHE_L1_ORIGIN")
 				cachemetrics.RecordTotalCosts("CACHE_L1_ORIGIN", start2)
 			}
+
+			if isSyncMainProcess && !hitInPend && hitInOrigin {
+				cachemetrics.CacheL1StorageCostCounter2.Inc(end1.Sub(start1).Nanoseconds())
+			}
+
+			if isSyncMainProcess && !hitInPend && !hitInOrigin {
+				cachemetrics.CacheL1StorageCostCounter2.Inc(end1.Sub(start1).Nanoseconds())
+				cachemetrics.CacheL1StorageCostCounter3.Inc(end2.Sub(start2).Nanoseconds())
+			}
+
 			if isMinerMainProcess && *hit {
 				cachemetrics.RecordMinerCacheDepth("MINER_L1_STORAGE")
 				cachemetrics.RecordMinerCacheMetrics("MINER_L1_STORAGE", start)
 				cachemetrics.RecordMinerTotalCosts("MINER_L1_STORAGE", start)
 			}
+
 		}
 	}()
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
@@ -317,12 +338,15 @@ func (s *StateObject) GetCommittedState(db Database, key common.Hash, hit *bool,
 		*hit = true
 		return value
 	}
+
+	end1 = time.Now()
 	start2 = time.Now()
 	if value, cached := s.getOriginStorage(key); cached {
 		hitInOrigin = true
 		*hit = true
 		return value
 	}
+	end2 = time.Now()
 
 	// If no live objects are available, attempt to use snapshots
 	var (
