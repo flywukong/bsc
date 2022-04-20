@@ -1,6 +1,7 @@
 package state
 
 import (
+	"github.com/ethereum/go-ethereum/core/state/snapshot"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -12,9 +13,22 @@ type StoragePool struct {
 	sharedMap map[common.Address]*sync.Map
 }
 
+type AccountPool struct {
+	sync.RWMutex
+	sharedMap map[common.Address]*snapshot.Account
+}
+
 func NewStoragePool() *StoragePool {
 	sharedMap := make(map[common.Address]*sync.Map)
 	return &StoragePool{
+		sync.RWMutex{},
+		sharedMap,
+	}
+}
+
+func NewAccountPool() *AccountPool {
+	sharedMap := make(map[common.Address]*snapshot.Account)
+	return &AccountPool{
 		sync.RWMutex{},
 		sharedMap,
 	}
@@ -33,6 +47,22 @@ func (s *StoragePool) getStorage(address common.Address) *sync.Map {
 			m := new(sync.Map)
 			s.sharedMap[address] = m
 			return m
+		}
+	}
+	return storageMap
+}
+
+func (s *AccountPool) getAccount(address common.Address) *snapshot.Account {
+	s.RLock()
+	storageMap, ok := s.sharedMap[address]
+	s.RUnlock()
+	if !ok {
+		s.Lock()
+		defer s.Unlock()
+		if storageMap, ok = s.sharedMap[address]; !ok {
+			account := new(Account)
+			s.sharedMap[address] = account
+			return account
 		}
 	}
 	return storageMap

@@ -119,7 +119,9 @@ type StateDB struct {
 	stateObjectsDirty   map[common.Address]struct{} // State objects modified in the current execution
 
 	storagePool          *StoragePool // sharedPool to store L1 originStorage of stateObjects
+	accountPool          *AccountPool // 怎么让prefetch线程去 更新这个值，并且只是第一次读盘时候才更新
 	writeOnSharedStorage bool         // Write to the shared origin storage of a stateObject while reading from the underlying storage layer.
+	writeOnSharedAccount bool
 	// DB error.
 	// State objects are used by the consensus core and VM which are
 	// unable to deal with database-level errors. Any error that occurs
@@ -175,6 +177,7 @@ func NewWithSharedPool(root common.Hash, db Database, snaps *snapshot.Tree) (*St
 		return nil, err
 	}
 	statedb.storagePool = NewStoragePool()
+	statedb.accountPool = NewAccountPool()
 	return statedb, nil
 }
 
@@ -211,6 +214,7 @@ func newStateDB(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, 
 
 func (s *StateDB) EnableWriteOnSharedStorage() {
 	s.writeOnSharedStorage = true
+	s.writeOnSharedAccount = true
 }
 
 // StartPrefetcher initializes a new trie prefetcher to pull in nodes from the
@@ -783,6 +787,9 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *StateObject {
 			}
 			if data.Root == (common.Hash{}) {
 				data.Root = emptyRoot
+			}
+			if s.writeOnSharedAccount {
+				s.accountPool[addr] = acc
 			}
 		}
 	}
