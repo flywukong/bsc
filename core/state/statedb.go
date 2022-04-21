@@ -775,6 +775,13 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *StateObject {
 			CodeHash: acc.CodeHash,
 			Root:     common.BytesToHash(acc.Root),
 		}
+
+		if len(data.CodeHash) == 0 {
+			data.CodeHash = emptyCodeHash
+		}
+		if data.Root == (common.Hash{}) {
+			data.Root = emptyRoot
+		}
 	}
 
 	if s.snap != nil {
@@ -799,7 +806,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *StateObject {
 				data.Root = emptyRoot
 			}
 			if s.writeOnSharedAccount {
-				s.accountPool.setAccount(addr, *data)
+				s.accountPool.setAccount(addr, *acc)
 			}
 		}
 	}
