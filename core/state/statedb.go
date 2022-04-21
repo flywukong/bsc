@@ -767,6 +767,16 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *StateObject {
 		data *Account
 		err  error
 	)
+
+	if acc, ok := s.accountPool.getAccount(addr); ok == true {
+		data = &Account{
+			Nonce:    acc.Nonce,
+			Balance:  acc.Balance,
+			CodeHash: acc.CodeHash,
+			Root:     common.BytesToHash(acc.Root),
+		}
+	}
+
 	if s.snap != nil {
 		if metrics.EnabledExpensive {
 			defer func(start time.Time) { s.SnapshotAccountReads += time.Since(start) }(time.Now())
@@ -789,11 +799,11 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *StateObject {
 				data.Root = emptyRoot
 			}
 			if s.writeOnSharedAccount {
-				s.accountPool[addr] = acc
+				s.accountPool.setAccount(addr, *data)
 			}
 		}
 	}
-	// If snapshot unavailable or reading from it failed, load from the database
+	// If snapshot unavailable or reading from it fa viled, load from the database
 	if s.snap == nil || err != nil {
 		if s.trie == nil {
 			tr, err := s.db.OpenTrie(s.originalRoot)

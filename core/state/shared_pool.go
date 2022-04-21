@@ -15,7 +15,7 @@ type StoragePool struct {
 
 type AccountPool struct {
 	sync.RWMutex
-	sharedMap map[common.Address]*snapshot.Account
+	sharedMap map[common.Address]snapshot.Account
 }
 
 func NewStoragePool() *StoragePool {
@@ -27,7 +27,7 @@ func NewStoragePool() *StoragePool {
 }
 
 func NewAccountPool() *AccountPool {
-	sharedMap := make(map[common.Address]*snapshot.Account)
+	sharedMap := make(map[common.Address]snapshot.Account)
 	return &AccountPool{
 		sync.RWMutex{},
 		sharedMap,
@@ -52,18 +52,17 @@ func (s *StoragePool) getStorage(address common.Address) *sync.Map {
 	return storageMap
 }
 
-func (s *AccountPool) getAccount(address common.Address) *snapshot.Account {
+func (s *AccountPool) setAccount(address common.Address, account snapshot.Account) {
+	s.Lock()
+	defer s.Unlock()
+	s.sharedMap[address] = account
+}
+func (s *AccountPool) getAccount(address common.Address) (snapshot.Account, bool) {
 	s.RLock()
-	storageMap, ok := s.sharedMap[address]
-	s.RUnlock()
+	defer s.RUnlock()
+	account, ok := s.sharedMap[address]
 	if !ok {
-		s.Lock()
-		defer s.Unlock()
-		if storageMap, ok = s.sharedMap[address]; !ok {
-			account := new(Account)
-			s.sharedMap[address] = account
-			return account
-		}
+		return snapshot.Account{}, false
 	}
-	return storageMap
+	return account, true
 }
