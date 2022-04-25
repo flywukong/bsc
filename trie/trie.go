@@ -561,7 +561,7 @@ func (t *Trie) insert(n node, prefix, key []byte, value node) (bool, node, error
 		}
 		n = n.copy()
 		n.flags = t.newFlag()
-		n.Children[key[0]] = nn
+		n.Children[x] = nn
 		return true, n, nil
 
 	case nil:
