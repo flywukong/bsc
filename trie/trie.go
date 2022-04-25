@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -296,7 +297,8 @@ func (t *Trie) tryGetNode(origNode node, path []byte, pos int) (item []byte, new
 func getShardNum(hexStr []byte) uint8 {
 	val := hexStr[0]
 
-	return uint8(val)
+	n, _ := strconv.ParseUint(string(val), 16, 8)
+	return uint8(n)
 }
 
 func shardIndexToByte(index uint8) byte {
@@ -407,9 +409,11 @@ func (t *Trie) tryUpdateBatch(pKvBatch *[]KvPair) error {
 
 	shard := make([][]*KvPair, 16)
 
+	fmt.Println("lenKvBatch:", lenKvBatch)
 	for i := 0; i < lenKvBatch; i++ {
 		//k := keybytesToHex(kvBatch[i].key)
 		shardIndex := getShardNum((*pKvBatch)[i].key)
+		fmt.Println("shardIndex", shardIndex)
 		shard[shardIndex] = append(shard[shardIndex], &((*pKvBatch)[i]))
 	}
 
