@@ -111,7 +111,7 @@ func (t *Trie) UpdateShardInfo() error {
 	}
 	for i := 0; i < 16; i++ {
 		if t.subroot[i] != nil {
-			fmt.Println("subroot:", i, t.subroot[i])
+			//	fmt.Println("subroot:", i, t.subroot[i])
 		}
 	}
 	return nil
@@ -554,7 +554,8 @@ func (t *Trie) insert(n node, prefix, key []byte, value node) (bool, node, error
 		return true, &shortNode{key[:matchlen], branch, t.newFlag()}, nil
 
 	case *fullNode:
-		dirty, nn, err := t.insert(n.Children[key[0]], append(prefix, key[0]), key[1:], value)
+		x, _ := strconv.ParseUint(string(key[0]), 16, 8)
+		dirty, nn, err := t.insert(n.Children[x], append(prefix, key[0]), key[1:], value)
 		if !dirty || err != nil {
 			return false, n, err
 		}
