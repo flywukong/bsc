@@ -491,13 +491,13 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		if (value == common.Hash{}) {
 			updateBatch = append(updateBatch, trie.NewKvPair(key[:], common.Hash{}.Bytes(), true, trieInstance))
 			// fmt.Println("called deleted in SecureTrie")
-			//tr.TryDelete(key[:])
+			//	tr.TryDelete(key[:])
 			trieInstance.PrintKey(key[:], common.Hash{}.Bytes(), true)
 		} else {
 			// Encoding []byte cannot fail, ok to ignore the error.
 			v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
 			// fmt.Println("called deleted in SecureTrie")
-			//tr.TryUpdate(key[:], v)
+			// tr.TryUpdate(key[:], v)
 			updateBatch = append(updateBatch, trie.NewKvPair(key[:], v, false, trieInstance))
 			trieInstance.PrintKey(key[:], v, false)
 		}
