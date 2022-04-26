@@ -410,14 +410,14 @@ func (t *Trie) tryUpdateBatch(pKvBatch *[]KvPair) error {
 	for i := 0; i < lenKvBatch; i++ {
 		k := keybytesToHex((*pKvBatch)[i].key)
 		shardIndex := getShardNum(k)
-		// fmt.Println("shardIndex", shardIndex)
+		fmt.Println("shardIndex", shardIndex)
 		//	shard[shardIndex] = append(shard[shardIndex], &((*pKvBatch)[i]))
 		v := (*pKvBatch)[i].val
 		shard[shardIndex] = append(shard[shardIndex], &KvPair{k, v, (*pKvBatch)[i].del})
 		if (*pKvBatch)[i].del == false {
-			fmt.Println(" batch update key", k, "value:", v)
+			fmt.Println("batch update key", common.Bytes2Hex(k), "value:", v)
 		} else {
-			fmt.Println(" batch del key", k, "value:", v)
+			fmt.Println("batch del key", common.Bytes2Hex(k), "value:", v)
 		}
 	}
 
@@ -499,26 +499,24 @@ func (t *Trie) Update(key, value []byte) {
 //
 // If a node was not found in the database, a MissingNodeError is returned.
 func (t *Trie) TryUpdate(key, value []byte) error {
-	// t.unhashed++
+	t.unhashed++
 	k := keybytesToHex(key)
-	fmt.Println("no batch update key", k, "value:", value)
-	/*
-		if len(value) != 0 {
-			_, n, err := t.insert(t.root, nil, k, valueNode(value))
-			if err != nil {
-				return err
-			}
-			t.root = n
-			// fmt.Println("newroot:", t.root)
-			// t.UpdateShardInfo()
-		} else {
-			_, n, err := t.delete(t.root, nil, k)
-			if err != nil {
-				return err
-			}
-			t.root = n
+
+	if len(value) != 0 {
+		_, n, err := t.insert(t.root, nil, k, valueNode(value))
+		if err != nil {
+			return err
 		}
-	*/
+		t.root = n
+		// fmt.Println("newroot:", t.root)
+		// t.UpdateShardInfo()
+	} else {
+		_, n, err := t.delete(t.root, nil, k)
+		if err != nil {
+			return err
+		}
+		t.root = n
+	}
 	return nil
 }
 
@@ -602,16 +600,13 @@ func (t *Trie) Delete(key []byte) {
 // TryDelete removes any existing value for key from the trie.
 // If a node was not found in the database, a MissingNodeError is returned.
 func (t *Trie) TryDelete(key []byte) error {
-	// t.unhashed++
+	t.unhashed++
 	k := keybytesToHex(key)
-	fmt.Println("no batch del key", k)
-	/*
-		_, n, err := t.delete(t.root, nil, k)
-		if err != nil {
-			return err
-		}
-		t.root = n
-	*/
+	_, n, err := t.delete(t.root, nil, k)
+	if err != nil {
+		return err
+	}
+	t.root = n
 
 	return nil
 }
