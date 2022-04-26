@@ -410,7 +410,7 @@ func (t *Trie) tryUpdateBatch(pKvBatch *[]KvPair) error {
 	for i := 0; i < lenKvBatch; i++ {
 		k := keybytesToHex((*pKvBatch)[i].key)
 		shardIndex := getShardNum(k)
-		//	fmt.Println("shardIndex", shardIndex)
+		fmt.Println("shardIndex", shardIndex)
 		//	shard[shardIndex] = append(shard[shardIndex], &((*pKvBatch)[i]))
 		shard[shardIndex] = append(shard[shardIndex], &KvPair{k, (*pKvBatch)[i].val, (*pKvBatch)[i].del})
 	}
