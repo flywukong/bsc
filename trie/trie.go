@@ -410,9 +410,12 @@ func (t *Trie) tryUpdateBatch(pKvBatch *[]KvPair) error {
 	for i := 0; i < lenKvBatch; i++ {
 		k := keybytesToHex((*pKvBatch)[i].key)
 		shardIndex := getShardNum(k)
-		fmt.Println("shardIndex", shardIndex)
+		// fmt.Println("shardIndex", shardIndex)
 		//	shard[shardIndex] = append(shard[shardIndex], &((*pKvBatch)[i]))
-		shard[shardIndex] = append(shard[shardIndex], &KvPair{k, (*pKvBatch)[i].val, (*pKvBatch)[i].del})
+		v := (*pKvBatch)[i].val
+		shard[shardIndex] = append(shard[shardIndex], &KvPair{k, v, (*pKvBatch)[i].del})
+
+		fmt.Println(" batch update key", k, "value:", v)
 	}
 
 	taskResults := make(chan error, 16)
@@ -493,25 +496,26 @@ func (t *Trie) Update(key, value []byte) {
 //
 // If a node was not found in the database, a MissingNodeError is returned.
 func (t *Trie) TryUpdate(key, value []byte) error {
-	t.unhashed++
+	// t.unhashed++
 	k := keybytesToHex(key)
-
-	if len(value) != 0 {
-		_, n, err := t.insert(t.root, nil, k, valueNode(value))
-		if err != nil {
-			return err
+	fmt.Println("no batch update key", k, "value:", value)
+	/*
+		if len(value) != 0 {
+			_, n, err := t.insert(t.root, nil, k, valueNode(value))
+			if err != nil {
+				return err
+			}
+			t.root = n
+			// fmt.Println("newroot:", t.root)
+			// t.UpdateShardInfo()
+		} else {
+			_, n, err := t.delete(t.root, nil, k)
+			if err != nil {
+				return err
+			}
+			t.root = n
 		}
-		t.root = n
-		// fmt.Println("newroot:", t.root)
-		// t.UpdateShardInfo()
-	} else {
-		_, n, err := t.delete(t.root, nil, k)
-		if err != nil {
-			return err
-		}
-		t.root = n
-	}
-
+	*/
 	return nil
 }
 
