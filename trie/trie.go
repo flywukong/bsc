@@ -414,8 +414,11 @@ func (t *Trie) tryUpdateBatch(pKvBatch *[]KvPair) error {
 		//	shard[shardIndex] = append(shard[shardIndex], &((*pKvBatch)[i]))
 		v := (*pKvBatch)[i].val
 		shard[shardIndex] = append(shard[shardIndex], &KvPair{k, v, (*pKvBatch)[i].del})
-
-		fmt.Println(" batch update key", k, "value:", v)
+		if (*pKvBatch)[i].del == false {
+			fmt.Println(" batch update key", k, "value:", v)
+		} else {
+			fmt.Println(" batch del key", k, "value:", v)
+		}
 	}
 
 	taskResults := make(chan error, 16)
@@ -599,13 +602,17 @@ func (t *Trie) Delete(key []byte) {
 // TryDelete removes any existing value for key from the trie.
 // If a node was not found in the database, a MissingNodeError is returned.
 func (t *Trie) TryDelete(key []byte) error {
-	t.unhashed++
+	// t.unhashed++
 	k := keybytesToHex(key)
-	_, n, err := t.delete(t.root, nil, k)
-	if err != nil {
-		return err
-	}
-	t.root = n
+	fmt.Println("no batch del key", k)
+	/*
+		_, n, err := t.delete(t.root, nil, k)
+		if err != nil {
+			return err
+		}
+		t.root = n
+	*/
+
 	return nil
 }
 

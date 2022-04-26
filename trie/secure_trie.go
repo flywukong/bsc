@@ -119,13 +119,16 @@ func (t *SecureTrie) UpdateBatch(pKvBatch *[]KvPair) error {
 	err := t.trie.UpdateBatch(pKvBatch)
 	if err != nil {
 		panic("update batcth error")
+		log.Error(fmt.Sprintf("Unhandled trie updatebatch error: %v", err))
 		return err
 	}
 
 	for i := 0; i < len(*pKvBatch); i++ {
+		key := (*pKvBatch)[i].getKey()
 		if (*pKvBatch)[i].getDelFlag() == false {
-			key := (*pKvBatch)[i].getKey()
 			t.getSecKeyCache()[string(key)] = common.CopyBytes(key)
+		} else {
+			delete(t.getSecKeyCache(), string(key))
 		}
 	}
 	return nil

@@ -489,7 +489,7 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		s.originStorage[key] = value
 		var v []byte
 		if (value == common.Hash{}) {
-			// updateBatch = append(updateBatch, trie.NewKvPair(key[:], common.Hash{}.Bytes(), true, trieInstance))
+			updateBatch = append(updateBatch, trie.NewKvPair(key[:], common.Hash{}.Bytes(), true, trieInstance))
 			// fmt.Println("called deleted in SecureTrie")
 			s.setError(tr.TryDelete(key[:]))
 		} else {
