@@ -491,12 +491,12 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		if (value == common.Hash{}) {
 			updateBatch = append(updateBatch, trie.NewKvPair(key[:], common.Hash{}.Bytes(), true, trieInstance))
 			// fmt.Println("called deleted in SecureTrie")
-			//s.setError(tr.TryDelete(key[:]))
+			// s.setError(tr.TryDelete(key[:]))
 		} else {
 			// Encoding []byte cannot fail, ok to ignore the error.
 			v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
 			// fmt.Println("called deleted in SecureTrie")
-			//s.setError(tr.TryUpdate(key[:], v))
+			// s.setError(tr.TryUpdate(key[:], v))
 			updateBatch = append(updateBatch, trie.NewKvPair(key[:], v, false, trieInstance))
 		}
 		// If state snapshotting is active, cache the data til commit
