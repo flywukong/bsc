@@ -260,8 +260,8 @@ func TestCompareInsertPerformanceInDb(t *testing.T) {
 	// Create 4196 kv pair batch
 	// includes 4096 to insert, 100 to delete
 	old_batch := []KvPair{}
-	testnum := 100000
-	delNum := 2000
+	testnum := 10000
+	delNum := 102
 	// Create 4096 kv pair to insert
 	for i := 0; i < testnum; i++ {
 		// batch[i] = createInsertKvPair()
@@ -307,6 +307,175 @@ func TestCompareInsertPerformanceInDb(t *testing.T) {
 			secureTrieUpdate(trie, string(old_batch[i].key), string(old_batch[i].val), true)
 		}
 	}
+
+	oldTc := time.Since(oldStartTime)
+	t.Logf("oldTc = %v", oldTc)
+
+	// trie.UpdateShardInfo()
+	//fmt.Println("rootnode ==:", trie.root)
+
+	// Batch test
+	newStartTime := time.Now()
+	// secureTrieUpdateBatch(batchTrie, &new_batch)
+	for i := 0; i < testnum; i++ {
+		if delMap[i] == false {
+			secureTrieUpdate(batchTrie, string(old_batch[i].key), string(old_batch[i].val), false)
+		} else {
+			secureTrieUpdate(batchTrie, string(old_batch[i].key), string(old_batch[i].val), true)
+		}
+	}
+
+	newTc := time.Since(newStartTime)
+	//	batchTrie.UpdateShardInfo()
+	t.Logf("newTc = %v", newTc)
+	t.Logf("oldTc = %v", oldTc)
+	root := batchTrie.Hash()
+	t.Logf("newroot ==: %x", root)
+	exp := trie.Hash()
+	t.Logf("exp root ==: %x", exp)
+	// trie.UpdateShardInfo()
+	//fmt.Println("newrootnode ==:", trie.root)
+
+	if root != exp {
+		t.Errorf("case 1: exp %x got %x", exp, root)
+	}
+	testnum = 100000
+	delNum = 102
+	old_batch2 := []KvPair{}
+
+	// Create 4096 kv pair to insert
+	for i := 0; i < testnum; i++ {
+		// batch[i] = createInsertKvPair()
+		old_batch2 = append(old_batch2, createInsertKvPair())
+	}
+
+	delMap2 := make(map[int]bool, testnum)
+	for i := 0; i < testnum; i++ {
+		delMap2[i] = false
+	}
+
+	for index := 0; index < delNum; index++ {
+		delMap2[rand.Intn(testnum)] = true
+	}
+
+	new_batch2 := []KvPair{}
+	for i := 0; i < len(old_batch2); i++ {
+		if delMap2[i] == false {
+			new_batch2 = append(new_batch2, NewKvPair(old_batch2[i].key, old_batch2[i].val, false, batchTrie))
+		} else {
+			new_batch2 = append(new_batch2, NewKvPair(old_batch2[i].key, old_batch2[i].val, true, batchTrie))
+		}
+	}
+
+	t.Logf("batch size ==: %d", len(old_batch2))
+
+	// Batch test
+	newStartTime = time.Now()
+	secureTrieUpdateBatch(batchTrie, &new_batch2)
+	newTc = time.Since(newStartTime)
+	t.Logf("newTc = %v", newTc)
+
+	// Single insert&del test
+	root_new, _ := trie.Commit(nil)
+	db2.Commit(root, true, nil)
+	trie2, _ := NewSecure(root_new, db2)
+	if trie2 == nil {
+		fmt.Println("sec Trie2 is nil")
+		fmt.Println("sec Trie hash is ", root_new)
+		if db2 == nil {
+			fmt.Println("db is nil")
+		}
+	}
+	oldStartTime = time.Now()
+	// 1. insert
+	for i := 0; i < testnum; i++ {
+		if delMap2[i] == false {
+			secureTrieUpdate(trie2, string(old_batch2[i].key), string(old_batch2[i].val), false)
+		} else {
+			secureTrieUpdate(trie2, string(old_batch2[i].key), string(old_batch2[i].val), true)
+		}
+	}
+	oldTc = time.Since(oldStartTime)
+	t.Logf("oldTc = %v", oldTc)
+
+	// trie.UpdateShardInfo()
+	//fmt.Println("rootnode ==:", trie.root)
+
+	// batchTrie, _ = NewSecure(root, db1)
+	// Batch test
+	root_batch, _ := batchTrie.Commit(nil)
+	db1.Commit(root, true, nil)
+	batchTrie2, _ := NewSecure(root_batch, db1)
+	if batchTrie2 == nil {
+		fmt.Println("batch Trie2 is nil")
+		fmt.Println("batch Trie hash is ", batchTrie.Hash())
+		fmt.Println("batch Trie hash2 is ", root_batch)
+		if db1 == nil {
+			fmt.Println("db is nil")
+		}
+	}
+
+	newStartTime = time.Now()
+	secureTrieUpdateBatch(batchTrie, &new_batch2)
+	newTc = time.Since(newStartTime)
+
+	// batchTrie.UpdateShardInfo()
+	t.Logf("newTc = %v", newTc)
+	t.Logf("oldTc = %v", oldTc)
+	root = batchTrie2.Hash()
+	t.Logf("newroot ==: %x", root)
+	exp = trie2.Hash()
+	t.Logf("exp root ==: %x", exp)
+
+}
+
+func TestCompareInsertPerformanceInDb3(t *testing.T) {
+	// Create 4196 kv pair batch
+	// includes 4096 to insert, 100 to delete
+	old_batch := []KvPair{}
+	testnum := 100000
+	delNum := 3000
+	// Create 4096 kv pair to insert
+	for i := 0; i < testnum; i++ {
+		// batch[i] = createInsertKvPair()
+		old_batch = append(old_batch, createInsertKvPair())
+	}
+	fmt.Println("old_batch len:", len(old_batch))
+	delMap := make(map[int]bool, testnum)
+
+	for i := 0; i < testnum; i++ {
+		delMap[i] = false
+	}
+
+	for index := 0; index < delNum; index++ {
+		delMap[rand.Intn(testnum)] = true
+	}
+
+	batchTrie := newSecTrie("batch_trie")
+	new_batch := []KvPair{}
+	for i := 0; i < len(old_batch); i++ {
+		//	new_batch = append(new_batch, KvPair{keybytesToHex(old_batch[i].key), old_batch[i].val, false})
+		if delMap[i] == false {
+			new_batch = append(new_batch, NewKvPair(old_batch[i].key, old_batch[i].val, false, batchTrie))
+		} else {
+			new_batch = append(new_batch, NewKvPair(old_batch[i].key, old_batch[i].val, true, batchTrie))
+		}
+	}
+
+	t.Logf("batch size ==: %d", len(old_batch))
+
+	// Single insert&del test
+	trie := newSecTrie("sec_trie")
+
+	oldStartTime := time.Now()
+	// 1. insert
+	for i := 0; i < testnum; i++ {
+		if delMap[i] == false {
+			secureTrieUpdate(trie, string(old_batch[i].key), string(old_batch[i].val), false)
+		} else {
+			secureTrieUpdate(trie, string(old_batch[i].key), string(old_batch[i].val), true)
+		}
+	}
 	oldTc := time.Since(oldStartTime)
 	t.Logf("oldTc = %v", oldTc)
 
@@ -338,6 +507,14 @@ func TestCompareInsertPerformanceInDb(t *testing.T) {
 		old_batch2 = append(old_batch, createInsertKvPair())
 	}
 
+	//old_batch2 = old_batch
+	// old_batch2 = old_batch
+	fmt.Println("old_batch2 len:", len(old_batch2))
+
+	for i := 0; i < 10; i++ {
+		fmt.Println("old_batch2,key", old_batch2[i].key, old_batch2[i].val)
+		fmt.Println("old_batch,key", old_batch[i].key, old_batch[i].val)
+	}
 	for i := 0; i < testnum; i++ {
 		delMap[i] = false
 	}
@@ -357,18 +534,12 @@ func TestCompareInsertPerformanceInDb(t *testing.T) {
 
 	t.Logf("batch size ==: %d", len(old_batch))
 
-	// Batch test
-	newStartTime = time.Now()
-	secureTrieUpdateBatch(batchTrie, &new_batch2)
-	newTc = time.Since(newStartTime)
-	t.Logf("newTc = %v", newTc)
-
 	// Single insert&del test
-	// trie, _ = NewSecure(trie.Hash(), db2)
+	//trie := newSecTrie("sec_trie")
 
 	oldStartTime = time.Now()
 	// 1. insert
-	for i := 0; i < testnum; i++ {
+	for i := 0; i < len(old_batch2); i++ {
 		if delMap[i] == false {
 			secureTrieUpdate(trie, string(old_batch2[i].key), string(old_batch2[i].val), false)
 		} else {
@@ -381,7 +552,6 @@ func TestCompareInsertPerformanceInDb(t *testing.T) {
 	// trie.UpdateShardInfo()
 	//fmt.Println("rootnode ==:", trie.root)
 
-	// batchTrie, _ = NewSecure(root, db1)
 	// Batch test
 	newStartTime = time.Now()
 	secureTrieUpdateBatch(batchTrie, &new_batch2)
@@ -392,7 +562,6 @@ func TestCompareInsertPerformanceInDb(t *testing.T) {
 	t.Logf("newroot ==: %x", root)
 	exp = trie.Hash()
 	t.Logf("exp root ==: %x", exp)
-
 }
 
 /*
