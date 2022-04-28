@@ -95,10 +95,13 @@ func (t *Trie) UpdateShardInfo() error {
 			if n.Children[i] == nil {
 				t.subroot[i] = nil
 			} else {
-				a := byte(i)
-				var b []byte
-				c := append(b, a)
-				sNode := &shortNode{c, n.Children[i], t.newFlag()}
+				//a := byte(i)
+				// c := []byte(fmt.Sprintf("%x", a))
+				// var b []byte
+				// c :=append(b, a)
+				// fmt.Println("shornode key : ", []byte{i})
+
+				sNode := &shortNode{[]byte{i}, n.Children[i], t.newFlag()}
 				t.subroot[i] = sNode
 			}
 		}

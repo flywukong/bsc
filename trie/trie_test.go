@@ -300,7 +300,7 @@ func TestCompareInsertPerformanceInDb(t *testing.T) {
 
 	oldStartTime := time.Now()
 	// 1. insert
-	for i := 0; i < testnum; i++ {
+	for i := 0; i < len(old_batch); i++ {
 		if delMap[i] == false {
 			secureTrieUpdate(trie, string(old_batch[i].key), string(old_batch[i].val), false)
 		} else {
@@ -317,7 +317,7 @@ func TestCompareInsertPerformanceInDb(t *testing.T) {
 	// Batch test
 	newStartTime := time.Now()
 	// secureTrieUpdateBatch(batchTrie, &new_batch)
-	for i := 0; i < testnum; i++ {
+	for i := 0; i < len(old_batch); i++ {
 		if delMap[i] == false {
 			secureTrieUpdate(batchTrie, string(old_batch[i].key), string(old_batch[i].val), false)
 		} else {
