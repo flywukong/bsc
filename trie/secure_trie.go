@@ -115,22 +115,9 @@ func (t *SecureTrie) TryUpdate(key, value []byte) error {
 	return nil
 }
 
-func (t *SecureTrie) PrintKey(key []byte, value []byte, del bool) {
-	if del == false {
-		hk := t.hashKey(key)
-		k := keybytesToHex(hk)
-		fmt.Println("no batch update key", common.Bytes2Hex(k), "value:", value)
-	} else {
-		hk := t.hashKey(key)
-		k := keybytesToHex(hk)
-		fmt.Println("no batch del key", common.Bytes2Hex(k), "value:", value)
-	}
-}
-
 func (t *SecureTrie) UpdateBatch(pKvBatch *[]KvPair) error {
 	err := t.trie.UpdateBatch(pKvBatch)
 	if err != nil {
-		panic("update batcth error")
 		log.Error(fmt.Sprintf("Unhandled trie updatebatch error: %v", err))
 		return err
 	}
