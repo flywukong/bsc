@@ -116,9 +116,6 @@ func RecordTotalCosts(metricsName cacheLayerName, start time.Time) {
 		accumulateCost(cacheL3StorageCostCounter, start)
 	case DiskL4STORAGE:
 		accumulateCost(diskL4StorageCostCounter, start)
-<<<<<<< HEAD
-
-=======
 	}
 }
 
@@ -140,7 +137,6 @@ func RecordTotalCosts2(metricsName cacheLayerName, start time.Time, end time.Tim
 		accumulateCost(cacheL3StorageCostCounter, start)
 	case DiskL4STORAGE:
 		accumulateCost(diskL4StorageCostCounter, start)
->>>>>>> 342e82280 (add trie metrics)
 	}
 }
 
