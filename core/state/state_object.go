@@ -472,14 +472,10 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		}(time.Now())
 	}
 	start := time.Now()
-	end := time.Now()
+	var updateTime time.Duration
 	defer func() {
-		goid := cachemetrics.Goid()
-		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
-		// record metrics of syncing main process
-		if isSyncMainProcess {
-			cachemetrics.RecordTotalCosts2("TRIE_UPDATE", start, end)
-		}
+		cachemetrics.TrieUpdateCostCounter.Inc(updateTime.Nanoseconds())
+		cachemetrics.TrieUpdateTimer.Update(updateTime)
 	}()
 	// The snapshot storage map for the object
 	var storage map[string][]byte
@@ -521,7 +517,8 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		usedStorage = append(usedStorage, common.CopyBytes(key[:])) // Copy needed for closure
 	}
 	s.setError(trieInstance.UpdateBatch(&updateBatch))
-	end = time.Now()
+	updateTime = time.Since(start)
+	// fmt.Println("updateRoot cost time,", updateTime)
 
 	if s.db.prefetcher != nil {
 		s.db.prefetcher.used(s.data.Root, usedStorage)
