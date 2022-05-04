@@ -16,6 +16,8 @@ const (
 	CacheL2STORAGE cacheLayerName = "CACHE_L2_STORAGE"
 	CacheL3STORAGE cacheLayerName = "CACHE_L3_STORAGE"
 	DiskL4STORAGE  cacheLayerName = "DISK_L4_STORAGE"
+
+	TRIEUPDATE cacheLayerName = "TRIE_UPDATE"
 )
 
 var (
@@ -45,6 +47,8 @@ var (
 	cacheL2StorageCostCounter = metrics.NewRegisteredCounter("cache/totalcost/storage/layer2", nil)
 	cacheL3StorageCostCounter = metrics.NewRegisteredCounter("cache/totalcost/storage/layer3", nil)
 	diskL4StorageCostCounter  = metrics.NewRegisteredCounter("cache/totalcost/storage/layer4", nil)
+
+	trieUpdateCostCounter = metrics.NewRegisteredCounter("trie/totalcost/update/layer", nil)
 )
 
 // mark the info of total hit counts of each layers
@@ -111,7 +115,31 @@ func RecordTotalCosts(metricsName cacheLayerName, start time.Time) {
 		accumulateCost(cacheL3StorageCostCounter, start)
 	case DiskL4STORAGE:
 		accumulateCost(diskL4StorageCostCounter, start)
+	case TRIEUPDATE:
+		accumulateCost(trieUpdateCostCounter, start)
+	}
+}
 
+func RecordTotalCosts2(metricsName cacheLayerName, start time.Time, end time.Time) {
+	switch metricsName {
+	case CacheL1ACCOUNT:
+		accumulateCost(cacheL1AccountCostCounter, start)
+	case CacheL2ACCOUNT:
+		accumulateCost(cacheL2AccountCostCounter, start)
+	case CacheL3ACCOUNT:
+		accumulateCost(cacheL3AccountCostCounter, start)
+	case DiskL4ACCOUNT:
+		accumulateCost(diskL4AccountCostCounter, start)
+	case CacheL1STORAGE:
+		accumulateCost(cacheL1StorageCostCounter, start)
+	case CacheL2STORAGE:
+		accumulateCost(cacheL2StorageCostCounter, start)
+	case CacheL3STORAGE:
+		accumulateCost(cacheL3StorageCostCounter, start)
+	case DiskL4STORAGE:
+		accumulateCost(diskL4StorageCostCounter, start)
+	case TRIEUPDATE:
+		accumulateCost(trieUpdateCostCounter, start)
 	}
 }
 
@@ -121,4 +149,8 @@ func recordCost(timer metrics.Timer, start time.Time) {
 
 func accumulateCost(totalcost metrics.Counter, start time.Time) {
 	totalcost.Inc(time.Since(start).Nanoseconds())
+}
+
+func accumulateCost2(totalcost metrics.Counter, start time.Time, end time.Time) {
+	totalcost.Inc(end.Sub(start).Nanoseconds())
 }

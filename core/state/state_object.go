@@ -471,6 +471,16 @@ func (s *StateObject) updateTrie(db Database) Trie {
 			s.db.MetricsMux.Unlock()
 		}(time.Now())
 	}
+	start := time.Now()
+	end := time.Now()
+	defer func() {
+		goid := cachemetrics.Goid()
+		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
+		// record metrics of syncing main process
+		if isSyncMainProcess {
+			cachemetrics.RecordTotalCosts2("TRIE_UPDATE", start, end)
+		}
+	}()
 	// The snapshot storage map for the object
 	var storage map[string][]byte
 	// Insert all the pending updates into the trie
@@ -478,7 +488,7 @@ func (s *StateObject) updateTrie(db Database) Trie {
 
 	trieInstance := tr.(*trie.SecureTrie)
 	usedStorage := make([][]byte, 0, len(s.pendingStorage))
-
+	start = time.Now()
 	// kvpair
 	updateBatch := []trie.KvPair{}
 	for key, value := range s.pendingStorage {
@@ -510,8 +520,8 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		}
 		usedStorage = append(usedStorage, common.CopyBytes(key[:])) // Copy needed for closure
 	}
-
 	s.setError(trieInstance.UpdateBatch(&updateBatch))
+	end = time.Now()
 
 	if s.db.prefetcher != nil {
 		s.db.prefetcher.used(s.data.Root, usedStorage)
