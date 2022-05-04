@@ -1195,6 +1195,8 @@ func (s *StateDB) AccountsIntermediateRoot() {
 	finishCh := make(chan struct{})
 	defer close(finishCh)
 	wg := sync.WaitGroup{}
+	start := time.Now()
+	var updateRootCost time.Duration
 	for i := 0; i < runtime.NumCPU(); i++ {
 		go func() {
 			for {
@@ -1208,11 +1210,16 @@ func (s *StateDB) AccountsIntermediateRoot() {
 		}()
 	}
 
+	defer func() {
+		cachemetrics.TrieUpdateRootCostCounter.Inc(updateRootCost.Nanoseconds())
+		cachemetrics.TrieUpdateRootTimer.Update(updateRootCost)
+	}()
 	// Although naively it makes sense to retrieve the account trie and then do
 	// the contract storage and account updates sequentially, that short circuits
 	// the account prefetcher. Instead, let's process all the storage updates
 	// first, giving the account prefeches just a few more milliseconds of time
 	// to pull useful data from disk.
+	start = time.Now()
 	for addr := range s.stateObjectsPending {
 		if obj := s.stateObjects[addr]; !obj.deleted {
 			wg.Add(1)
@@ -1239,6 +1246,7 @@ func (s *StateDB) AccountsIntermediateRoot() {
 		}
 	}
 	wg.Wait()
+	updateRootCost = time.Since(start)
 }
 
 func (s *StateDB) StateIntermediateRoot() common.Hash {

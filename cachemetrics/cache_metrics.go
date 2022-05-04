@@ -45,6 +45,11 @@ var (
 	cacheL2StorageCostCounter = metrics.NewRegisteredCounter("cache/totalcost/storage/layer2", nil)
 	cacheL3StorageCostCounter = metrics.NewRegisteredCounter("cache/totalcost/storage/layer3", nil)
 	diskL4StorageCostCounter  = metrics.NewRegisteredCounter("cache/totalcost/storage/layer4", nil)
+
+	TrieUpdateCostCounter     = metrics.NewRegisteredCounter("trie/totalcost/update/sum", nil)
+	TrieUpdateTimer           = metrics.NewRegisteredTimer("trie/cost/update/delay", nil)
+	TrieUpdateRootTimer       = metrics.NewRegisteredTimer("trie/cost/updateroot/delay", nil)
+	TrieUpdateRootCostCounter = metrics.NewRegisteredCounter("trie/totalcost/updateroot/sum", nil)
 )
 
 // mark the info of total hit counts of each layers
@@ -111,7 +116,31 @@ func RecordTotalCosts(metricsName cacheLayerName, start time.Time) {
 		accumulateCost(cacheL3StorageCostCounter, start)
 	case DiskL4STORAGE:
 		accumulateCost(diskL4StorageCostCounter, start)
+<<<<<<< HEAD
 
+=======
+	}
+}
+
+func RecordTotalCosts2(metricsName cacheLayerName, start time.Time, end time.Time) {
+	switch metricsName {
+	case CacheL1ACCOUNT:
+		accumulateCost(cacheL1AccountCostCounter, start)
+	case CacheL2ACCOUNT:
+		accumulateCost(cacheL2AccountCostCounter, start)
+	case CacheL3ACCOUNT:
+		accumulateCost(cacheL3AccountCostCounter, start)
+	case DiskL4ACCOUNT:
+		accumulateCost(diskL4AccountCostCounter, start)
+	case CacheL1STORAGE:
+		accumulateCost(cacheL1StorageCostCounter, start)
+	case CacheL2STORAGE:
+		accumulateCost(cacheL2StorageCostCounter, start)
+	case CacheL3STORAGE:
+		accumulateCost(cacheL3StorageCostCounter, start)
+	case DiskL4STORAGE:
+		accumulateCost(diskL4StorageCostCounter, start)
+>>>>>>> 342e82280 (add trie metrics)
 	}
 }
 
