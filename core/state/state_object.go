@@ -471,10 +471,12 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		}(time.Now())
 	}
 	start := time.Now()
+	start2 := time.Now()
 	var updateTime1 time.Duration
+	var updateTime3 int64
 	var updateTime2 time.Duration
 	defer func() {
-		cachemetrics.TrieUpdateCostCounter1.Inc(updateTime1.Nanoseconds())
+		cachemetrics.TrieUpdateCostCounter1.Inc(updateTime3)
 		cachemetrics.TrieUpdateTimer1.Update(updateTime1)
 		cachemetrics.TrieUpdateCostCounter2.Inc(updateTime2.Nanoseconds())
 		cachemetrics.TrieUpdateTimer2.Update(updateTime2)
@@ -486,6 +488,7 @@ func (s *StateObject) updateTrie(db Database) Trie {
 
 	usedStorage := make([][]byte, 0, len(s.pendingStorage))
 	tempBatch := make(map[common.Hash][]byte)
+	updateTime3 = 0
 	for key, value := range s.pendingStorage {
 		// Skip noop changes, persist actual changes
 		if value == s.originStorage[key] {
@@ -493,6 +496,7 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		}
 		s.originStorage[key] = value
 		var v []byte
+		start2 = time.Now()
 		if (value == common.Hash{}) {
 			s.setError(tr.TryDelete(key[:]))
 		} else {
@@ -500,9 +504,16 @@ func (s *StateObject) updateTrie(db Database) Trie {
 			v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
 			s.setError(tr.TryUpdate(key[:], v))
 		}
+		updateTime3 += time.Since(start2).Nanoseconds()
 		tempBatch[key] = v
 	}
-	
+
+	if len(tempBatch) >= 3 {
+		fmt.Println("trie batch size1:", len(tempBatch))
+	} else {
+		fmt.Println("trie batch size2:", len(tempBatch))
+	}
+
 	updateTime1 = time.Since(start)
 	start = time.Now()
 	for key, v := range tempBatch {
