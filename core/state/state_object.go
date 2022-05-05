@@ -487,11 +487,13 @@ func (s *StateObject) updateTrie(db Database) Trie {
 	start = time.Now()
 	// kvpair
 	updateBatch := []trie.KvPair{}
+	tempMap := make(Storage)
 	for key, value := range s.pendingStorage {
 		// Skip noop changes, persist actual changes
 		if value == s.originStorage[key] {
 			continue
 		}
+		tempMap[key] = value
 		s.originStorage[key] = value
 		var v []byte
 		if (value == common.Hash{}) {
@@ -501,6 +503,12 @@ func (s *StateObject) updateTrie(db Database) Trie {
 			v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
 			updateBatch = append(updateBatch, trie.NewKvPair(key[:], v, false, trieInstance))
 		}
+	}
+
+	s.setError(trieInstance.UpdateBatch(&updateBatch))
+	updateTime = time.Since(start)
+
+	for key, value := range tempMap {
 		// If state snapshotting is active, cache the data til commit
 		if s.db.snap != nil {
 			s.db.snapStorageMux.Lock()
@@ -511,13 +519,12 @@ func (s *StateObject) updateTrie(db Database) Trie {
 					s.db.snapStorage[s.address] = storage
 				}
 			}
-			storage[string(key[:])] = v // v will be nil if value is 0x00
+			storage[string(key[:])] = value // v will be nil if value is 0x00
 			s.db.snapStorageMux.Unlock()
 		}
 		usedStorage = append(usedStorage, common.CopyBytes(key[:])) // Copy needed for closure
 	}
-	s.setError(trieInstance.UpdateBatch(&updateBatch))
-	updateTime = time.Since(start)
+
 	// fmt.Println("updateRoot cost time,", updateTime)
 
 	if s.db.prefetcher != nil {
