@@ -487,7 +487,7 @@ func (s *StateObject) updateTrie(db Database) Trie {
 
 	trieInstance := tr.(*trie.SecureTrie)
 	usedStorage := make([][]byte, 0, len(s.pendingStorage))
-	start = time.Now()
+	//	start = time.Now()
 	// kvpair
 	updateBatch := []trie.KvPair{}
 	tempBatch := make(map[common.Hash][]byte)
@@ -509,9 +509,15 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		tempBatch[key] = v
 	}
 
+	start = time.Now()
 	s.setError(trieInstance.UpdateBatch(&updateBatch))
 	updateTime1 = time.Since(start)
-
+	if len(tempBatch) >= 3 {
+		fmt.Println("trie batch size1:", len(tempBatch))
+	} else {
+		fmt.Println("trie batch size2:", len(tempBatch))
+	}
+	
 	start = time.Now()
 	for key, value := range tempBatch {
 		// If state snapshotting is active, cache the data til commit
