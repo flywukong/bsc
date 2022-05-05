@@ -471,10 +471,13 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		}(time.Now())
 	}
 	start := time.Now()
-	var updateTime time.Duration
+	var updateTime1 time.Duration
+	var updateTime2 time.Duration
 	defer func() {
-		cachemetrics.TrieUpdateCostCounter.Inc(updateTime.Nanoseconds())
-		cachemetrics.TrieUpdateTimer.Update(updateTime)
+		cachemetrics.TrieUpdateCostCounter1.Inc(updateTime1.Nanoseconds())
+		cachemetrics.TrieUpdateTimer1.Update(updateTime1)
+		cachemetrics.TrieUpdateCostCounter2.Inc(updateTime2.Nanoseconds())
+		cachemetrics.TrieUpdateTimer2.Update(updateTime2)
 	}()
 	// The snapshot storage map for the object
 	var storage map[string][]byte
@@ -482,6 +485,7 @@ func (s *StateObject) updateTrie(db Database) Trie {
 	tr := s.getTrie(db)
 
 	usedStorage := make([][]byte, 0, len(s.pendingStorage))
+	tempBatch := make(map[common.Hash][]byte)
 	for key, value := range s.pendingStorage {
 		// Skip noop changes, persist actual changes
 		if value == s.originStorage[key] {
@@ -496,6 +500,12 @@ func (s *StateObject) updateTrie(db Database) Trie {
 			v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
 			s.setError(tr.TryUpdate(key[:], v))
 		}
+		tempBatch[key] = v
+	}
+	
+	updateTime1 = time.Since(start)
+	start = time.Now()
+	for key, v := range tempBatch {
 		// If state snapshotting is active, cache the data til commit
 		if s.db.snap != nil {
 			s.db.snapMux.Lock()
@@ -511,8 +521,7 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		}
 		usedStorage = append(usedStorage, common.CopyBytes(key[:])) // Copy needed for closure
 	}
-
-	updateTime = time.Since(start)
+	updateTime2 = time.Since(start)
 	// fmt.Println("updateRoot cost time,", updateTime)
 
 	if s.db.prefetcher != nil {

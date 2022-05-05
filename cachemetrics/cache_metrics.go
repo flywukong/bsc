@@ -46,8 +46,11 @@ var (
 	cacheL3StorageCostCounter = metrics.NewRegisteredCounter("cache/totalcost/storage/layer3", nil)
 	diskL4StorageCostCounter  = metrics.NewRegisteredCounter("cache/totalcost/storage/layer4", nil)
 
-	TrieUpdateCostCounter     = metrics.NewRegisteredCounter("trie/totalcost/update/sum", nil)
-	TrieUpdateTimer           = metrics.NewRegisteredTimer("trie/cost/update/delay", nil)
+	TrieUpdateCostCounter1 = metrics.NewRegisteredCounter("trie/totalcost/update/sum", nil)
+	TrieUpdateTimer1       = metrics.NewRegisteredTimer("trie/cost/update/delay", nil)
+	TrieUpdateCostCounter2 = metrics.NewRegisteredCounter("trie/totalcost/update/sum", nil)
+	TrieUpdateTimer2       = metrics.NewRegisteredTimer("trie/cost/update/delay", nil)
+
 	TrieUpdateRootTimer       = metrics.NewRegisteredTimer("trie/cost/updateroot/delay", nil)
 	TrieUpdateRootCostCounter = metrics.NewRegisteredCounter("trie/totalcost/updateroot/sum", nil)
 )
