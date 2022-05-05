@@ -470,6 +470,14 @@ func (s *StateObject) updateTrie(db Database) Trie {
 			s.db.MetricsMux.Unlock()
 		}(time.Now())
 	}
+	start := time.Now()
+
+	var updateTime1 time.Duration
+
+	defer func() {
+		cachemetrics.TrieUpdateCostCounter1.Inc(updateTime1.Nanoseconds())
+		cachemetrics.TrieUpdateTimer1.Update(updateTime1)
+	}()
 	// The snapshot storage map for the object
 	var storage map[string][]byte
 	// Insert all the pending updates into the trie
@@ -533,6 +541,7 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		s.pendingStorage = make(Storage)
 	}
 	wg.Wait()
+	updateTime1 = time.Since(start)
 	return tr
 }
 
