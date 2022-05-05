@@ -16,8 +16,6 @@ const (
 	CacheL2STORAGE cacheLayerName = "CACHE_L2_STORAGE"
 	CacheL3STORAGE cacheLayerName = "CACHE_L3_STORAGE"
 	DiskL4STORAGE  cacheLayerName = "DISK_L4_STORAGE"
-
-	TRIEUPDATE cacheLayerName = "TRIE_UPDATE"
 )
 
 var (
@@ -48,8 +46,11 @@ var (
 	cacheL3StorageCostCounter = metrics.NewRegisteredCounter("cache/totalcost/storage/layer3", nil)
 	diskL4StorageCostCounter  = metrics.NewRegisteredCounter("cache/totalcost/storage/layer4", nil)
 
-	TrieUpdateCostCounter     = metrics.NewRegisteredCounter("trie/totalcost/update/sum", nil)
-	TrieUpdateTimer           = metrics.NewRegisteredTimer("trie/cost/update/delay", nil)
+	TrieUpdateCostCounter1 = metrics.NewRegisteredCounter("trie/totalcost/update/sum1", nil)
+	TrieUpdateTimer1       = metrics.NewRegisteredTimer("trie/cost/update/delay1", nil)
+	TrieUpdateCostCounter2 = metrics.NewRegisteredCounter("trie/totalcost/update/sum2", nil)
+	TrieUpdateTimer2       = metrics.NewRegisteredTimer("trie/cost/update/delay2", nil)
+
 	TrieUpdateRootTimer       = metrics.NewRegisteredTimer("trie/cost/updateroot/delay", nil)
 	TrieUpdateRootCostCounter = metrics.NewRegisteredCounter("trie/totalcost/updateroot/sum", nil)
 )
@@ -148,8 +149,4 @@ func recordCost(timer metrics.Timer, start time.Time) {
 
 func accumulateCost(totalcost metrics.Counter, start time.Time) {
 	totalcost.Inc(time.Since(start).Nanoseconds())
-}
-
-func accumulateCost2(totalcost metrics.Counter, start time.Time, end time.Time) {
-	totalcost.Inc(end.Sub(start).Nanoseconds())
 }
