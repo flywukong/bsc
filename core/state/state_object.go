@@ -508,10 +508,24 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		tempBatch[key] = v
 	}
 
-	if len(tempBatch) >= 3 {
+	if len(tempBatch) <= 3 {
 		fmt.Println("trie batch size1:", len(tempBatch))
-	} else {
+	} else if len(tempBatch) <= 8 {
 		fmt.Println("trie batch size2:", len(tempBatch))
+	} else if len(tempBatch) <= 16 {
+		fmt.Println("trie batch size3:", len(tempBatch))
+	} else if len(tempBatch) <= 30 {
+		fmt.Println("trie batch size4:", len(tempBatch))
+	} else if len(tempBatch) <= 50 {
+		fmt.Println("trie batch size5:", len(tempBatch))
+	} else if len(tempBatch) <= 100 {
+		fmt.Println("trie batch size6:", len(tempBatch))
+	} else if len(tempBatch) <= 200 {
+		fmt.Println("trie batch size8:", len(tempBatch))
+	} else if len(tempBatch) <= 300 {
+		fmt.Println("trie batch size9:", len(tempBatch))
+	} else {
+		fmt.Println("trie batch size10:", len(tempBatch))
 	}
 
 	updateTime1 = time.Since(start)
