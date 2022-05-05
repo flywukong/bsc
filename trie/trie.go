@@ -413,6 +413,75 @@ func (t *Trie) tryUpdateBatch(pKvBatch *[]KvPair) error {
 	t.unhashed += lenKvBatch
 
 	shard := make([][]*KvPair, 16)
+	indexArr := make([]int, 0)
+	x := make(map[int]bool, 16)
+	for i := 0; i < lenKvBatch; i++ {
+		k := keybytesToHex((*pKvBatch)[i].key)
+		shardIndex := getShardNum(k)
+		v := (*pKvBatch)[i].val
+		shard[shardIndex] = append(shard[shardIndex], &KvPair{k, v, (*pKvBatch)[i].del})
+		if x[shardIndex] == false {
+			indexArr = append(indexArr, shardIndex)
+		}
+		x[shardIndex] = true
+	}
+
+	routeNUm := len(indexArr)
+
+	taskResults := make(chan error, routeNUm)
+	wg := sync.WaitGroup{}
+	wg.Add(routeNUm)
+	for i := 0; i < routeNUm; i++ {
+		// fmt.Println("i =====", i)
+		index := indexArr[i]
+		go func() {
+			// fmt.Println("shard has elements", index, len(shard[index]))
+
+			var (
+				n   node
+				err error
+			)
+			for it := range shard[index] {
+				if shard[index][it].del == true {
+					_, n, err = t.delete(t.subroot[index], nil, (shard[index][it].key)[:])
+				} else {
+					_, n, err = t.insert(t.subroot[index], nil, (shard[index][it].key)[:], valueNode(shard[index][it].val))
+				}
+
+				if err != nil {
+					// fmt.Println("task", index, "finished with status:", err)
+					taskResults <- err
+					wg.Done()
+				}
+				t.subroot[index] = n
+			}
+			// fmt.Println("task", index, "finished with status:", nil)
+			taskResults <- nil
+			wg.Done()
+		}()
+	}
+
+	// fmt.Println("before wait")
+	wg.Wait()
+	// fmt.Println("after wait")
+
+	for i := 0; i < routeNUm; i++ {
+		result := <-taskResults
+		if result != nil {
+			return result
+		}
+		// fmt.Println("-------------")
+	}
+	// Set trie root
+	t.root = t.updateRootNodeWithShards(t.subroot)
+	return nil
+}
+
+func (t *Trie) tryUpdateBatch2(pKvBatch *[]KvPair) error {
+	lenKvBatch := len(*pKvBatch)
+	t.unhashed += lenKvBatch
+
+	shard := make([][]*KvPair, 16)
 
 	for i := 0; i < lenKvBatch; i++ {
 		k := keybytesToHex((*pKvBatch)[i].key)

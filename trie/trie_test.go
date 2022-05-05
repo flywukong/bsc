@@ -260,7 +260,7 @@ func TestCompareInsertPerformanceInDb(t *testing.T) {
 	// Create 4196 kv pair batch
 	// includes 4096 to insert, 100 to delete
 	old_batch := []KvPair{}
-	testnum := 30000
+	testnum := 10000
 	delNum := 402
 	// Create 4096 kv pair to insert
 	for i := 0; i < testnum; i++ {
@@ -278,7 +278,8 @@ func TestCompareInsertPerformanceInDb(t *testing.T) {
 		delMap[rand.Intn(testnum)] = true
 	}
 
-	db1 := tempDBWithDir("batch_trie")
+	// db1 := tempDBWithDir("batch_trie")
+	db1 := NewDatabase(memorydb.New())
 	batchTrie, _ := NewSecure(common.Hash{}, db1)
 
 	// batchTrie := newSecTrie("batch_trie")
@@ -295,7 +296,8 @@ func TestCompareInsertPerformanceInDb(t *testing.T) {
 	t.Logf("batch size ==: %d", len(old_batch))
 
 	// Single insert&del test
-	db2 := tempDBWithDir("sec_trie")
+	// db2 := tempDBWithDir("sec_trie")
+	db2 := NewDatabase(memorydb.New())
 	trie, _ := NewSecure(common.Hash{}, db2)
 
 	oldStartTime := time.Now()
@@ -339,6 +341,9 @@ func TestCompareInsertPerformanceInDb(t *testing.T) {
 	if root != exp {
 		t.Errorf("case 1: exp %x got %x", exp, root)
 	}
+
+	testnum = 1
+	delNum = 0
 
 	old_batch2 := []KvPair{}
 
