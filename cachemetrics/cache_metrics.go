@@ -1,8 +1,9 @@
 package cachemetrics
 
 import (
-	"github.com/ethereum/go-ethereum/metrics"
 	"time"
+
+	"github.com/ethereum/go-ethereum/metrics"
 )
 
 type cacheLayerName string
@@ -45,6 +46,14 @@ var (
 	cacheL2StorageCostCounter = metrics.NewRegisteredCounter("cache/totalcost/storage/layer2", nil)
 	cacheL3StorageCostCounter = metrics.NewRegisteredCounter("cache/totalcost/storage/layer3", nil)
 	diskL4StorageCostCounter  = metrics.NewRegisteredCounter("cache/totalcost/storage/layer4", nil)
+
+	TrieUpdateCostCounter1 = metrics.NewRegisteredCounter("trie/totalcost/update/sum1", nil)
+	TrieUpdateTimer1       = metrics.NewRegisteredTimer("trie/cost/update/delay1", nil)
+	TrieUpdateCostCounter2 = metrics.NewRegisteredCounter("trie/totalcost/update/sum2", nil)
+	TrieUpdateTimer2       = metrics.NewRegisteredTimer("trie/cost/update/delay2", nil)
+
+	TrieUpdateRootTimer       = metrics.NewRegisteredTimer("trie/cost/updateroot/delay", nil)
+	TrieUpdateRootCostCounter = metrics.NewRegisteredCounter("trie/totalcost/updateroot/sum", nil)
 )
 
 // mark the info of total hit counts of each layers
