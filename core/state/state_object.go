@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"fmt"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/trie"
 	"io"
 	"math/big"
@@ -490,43 +491,45 @@ func (s *StateObject) updateTrie(db Database) Trie {
 	//	start = time.Now()
 	// kvpair
 	updateBatch := []trie.KvPair{}
-	tempBatch := make(map[common.Hash][]byte)
-	// tempBatch := make(map[common.Hash]common.Hash)
+
+	tempBatch2 := make(map[common.Hash]common.Hash)
 	for key, value := range s.pendingStorage {
 		// Skip noop changes, persist actual changes
 		if value == s.originStorage[key] {
 			continue
 		}
-		var v []byte
-		if (value != common.Hash{}) {
-			v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
-		}
 		s.originStorage[key] = value
-		tempBatch[key] = v
+		tempBatch2[key] = value
 	}
+
 	start = time.Now()
-	if len(tempBatch) > 100 {
-		for key, value := range tempBatch {
-			if value == nil {
+	if len(tempBatch2) > 100 {
+		log.Info("batch size > 100")
+		for key, value := range tempBatch2 {
+			if (value == common.Hash{}) {
 				updateBatch = append(updateBatch, trie.NewKvPair(key[:], common.Hash{}.Bytes(), true, trieInstance))
 			} else {
-				updateBatch = append(updateBatch, trie.NewKvPair(key[:], value, false, trieInstance))
+				v, _ := rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
+				updateBatch = append(updateBatch, trie.NewKvPair(key[:], v, false, trieInstance))
 			}
 		}
 		s.setError(trieInstance.UpdateBatch(&updateBatch))
 	} else {
-		for key, value := range tempBatch {
-			if value == nil {
+		for key, value := range tempBatch2 {
+			if (value == common.Hash{}) {
 				s.setError(tr.TryDelete(key[:]))
 			} else {
-				s.setError(tr.TryUpdate(key[:], value))
+				// Encoding []byte cannot fail, ok to ignore the error.
+				v, _ := rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
+				s.setError(tr.TryUpdate(key[:], v))
 			}
 		}
 	}
+
 	updateTime1 = time.Since(start)
 
 	start = time.Now()
-	for key, value := range tempBatch {
+	for key, value := range tempBatch2 {
 		// If state snapshotting is active, cache the data til commit
 		if s.db.snap != nil {
 			s.db.snapStorageMux.Lock()
@@ -537,7 +540,11 @@ func (s *StateObject) updateTrie(db Database) Trie {
 					s.db.snapStorage[s.address] = storage
 				}
 			}
-			storage[string(key[:])] = value // v will be nil if value is 0x00
+			var v []byte
+			if (value != common.Hash{}) {
+				v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
+			}
+			storage[string(key[:])] = v // v will be nil if value is 0x00
 			s.db.snapStorageMux.Unlock()
 		}
 		usedStorage = append(usedStorage, common.CopyBytes(key[:])) // Copy needed for closure
