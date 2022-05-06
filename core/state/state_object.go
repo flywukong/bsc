@@ -491,33 +491,40 @@ func (s *StateObject) updateTrie(db Database) Trie {
 	// kvpair
 	updateBatch := []trie.KvPair{}
 	tempBatch := make(map[common.Hash][]byte)
+	// tempBatch := make(map[common.Hash]common.Hash)
 	for key, value := range s.pendingStorage {
 		// Skip noop changes, persist actual changes
 		if value == s.originStorage[key] {
 			continue
 		}
-
-		s.originStorage[key] = value
 		var v []byte
-		if (value == common.Hash{}) {
-			updateBatch = append(updateBatch, trie.NewKvPair(key[:], common.Hash{}.Bytes(), true, trieInstance))
-		} else {
-			// Encoding []byte cannot fail, ok to ignore the error.
+		if (value != common.Hash{}) {
 			v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
-			updateBatch = append(updateBatch, trie.NewKvPair(key[:], v, false, trieInstance))
 		}
+		s.originStorage[key] = value
 		tempBatch[key] = v
 	}
-
 	start = time.Now()
-	s.setError(trieInstance.UpdateBatch(&updateBatch))
-	updateTime1 = time.Since(start)
-	if len(tempBatch) >= 3 {
-		fmt.Println("trie batch size1:", len(tempBatch))
+	if len(tempBatch) > 100 {
+		for key, value := range tempBatch {
+			if value == nil {
+				updateBatch = append(updateBatch, trie.NewKvPair(key[:], common.Hash{}.Bytes(), true, trieInstance))
+			} else {
+				updateBatch = append(updateBatch, trie.NewKvPair(key[:], value, false, trieInstance))
+			}
+		}
+		s.setError(trieInstance.UpdateBatch(&updateBatch))
 	} else {
-		fmt.Println("trie batch size2:", len(tempBatch))
+		for key, value := range tempBatch {
+			if value == nil {
+				s.setError(tr.TryDelete(key[:]))
+			} else {
+				s.setError(tr.TryUpdate(key[:], value))
+			}
+		}
 	}
-	
+	updateTime1 = time.Since(start)
+
 	start = time.Now()
 	for key, value := range tempBatch {
 		// If state snapshotting is active, cache the data til commit
