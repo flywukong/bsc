@@ -498,8 +498,7 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		dirtyStorage[key] = v
 	}
 	var wg sync.WaitGroup
-	wg.Add(2)
-
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for key, value := range dirtyStorage {
@@ -508,33 +507,29 @@ func (s *StateObject) updateTrie(db Database) Trie {
 			} else {
 				s.setError(tr.TryUpdate(key[:], value))
 			}
+			usedStorage = append(usedStorage, common.CopyBytes(key[:]))
 		}
 	}()
-
-	go func() {
-		defer wg.Done()
-		// The snapshot storage map for the object
-		var storage map[string][]byte
-		for key, value := range dirtyStorage {
-			// If state snapshotting is active, cache the data til commit
-			if s.db.snap != nil {
-				s.db.snapMux.Lock()
-				if storage == nil {
-					// Retrieve the old storage map, if available, create a new one otherwise
-					if storage = s.db.snapStorage[s.address]; storage == nil {
-						storage = make(map[string][]byte)
-						s.db.snapStorage[s.address] = storage
-					}
-				}
-
-				storage[string(key[:])] = value // value will be nil if value is 0x00
-				s.db.snapMux.Unlock()
+	if s.db.snap != nil {
+		// If state snapshotting is active, cache the data til commit
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.db.snapMux.Lock()
+			// The snapshot storage map for the object
+			storage := s.db.snapStorage[s.address]
+			if storage == nil {
+				storage = make(map[string][]byte, len(dirtyStorage))
+				s.db.snapStorage[s.address] = storage
 			}
-			usedStorage = append(usedStorage, common.CopyBytes(key[:])) // Copy needed for closure
-		}
-	}()
-
+			for key, value := range dirtyStorage {
+				storage[string(key[:])] = value
+			}
+			s.db.snapMux.Unlock()
+		}()
+	}
 	wg.Wait()
+
 	if s.db.prefetcher != nil {
 		s.db.prefetcher.used(s.data.Root, usedStorage)
 	}
