@@ -29,10 +29,12 @@ const abortChanSize = 64
 
 var (
 	// triePrefetchMetricsPrefix is the prefix under which to publis the metrics.
-	triePrefetchMetricsPrefix = "trie/prefetch/"
-	trieSubPrefetchTimer      = metrics.NewRegisteredTimer("trie/subprefetch/delay", nil)
-	trieSubPrefetchCounter    = metrics.NewRegisteredCounter("trie/prefetch/total", nil)
-	triePrefetchTimer         = metrics.NewRegisteredTimer("trie/prefetch/delay", nil)
+	triePrefetchMetricsPrefix    = "trie/prefetch/"
+	trieSubPrefetchTimer         = metrics.NewRegisteredTimer("trie/subprefetch/delay", nil)
+	trieSubPrefetchCounter       = metrics.NewRegisteredCounter("trie/prefetch/total", nil)
+	triePrefetchTimer            = metrics.NewRegisteredTimer("trie/prefetch/delay", nil)
+	trieSubPrefetchNumberCounter = metrics.NewRegisteredCounter("trie/subprefetcher/total", nil)
+	triePrefetchNumberCounter    = metrics.NewRegisteredCounter("trie/prefetcher/total", nil)
 )
 
 // triePrefetcher is an active prefetcher, which receives accounts or storage
@@ -81,6 +83,7 @@ func newTriePrefetcher(db Database, root common.Hash, namespace string) *triePre
 		storageWasteMeter: metrics.GetOrRegisterMeter(prefix+"/storage/waste", nil),
 	}
 	go p.abortLoop()
+	triePrefetchNumberCounter.Inc(1)
 	return p
 }
 
@@ -111,7 +114,7 @@ func (p *triePrefetcher) close() {
 		duration += fetcher.preDataRead
 		p.abortChan <- fetcher // safe to do multiple times
 		<-fetcher.term
-		trieSubPrefetchTimer.Update(fetcher.preDataRead)
+		// trieSubPrefetchTimer.Update(fetcher.preDataRead)
 		if metrics.EnabledExpensive {
 			if fetcher.root == p.root {
 				p.accountLoadMeter.Mark(int64(len(fetcher.seen)))
@@ -256,6 +259,7 @@ type subfetcher struct {
 // newSubfetcher creates a goroutine to prefetch state items belonging to a
 // particular root hash.
 func newSubfetcher(db Database, root common.Hash, accountHash common.Hash) *subfetcher {
+	trieSubPrefetchNumberCounter.Inc(1)
 	start := time.Now()
 	sf := &subfetcher{
 		db:          db,
@@ -325,7 +329,7 @@ func (sf *subfetcher) loop() {
 	defer close(sf.term)
 	start := time.Now()
 	defer func() {
-		sf.preDataRead += time.Since(start)
+		trieSubPrefetchTimer.Update(time.Since(start))
 	}()
 	// Start by opening the trie and stop processing if it fails
 	var trie Trie
