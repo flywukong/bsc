@@ -260,8 +260,8 @@ func TestCompareInsertPerformanceInDb(t *testing.T) {
 	// Create 4196 kv pair batch
 	// includes 4096 to insert, 100 to delete
 	old_batch := []KvPair{}
-	testnum := 30000
-	delNum := 402
+	testnum := 3000
+	delNum := 0
 	// Create 4096 kv pair to insert
 	for i := 0; i < testnum; i++ {
 		// batch[i] = createInsertKvPair()
@@ -348,45 +348,38 @@ func TestCompareInsertPerformanceInDb(t *testing.T) {
 		old_batch2 = append(old_batch2, createInsertKvPair())
 	}
 
-	delMap2 := make(map[int]bool, testnum)
+	batch1 := []KvPair{}
 	for i := 0; i < testnum; i++ {
-		delMap2[i] = false
+		// batch[i] = createInsertKvPair()
+		batch1 = append(batch1, createInsertKvPair())
 	}
 
-	for index := 0; index < delNum; index++ {
-		delMap2[rand.Intn(testnum)] = true
+	batch2 := []KvPair{}
+	for i := 0; i < testnum; i++ {
+		// batch[i] = createInsertKvPair()
+		batch2 = append(batch2, createInsertKvPair())
+	}
+
+	delMap2 := make(map[int]bool, testnum)
+	for i := 0; i < testnum; i++ {
+		delMap2[i] = true
 	}
 
 	t.Logf("batch size ==: %d", len(old_batch2))
-
-	// Single insert&del test
-	root_new, _ := trie.Commit(nil)
-	db2.Commit(root, true, nil)
-
-	trie2, _ := NewSecure(root_new, db2)
-
-	oldStartTime = time.Now()
-
-	// 1. insert
-	for i := 0; i < len(old_batch2); i++ {
-		if delMap2[i] == false {
-			secureTrieUpdate(trie2, string(old_batch2[i].key), string(old_batch2[i].val), false)
-		} else {
-			secureTrieUpdate(trie2, string(old_batch2[i].key), string(old_batch2[i].val), true)
-		}
-	}
-	oldTc = time.Since(oldStartTime)
-
-	t.Logf("oldTc = %v", oldTc)
-	// trie.UpdateShardInfo()
-	//fmt.Println("rootnode ==:", trie.root)
-
-	// batchTrie, _ = NewSecure(root, db1)
-	// Batch test
+	fmt.Println("finish0")
 	root_batch, _ := batchTrie.Commit(nil)
 	db1.Commit(root, true, nil)
 	batchTrie2, _ := NewSecure(root_batch, db1)
 
+	// Single insert&del test
+	root_new, _ := trie.Commit(nil)
+	db2.Commit(root, true, nil)
+	trie2, _ := NewSecure(root_new, db2)
+
+	root = batchTrie2.Hash()
+	t.Logf("newroot ==: %x", root)
+	exp = trie2.Hash()
+	t.Logf("exp root ==: %x", exp)
 	new_batch2 := []KvPair{}
 	for i := 0; i < len(old_batch2); i++ {
 		if delMap2[i] == false {
@@ -395,10 +388,62 @@ func TestCompareInsertPerformanceInDb(t *testing.T) {
 			new_batch2 = append(new_batch2, NewKvPair(old_batch2[i].key, old_batch2[i].val, true, batchTrie2))
 		}
 	}
+	fmt.Println("finish0")
+	/*
+		var wg sync.WaitGroup
+		wg.Add(1)
 
-	newStartTime = time.Now()
-	secureTrieUpdateBatch(batchTrie2, &new_batch2)
-	newTc = time.Since(newStartTime)
+			go func(trie *SecureTrie, wg *sync.WaitGroup, pair []KvPair, map1 map[int]bool) error {
+				defer wg.Done()
+				// secureTrieUpdateBatch(batchTrie2, &pair)
+				fmt.Println("pair len:", len(pair))
+				for i := 0; i < len(pair); i++ {
+					if map1[i] == false {
+						fmt.Println("delete")
+						secureTrieUpdate(trie, string(pair[i].key), string(pair[i].val), false)
+					} else {
+						secureTrieUpdate(trie, string(pair[i].key), string(pair[i].val), true)
+					}
+				}
+				fmt.Println("finish2")
+				return nil
+			}(batchTrie2, &wg, old_batch2, delMap2)
+	*/
+	pair := old_batch2
+	fmt.Println("pair len:", len(pair))
+	for i := 0; i < len(pair); i++ {
+		if delMap2[i] == false {
+			fmt.Println("delete")
+			secureTrieUpdate(batchTrie2, string(pair[i].key), string(pair[i].val), false)
+		} else {
+			secureTrieUpdate(batchTrie2, string(pair[i].key), string(pair[i].val), true)
+		}
+	}
+	fmt.Println("finish2")
+	fmt.Println("finish0")
+
+	fmt.Println("finish0")
+	oldStartTime = time.Now()
+
+	fmt.Println("finish0")
+	// 1. insert
+
+	fmt.Println("finish0")
+	/*
+		for i := 0; i < len(batch2); i++ {
+			secureTrieUpdate(trie2, string(batch1[i].key), string(batch1[i].val), false)
+		}
+	*/
+	oldTc = time.Since(oldStartTime)
+	//wg.Wait()
+
+	t.Logf("oldTc = %v", oldTc)
+	// trie.UpdateShardInfo()
+	//fmt.Println("rootnode ==:", trie.root)
+
+	// batchTrie, _ = NewSecure(root, db1)
+	// Batch test
+
 	// batchTrie.UpdateShardInfo()
 	t.Logf("newTc = %v", newTc)
 	t.Logf("oldTc = %v", oldTc)
