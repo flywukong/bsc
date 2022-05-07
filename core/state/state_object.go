@@ -476,6 +476,7 @@ func (s *StateObject) updateTrie(db Database) Trie {
 	tr := s.getTrie(db)
 
 	usedStorage := make([][]byte, 0, len(s.pendingStorage))
+	dirtyBatch := make(map[common.Hash][]byte)
 	for key, value := range s.pendingStorage {
 		// Skip noop changes, persist actual changes
 		if value == s.originStorage[key] {
@@ -483,34 +484,55 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		}
 		s.originStorage[key] = value
 		var v []byte
-		if (value == common.Hash{}) {
-			s.setError(tr.TryDelete(key[:]))
-		} else {
-			// Encoding []byte cannot fail, ok to ignore the error.
+		if (value != common.Hash{}) {
 			v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
-			s.setError(tr.TryUpdate(key[:], v))
 		}
-		// If state snapshotting is active, cache the data til commit
-		if s.db.snap != nil {
-			s.db.snapMux.Lock()
-			if storage == nil {
-				// Retrieve the old storage map, if available, create a new one otherwise
-				if storage = s.db.snapStorage[s.address]; storage == nil {
-					storage = make(map[string][]byte)
-					s.db.snapStorage[s.address] = storage
-				}
-			}
-			storage[string(key[:])] = v // v will be nil if value is 0x00
-			s.db.snapMux.Unlock()
-		}
-		usedStorage = append(usedStorage, common.CopyBytes(key[:])) // Copy needed for closure
+		dirtyBatch[key] = v
 	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		for key, value := range dirtyBatch {
+			if len(value) == 0 {
+				s.setError(tr.TryDelete(key[:]))
+			} else {
+				// Encoding []byte cannot fail, ok to ignore the error.
+				v, _ := rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
+				s.setError(tr.TryUpdate(key[:], v))
+			}
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for key, value := range dirtyBatch {
+			// If state snapshotting is active, cache the data til commit
+			if s.db.snap != nil {
+				s.db.snapMux.Lock()
+				if storage == nil {
+					// Retrieve the old storage map, if available, create a new one otherwise
+					if storage = s.db.snapStorage[s.address]; storage == nil {
+						storage = make(map[string][]byte)
+						s.db.snapStorage[s.address] = storage
+					}
+				}
+
+				storage[string(key[:])] = value // v will be nil if value is 0x00
+				s.db.snapMux.Unlock()
+			}
+			usedStorage = append(usedStorage, common.CopyBytes(key[:])) // Copy needed for closure
+		}
+	}()
+
 	if s.db.prefetcher != nil {
 		s.db.prefetcher.used(s.data.Root, usedStorage)
 	}
 	if len(s.pendingStorage) > 0 {
 		s.pendingStorage = make(Storage)
 	}
+	wg.Wait()
 	return tr
 }
 
