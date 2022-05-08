@@ -478,8 +478,7 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		cachemetrics.TrieUpdateCostCounter1.Inc(updateTime1.Nanoseconds())
 		cachemetrics.TrieUpdateTimer1.Update(updateTime1)
 	}()
-	// The snapshot storage map for the object
-	var storage map[string][]byte
+
 	// Insert all the pending updates into the trie
 	tr := s.getTrie(db)
 
@@ -500,7 +499,7 @@ func (s *StateObject) updateTrie(db Database) Trie {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	go func() {
+	go func(batch *map[common.Hash][]byte, s *StateObject) {
 		defer wg.Done()
 		for key, value := range dirtyBatch {
 			if len(value) == 0 {
@@ -511,10 +510,12 @@ func (s *StateObject) updateTrie(db Database) Trie {
 				s.setError(tr.TryUpdate(key[:], v))
 			}
 		}
-	}()
+	}(&dirtyBatch, s)
 
-	go func() {
+	go func(batch *map[common.Hash][]byte, s *StateObject) {
 		defer wg.Done()
+		// The snapshot storage map for the object
+		var storage map[string][]byte
 		for key, value := range dirtyBatch {
 			// If state snapshotting is active, cache the data til commit
 			if s.db.snap != nil {
@@ -532,15 +533,16 @@ func (s *StateObject) updateTrie(db Database) Trie {
 			}
 			usedStorage = append(usedStorage, common.CopyBytes(key[:])) // Copy needed for closure
 		}
-	}()
+	}(&dirtyBatch, s)
 
+	wg.Wait()
 	if s.db.prefetcher != nil {
 		s.db.prefetcher.used(s.data.Root, usedStorage)
 	}
 	if len(s.pendingStorage) > 0 {
 		s.pendingStorage = make(Storage)
 	}
-	wg.Wait()
+
 	updateTime1 = time.Since(start)
 	return tr
 }
