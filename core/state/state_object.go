@@ -492,6 +492,7 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		s.originStorage[key] = value
 		var v []byte
 		if (value != common.Hash{}) {
+			// Encoding []byte cannot fail, ok to ignore the error.
 			v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
 		}
 		dirtyBatch[key] = v
@@ -501,13 +502,11 @@ func (s *StateObject) updateTrie(db Database) Trie {
 
 	go func(batch *map[common.Hash][]byte, s *StateObject) {
 		defer wg.Done()
-		for key, value := range dirtyBatch {
+		for key, value := range *batch {
 			if len(value) == 0 {
 				s.setError(tr.TryDelete(key[:]))
 			} else {
-				// Encoding []byte cannot fail, ok to ignore the error.
-				v, _ := rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
-				s.setError(tr.TryUpdate(key[:], v))
+				s.setError(tr.TryUpdate(key[:], value))
 			}
 		}
 	}(&dirtyBatch, s)
@@ -516,7 +515,7 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		defer wg.Done()
 		// The snapshot storage map for the object
 		var storage map[string][]byte
-		for key, value := range dirtyBatch {
+		for key, value := range *batch {
 			// If state snapshotting is active, cache the data til commit
 			if s.db.snap != nil {
 				s.db.snapMux.Lock()
