@@ -492,36 +492,39 @@ func (s *StateObject) updateTrie(db Database) Trie {
 	// kvpair
 	updateBatch := []trie.KvPair{}
 
-	tempBatch2 := make(map[common.Hash]common.Hash)
+	dirtyBatch := make(map[common.Hash][]byte)
 	for key, value := range s.pendingStorage {
 		// Skip noop changes, persist actual changes
 		if value == s.originStorage[key] {
 			continue
 		}
 		s.originStorage[key] = value
-		tempBatch2[key] = value
+		var v []byte
+		if (value != common.Hash{}) {
+			// Encoding []byte cannot fail, ok to ignore the error.
+			v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
+		}
+		dirtyBatch[key] = v
 	}
 
 	start = time.Now()
-	if len(tempBatch2) > 100 {
+	if len(dirtyBatch) > 100 {
 		log.Info("batch size > 100")
-		for key, value := range tempBatch2 {
-			if (value == common.Hash{}) {
+		for key, value := range dirtyBatch {
+			if len(value) == 0 {
 				updateBatch = append(updateBatch, trie.NewKvPair(key[:], common.Hash{}.Bytes(), true, trieInstance))
 			} else {
-				v, _ := rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
-				updateBatch = append(updateBatch, trie.NewKvPair(key[:], v, false, trieInstance))
+				updateBatch = append(updateBatch, trie.NewKvPair(key[:], value, false, trieInstance))
 			}
 		}
 		s.setError(trieInstance.UpdateBatch(&updateBatch))
 	} else {
-		for key, value := range tempBatch2 {
-			if (value == common.Hash{}) {
+		for key, value := range dirtyBatch {
+			if len(value) == 0 {
 				s.setError(tr.TryDelete(key[:]))
 			} else {
 				// Encoding []byte cannot fail, ok to ignore the error.
-				v, _ := rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
-				s.setError(tr.TryUpdate(key[:], v))
+				s.setError(tr.TryUpdate(key[:], value))
 			}
 		}
 	}
@@ -529,7 +532,7 @@ func (s *StateObject) updateTrie(db Database) Trie {
 	updateTime1 = time.Since(start)
 
 	start = time.Now()
-	for key, value := range tempBatch2 {
+	for key, value := range dirtyBatch {
 		// If state snapshotting is active, cache the data til commit
 		if s.db.snap != nil {
 			s.db.snapStorageMux.Lock()
@@ -540,11 +543,7 @@ func (s *StateObject) updateTrie(db Database) Trie {
 					s.db.snapStorage[s.address] = storage
 				}
 			}
-			var v []byte
-			if (value != common.Hash{}) {
-				v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
-			}
-			storage[string(key[:])] = v // v will be nil if value is 0x00
+			storage[string(key[:])] = value // v will be nil if value is 0x00
 			s.db.snapStorageMux.Unlock()
 		}
 		usedStorage = append(usedStorage, common.CopyBytes(key[:])) // Copy needed for closure
