@@ -17,6 +17,8 @@
 package state
 
 import (
+	"fmt"
+	"github.com/panjf2000/ants/v2"
 	"sync"
 	"time"
 
@@ -176,7 +178,7 @@ func (p *triePrefetcher) copy() *triePrefetcher {
 }
 
 // prefetch schedules a batch of trie items to prefetch.
-func (p *triePrefetcher) prefetch(root common.Hash, keys [][]byte, accountHash common.Hash) {
+func (p *triePrefetcher) prefetch(root common.Hash, keys [][]byte, accountHash common.Hash, pool *ants.PoolWithFunc) {
 	// If the prefetcher is an inactive one, bail out
 	if p.fetches != nil {
 		return
@@ -184,7 +186,7 @@ func (p *triePrefetcher) prefetch(root common.Hash, keys [][]byte, accountHash c
 	// Active fetcher, schedule the retrievals
 	fetcher := p.fetchers[root]
 	if fetcher == nil {
-		fetcher = newSubfetcher(p.db, root, accountHash)
+		fetcher = newSubfetcher(p.db, root, accountHash, pool)
 		p.fetchers[root] = fetcher
 	}
 	fetcher.schedule(keys)
@@ -255,7 +257,7 @@ type subfetcher struct {
 
 // newSubfetcher creates a goroutine to prefetch state items belonging to a
 // particular root hash.
-func newSubfetcher(db Database, root common.Hash, accountHash common.Hash) *subfetcher {
+func newSubfetcher(db Database, root common.Hash, accountHash common.Hash, pool *ants.PoolWithFunc) *subfetcher {
 	start := time.Now()
 	sf := &subfetcher{
 		db:          db,
@@ -271,7 +273,18 @@ func newSubfetcher(db Database, root common.Hash, accountHash common.Hash) *subf
 	defer func() {
 		sf.preDataRead += time.Since(start)
 	}()
-	go sf.loop()
+	//	go sf.loop()
+	// put subfetcher task into thread pool
+	task := &TrieTask{
+		fetcher: sf,
+		start:   time.Now(),
+	}
+	// put task into pool
+	if pool != nil {
+		pool.Invoke(task)
+	} else {
+		fmt.Println("trie pool empty, error")
+	}
 	return sf
 }
 
