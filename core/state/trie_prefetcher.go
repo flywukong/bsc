@@ -23,9 +23,22 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
+	"github.com/panjf2000/ants/v2"
 )
 
 const abortChanSize = 64
+const BenchAntsSize = 500
+
+type TrieTask struct {
+	fetcher *subfetcher
+	finish  bool
+}
+
+var (
+	// Init a instance pool when importing ants.
+	defaultPool, _ = ants.NewPool(BenchAntsSize, ants.WithExpiryDuration(2*time.Second))
+	// defaultPool, _ = ants.NewPoolWithFunc(BenchAntsSize, taskFunc)
+)
 
 var (
 	// triePrefetchMetricsPrefix is the prefix under which to publis the metrics.
@@ -268,10 +281,12 @@ func newSubfetcher(db Database, root common.Hash, accountHash common.Hash) *subf
 		accountHash: accountHash,
 		preDataRead: 0,
 	}
-	defer func() {
-		sf.preDataRead += time.Since(start)
-	}()
-	go sf.loop()
+	//go sf.loop()
+	if defaultPool != nil {
+		defaultPool.Submit(func() {
+			sf.loop()
+		})
+	}
 	return sf
 }
 
