@@ -296,6 +296,7 @@ func inspect(ctx *cli.Context) error {
 	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
 
+	fmt.Println("prefix is:", prefix)
 	return rawdb.InspectDatabase(db, prefix, start)
 }
 
