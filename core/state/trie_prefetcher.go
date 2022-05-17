@@ -27,7 +27,7 @@ import (
 )
 
 const abortChanSize = 64
-const BenchAntsSize = 500
+const BenchAntsSize = 800
 
 type TrieTask struct {
 	fetcher *subfetcher
@@ -36,7 +36,7 @@ type TrieTask struct {
 
 var (
 	// Init a instance pool when importing ants.
-	defaultPool, _ = ants.NewPool(ants.DefaultAntsPoolSize, ants.WithExpiryDuration(2*time.Second))
+	defaultPool, _ = ants.NewPool(BenchAntsSize, ants.WithExpiryDuration(2*time.Second))
 	// defaultPool, _ = ants.NewPoolWithFunc(BenchAntsSize, taskFunc)
 )
 
