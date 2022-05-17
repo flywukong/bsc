@@ -36,7 +36,7 @@ type TrieTask struct {
 
 var (
 	// Init a instance pool when importing ants.
-	defaultPool, _ = ants.NewPool(BenchAntsSize, ants.WithExpiryDuration(2*time.Second))
+	defaultPool, _ = ants.NewPool(ants.DefaultAntsPoolSize, ants.WithExpiryDuration(2*time.Second))
 	// defaultPool, _ = ants.NewPoolWithFunc(BenchAntsSize, taskFunc)
 )
 
@@ -269,7 +269,6 @@ type subfetcher struct {
 // newSubfetcher creates a goroutine to prefetch state items belonging to a
 // particular root hash.
 func newSubfetcher(db Database, root common.Hash, accountHash common.Hash) *subfetcher {
-	start := time.Now()
 	sf := &subfetcher{
 		db:          db,
 		root:        root,
