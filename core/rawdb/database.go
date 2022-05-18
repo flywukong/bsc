@@ -401,6 +401,7 @@ func AncientInspect(db ethdb.Database) error {
 // of all different categories of data.
 func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	it := db.NewIterator(keyPrefix, keyStart)
+	fmt.Println("prefix:", keyPrefix, "start:", keyStart)
 	defer it.Release()
 
 	var (
@@ -568,6 +569,46 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 
 	if unaccounted.size > 0 {
 		log.Error("Database contains unaccounted data", "size", unaccounted.size, "count", unaccounted.count)
+	}
+
+	return nil
+}
+
+func MigrateDatabase(db ethdb.Database, ip []byte) error {
+	it := db.NewIterator([]byte(""), []byte(""))
+	defer it.Release()
+
+	MigrateStart()
+
+	var (
+		count  int64
+		start  = time.Now()
+		logged = time.Now()
+	)
+	// Inspect key-value database first.
+	tempKvList := make(map[string]string)
+	for it.Next() {
+		var (
+			key   = it.Key()
+			value = it.Value()
+		)
+		if count%100 == 0 {
+			SendKv(tempKvList)
+			tempKvList = make(map[string]string)
+		}
+
+		if count == 10000 {
+			break
+		}
+
+		if len(key) == common.HashLength {
+			tempKvList[string(key[:])] = string(value[:])
+		}
+		count++
+		if count%1000 == 0 && time.Since(logged) > 8*time.Second {
+			log.Info("Inspecting database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
+			logged = time.Now()
+		}
 	}
 
 	return nil

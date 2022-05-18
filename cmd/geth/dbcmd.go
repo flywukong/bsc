@@ -55,6 +55,7 @@ Remove blockchain and state databases`,
 		Category:  "DATABASE COMMANDS",
 		Subcommands: []cli.Command{
 			dbInspectCmd,
+			dbMigrateCmd,
 			dbStatCmd,
 			dbCompactCmd,
 			dbGetCmd,
@@ -79,6 +80,22 @@ Remove blockchain and state databases`,
 			utils.YoloV3Flag,
 		},
 		Usage:       "Inspect the storage size for each type of data in the database",
+		Description: `This commands iterates the entire database. If the optional 'prefix' and 'start' arguments are provided, then the iteration is limited to the given subset of data.`,
+	}
+	dbMigrateCmd = cli.Command{
+		Action:    utils.MigrateFlags(migrate),
+		Name:      "migrate",
+		ArgsUsage: "<ip> <port>",
+		Flags: []cli.Flag{
+			utils.DataDirFlag,
+			utils.SyncModeFlag,
+			utils.MainnetFlag,
+			utils.RopstenFlag,
+			utils.RinkebyFlag,
+			utils.GoerliFlag,
+			utils.YoloV3Flag,
+		},
+		Usage:       "Migrate data in the database",
 		Description: `This commands iterates the entire database. If the optional 'prefix' and 'start' arguments are provided, then the iteration is limited to the given subset of data.`,
 	}
 	dbStatCmd = cli.Command{
@@ -207,6 +224,30 @@ WARNING: This is a low-level operation which may cause database corruption!`,
 of ancientStore, will also displays the reserved number of blocks in ancientStore `,
 	}
 )
+
+func migrate(ctx *cli.Context) error {
+	var (
+		ip []byte
+	)
+	if ctx.NArg() > 1 {
+		return fmt.Errorf("Max 2 arguments: %v", ctx.Command.ArgsUsage)
+	}
+	if ctx.NArg() >= 1 {
+		if d, err := hexutil.Decode(ctx.Args().Get(0)); err != nil {
+			return fmt.Errorf("failed to hex-decode 'prefix': %v", err)
+		} else {
+			ip = d
+		}
+	}
+
+	stack, _ := makeConfigNode(ctx)
+	defer stack.Close()
+
+	db := utils.MakeChainDatabase(ctx, stack, true, false)
+	defer db.Close()
+
+	return rawdb.MigrateDatabase(db, ip)
+}
 
 func removeDB(ctx *cli.Context) error {
 	stack, config := makeConfigNode(ctx)
