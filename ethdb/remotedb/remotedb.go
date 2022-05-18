@@ -1,14 +1,16 @@
 package remotedb
 
 import (
-	"errors"
-	"time"
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"strconv"
+	"time"
 
-	rocks "github.com/go-redis/redis/v8"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	rocks "github.com/go-redis/redis/v8"
 )
 
 var (
@@ -28,7 +30,7 @@ var (
 	// headFastBlockKey tracks the latest known incomplete block's hash during fast sync.
 	headFastBlockKey = []byte("LastFast")
 	// remoteDbWriteMarker flag if has eth node write remotedb
-	remoteDbWriteMarker = []byte("remotedbwritermarker") 
+	remoteDbWriteMarker = []byte("remotedbwritermarker")
 	// remoteKeys is collection for get remotedb
 	remoteKeys = [][]byte{headBlockKey, headHeaderKey, headFastBlockKey, remoteDbWriteMarker}
 )
@@ -47,23 +49,23 @@ func reDeleteKey(key []byte) []byte {
 // functionality it also supports batch writes and iterating over the keyspace in
 // binary-alphabetical order.
 type RocksDB struct {
-	config        *Config
-	client        *rocks.ClusterClient
-	persistCache  ethdb.KeyValueStore
-	readonly      bool
-	quitChan      chan struct{}
+	config       *Config
+	client       *rocks.ClusterClient
+	persistCache ethdb.KeyValueStore
+	readonly     bool
+	quitChan     chan struct{}
 }
 
 // NewRocksDB returns a wrapped RemoteDB（compatible redis） object.
 func NewRocksDB(cfg *Config, cache ethdb.KeyValueStore, readonly bool) (*RocksDB, error) {
-	db := &RocksDB {
+	db := &RocksDB{
 		config:       cfg,
 		persistCache: cache,
 		readonly:     readonly,
 		quitChan:     make(chan struct{}),
 	}
 	db.client = rocks.NewClusterClient(cfg.GetClusterOption())
-	go db.handleExceptionKey()
+	// go db.handleExceptionKey()
 	return db, nil
 }
 
@@ -112,7 +114,7 @@ func (db *RocksDB) Has(key []byte) (bool, error) {
 
 // excludeKeys helper func , Get whether omit persist cache
 func excludeKeys(key []byte) bool {
-	for _, rkey :=range remoteKeys {
+	for _, rkey := range remoteKeys {
 		if bytes.Equal(key, rkey) {
 			return true
 		}
@@ -139,6 +141,43 @@ func (db *RocksDB) Get(key []byte) ([]byte, error) {
 		db.persistCache.Put(key, []byte(data))
 	}
 	return []byte(data), nil
+}
+
+func (db *RocksDB) MGet(keys []string) ([][]byte, error) {
+	result, err := db.client.MGet(context.Background(), keys...).Result()
+	if err != nil {
+		fmt.Println("mget call fail,", err.Error())
+		return nil, err
+	}
+	if len(result) != len(keys) {
+		return nil, errors.New("mget get keys error")
+	}
+
+	var values [][]byte
+	for i := 0; i < len(keys); i++ {
+		values = append(values, result[i].([]byte))
+	}
+
+	return values, nil
+}
+
+func (db *RocksDB) PipeRead(keyList []string) ([][]byte, error) {
+	pipe := db.client.Pipeline()
+	ctx := context.Background()
+	for i := 0; i < len(keyList); i++ {
+		pipe.Get(ctx, keyList[i])
+	}
+	exec, err := pipe.Exec(ctx)
+	if err != nil {
+		fmt.Println("pipeline read fail", err.Error())
+		return nil, err
+	}
+	results := make([][]byte, 0)
+	for _, cmder := range exec {
+		results = append(results, []byte(cmder.(*rocks.StringCmd).Val()))
+	}
+
+	return results, nil
 }
 
 // Put inserts the given value into the key-value store.
@@ -184,14 +223,14 @@ func (db *RocksDB) Delete(key []byte) error {
 // handleExceptionKey rewirte exception key to remotedb
 func (db *RocksDB) handleExceptionKey() {
 	if db.persistCache == nil || db.readonly {
-		return 
+		return
 	}
 
 	gcExceptionTimer := time.NewTicker(handleExceptionKeyInterval)
 	for {
 		select {
 		case <-db.quitChan:
-			return 
+			return
 
 		case <-gcExceptionTimer.C:
 			ctx := context.Background()
@@ -223,16 +262,49 @@ func (db *RocksDB) handleExceptionKey() {
 	}
 }
 
+func (db *RocksDB) CheckError() error {
+	var failNum int64
+	var failRemain int64
+
+	failKvList := make(map[string][]byte)
+	ctx := context.Background()
+	it := db.persistCache.NewIterator(reWriteKeyPrefix, nil)
+	defer it.Release()
+	for it.Next() {
+		exceptionKey := it.Key()
+		failNum++
+		key := exceptionKey[len(reWriteKeyPrefix):]
+		val := it.Value()
+		if err := db.client.Set(ctx, string(key), string(val), 0).Err(); err != nil {
+			log.Error("remotedb rewrite exception failed", "err", err)
+			failRemain++
+			failKvList[string(key)] = val
+			continue
+		}
+		db.persistCache.Delete(exceptionKey)
+	}
+
+	if failNum > 0 {
+		log.Error("first check ail kv num:" + strconv.FormatInt(failNum, 10))
+	}
+	if failRemain > 0 {
+		// todo (wayen) write fail kv to a file or db
+		log.Error("second check fail again  kv num:" + strconv.FormatInt(failRemain, 10))
+		return errors.New("try to migrate kv fail")
+	}
+	return nil
+}
+
 // batch is a write-only that commits changes to its host database
 // when Write is called. A batch cannot be used concurrently.
 type batch struct {
-	db           *RocksDB
-	ctx          context.Context
-	pipe         rocks.Pipeliner
-	size         int
-	op           []string
-	args         [][][]byte
-	cacheBatch   ethdb.Batch
+	db         *RocksDB
+	ctx        context.Context
+	pipe       rocks.Pipeliner
+	size       int
+	op         []string
+	args       [][][]byte
+	cacheBatch ethdb.Batch
 }
 
 func (db *RocksDB) NewBatch() ethdb.Batch {
@@ -287,23 +359,18 @@ func (b *batch) Write() error {
 	if b.db.readonly {
 		return errors.New("remotdb is readonly, not support Batch Write")
 	}
-	if b.cacheBatch != nil {
-		b.cacheBatch.Write()
-	}
+	/*
+		if b.cacheBatch != nil {
+			b.cacheBatch.Write()
+		}
+	*/
+
 	_, err := b.pipe.Exec(b.ctx)
 	if err != nil && b.db.persistCache != nil {
-		for idx, op := range b.op {
-			switch op {
-			case "SET":
-				err := b.db.persistCache.Put(reWriteKey(b.args[idx][0]), b.args[idx][1])
-				if err != nil {
-					break
-				}
-			case "DEL":
-				err := b.db.persistCache.Put(reDeleteKey(b.args[idx][0]), reDeleteKeyContent)
-				if err != nil {
-					break
-				}
+		for idx, _ := range b.op {
+			err := b.db.persistCache.Put(reWriteKey(b.args[idx][0]), b.args[idx][1])
+			if err != nil {
+				break
 			}
 		}
 	}
@@ -323,8 +390,8 @@ func (b *batch) Replay(w ethdb.KeyValueWriter) error {
 	if b.db.readonly {
 		return errors.New("remotdb is readonly, not support Batch Replay")
 	}
-	replay := & replayer {
-		writer : w,
+	replay := &replayer{
+		writer: w,
 	}
 	for idx, op := range b.op {
 		if replay.failure != nil {

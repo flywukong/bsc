@@ -892,7 +892,6 @@ var (
 		Name:  "remotedb.persistcache",
 		Usage: "Remotedb enable local persist cache ",
 	}
-
 )
 
 // MakeDataDir retrieves the currently requested data directory, terminating

@@ -55,6 +55,7 @@ Remove blockchain and state databases`,
 		Category:  "DATABASE COMMANDS",
 		Subcommands: []cli.Command{
 			dbInspectCmd,
+			dbCompareCmd,
 			dbStatCmd,
 			dbCompactCmd,
 			dbGetCmd,
@@ -80,6 +81,18 @@ Remove blockchain and state databases`,
 		},
 		Usage:       "Inspect the storage size for each type of data in the database",
 		Description: `This commands iterates the entire database. If the optional 'prefix' and 'start' arguments are provided, then the iteration is limited to the given subset of data.`,
+	}
+	dbCompareCmd = cli.Command{
+		Action:    utils.MigrateFlags(compare),
+		Name:      "compare",
+		ArgsUsage: "<compareAncient><blocknumber>",
+		Flags: []cli.Flag{
+			utils.DataDirFlag,
+			utils.SyncModeFlag,
+			utils.RemoteDBAddr,
+		},
+		Usage:       "Compare data in the database",
+		Description: `This commands iterates the entire database and compare data with kvorcks db`,
 	}
 	dbStatCmd = cli.Command{
 		Action: utils.MigrateFlags(dbStats),
@@ -207,6 +220,53 @@ WARNING: This is a low-level operation which may cause database corruption!`,
 of ancientStore, will also displays the reserved number of blocks in ancientStore `,
 	}
 )
+
+func compare(ctx *cli.Context) error {
+	var (
+		blockNumber        uint64
+		onlyCompareAncient bool
+	)
+
+	if ctx.NArg() > 3 {
+		return fmt.Errorf("Max 2 arguments: %v", ctx.Command.ArgsUsage)
+	}
+
+	if ctx.NArg() >= 1 {
+		if num, err := strconv.ParseUint(ctx.Args().Get(0), 10, 64); err != nil {
+			return fmt.Errorf("failed to decode 'blockNumber': %v", err)
+		} else {
+			blockNumber = num
+		}
+	}
+	// set onlyMigrateAncient as true when we just want to restart send ancient
+	if ctx.NArg() >= 2 {
+		if onlyAncient, err := strconv.ParseBool(ctx.Args().Get(1)); err != nil {
+			return fmt.Errorf("failed to decode 'migrateAncient': %v", err)
+		} else {
+			onlyCompareAncient = onlyAncient
+		}
+	}
+
+	stack, _ := makeConfigNode(ctx)
+	defer stack.Close()
+
+	db := utils.MakeChainDatabase(ctx, stack, true, false)
+	defer db.Close()
+
+	// fmt.Println("ctx,", ctx.String(""))
+	var addr string
+	if ctx.GlobalIsSet(utils.RemoteDBAddr.Name) {
+		addr = ctx.GlobalString(utils.RemoteDBAddr.Name)
+	}
+
+	var result error
+	if onlyCompareAncient {
+		result = rawdb.CompareAncient(db, addr, blockNumber)
+	} else {
+		result = rawdb.CompareDatabase(db, addr, blockNumber)
+	}
+	return result
+}
 
 func removeDB(ctx *cli.Context) error {
 	stack, config := makeConfigNode(ctx)
