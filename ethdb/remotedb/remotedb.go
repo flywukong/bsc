@@ -1,14 +1,14 @@
 package remotedb
 
 import (
-	"errors"
-	"time"
 	"bytes"
 	"context"
+	"errors"
+	"time"
 
-	rocks "github.com/go-redis/redis/v8"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	rocks "github.com/go-redis/redis/v8"
 )
 
 var (
@@ -28,7 +28,7 @@ var (
 	// headFastBlockKey tracks the latest known incomplete block's hash during fast sync.
 	headFastBlockKey = []byte("LastFast")
 	// remoteDbWriteMarker flag if has eth node write remotedb
-	remoteDbWriteMarker = []byte("remotedbwritermarker") 
+	remoteDbWriteMarker = []byte("remotedbwritermarker")
 	// remoteKeys is collection for get remotedb
 	remoteKeys = [][]byte{headBlockKey, headHeaderKey, headFastBlockKey, remoteDbWriteMarker}
 )
@@ -47,16 +47,16 @@ func reDeleteKey(key []byte) []byte {
 // functionality it also supports batch writes and iterating over the keyspace in
 // binary-alphabetical order.
 type RocksDB struct {
-	config        *Config
-	client        *rocks.ClusterClient
-	persistCache  ethdb.KeyValueStore
-	readonly      bool
-	quitChan      chan struct{}
+	config       *Config
+	client       *rocks.ClusterClient
+	persistCache ethdb.KeyValueStore
+	readonly     bool
+	quitChan     chan struct{}
 }
 
 // NewRocksDB returns a wrapped RemoteDB（compatible redis） object.
 func NewRocksDB(cfg *Config, cache ethdb.KeyValueStore, readonly bool) (*RocksDB, error) {
-	db := &RocksDB {
+	db := &RocksDB{
 		config:       cfg,
 		persistCache: cache,
 		readonly:     readonly,
@@ -112,7 +112,7 @@ func (db *RocksDB) Has(key []byte) (bool, error) {
 
 // excludeKeys helper func , Get whether omit persist cache
 func excludeKeys(key []byte) bool {
-	for _, rkey :=range remoteKeys {
+	for _, rkey := range remoteKeys {
 		if bytes.Equal(key, rkey) {
 			return true
 		}
@@ -184,14 +184,14 @@ func (db *RocksDB) Delete(key []byte) error {
 // handleExceptionKey rewirte exception key to remotedb
 func (db *RocksDB) handleExceptionKey() {
 	if db.persistCache == nil || db.readonly {
-		return 
+		return
 	}
 
 	gcExceptionTimer := time.NewTicker(handleExceptionKeyInterval)
 	for {
 		select {
 		case <-db.quitChan:
-			return 
+			return
 
 		case <-gcExceptionTimer.C:
 			ctx := context.Background()
@@ -226,13 +226,13 @@ func (db *RocksDB) handleExceptionKey() {
 // batch is a write-only that commits changes to its host database
 // when Write is called. A batch cannot be used concurrently.
 type batch struct {
-	db           *RocksDB
-	ctx          context.Context
-	pipe         rocks.Pipeliner
-	size         int
-	op           []string
-	args         [][][]byte
-	cacheBatch   ethdb.Batch
+	db         *RocksDB
+	ctx        context.Context
+	pipe       rocks.Pipeliner
+	size       int
+	op         []string
+	args       [][][]byte
+	cacheBatch ethdb.Batch
 }
 
 func (db *RocksDB) NewBatch() ethdb.Batch {
@@ -287,23 +287,18 @@ func (b *batch) Write() error {
 	if b.db.readonly {
 		return errors.New("remotdb is readonly, not support Batch Write")
 	}
-	if b.cacheBatch != nil {
-		b.cacheBatch.Write()
-	}
+	/*
+		if b.cacheBatch != nil {
+			b.cacheBatch.Write()
+		}
+	*/
+
 	_, err := b.pipe.Exec(b.ctx)
 	if err != nil && b.db.persistCache != nil {
-		for idx, op := range b.op {
-			switch op {
-			case "SET":
-				err := b.db.persistCache.Put(reWriteKey(b.args[idx][0]), b.args[idx][1])
-				if err != nil {
-					break
-				}
-			case "DEL":
-				err := b.db.persistCache.Put(reDeleteKey(b.args[idx][0]), reDeleteKeyContent)
-				if err != nil {
-					break
-				}
+		for idx, _ := range b.op {
+			err := b.db.persistCache.Put(reWriteKey(b.args[idx][0]), b.args[idx][1])
+			if err != nil {
+				break
 			}
 		}
 	}
@@ -323,8 +318,8 @@ func (b *batch) Replay(w ethdb.KeyValueWriter) error {
 	if b.db.readonly {
 		return errors.New("remotdb is readonly, not support Batch Replay")
 	}
-	replay := & replayer {
-		writer : w,
+	replay := &replayer{
+		writer: w,
 	}
 	for idx, op := range b.op {
 		if replay.failure != nil {

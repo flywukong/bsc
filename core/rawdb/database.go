@@ -575,41 +575,52 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 }
 
 func MigrateDatabase(db ethdb.Database, ip []byte) error {
+	fmt.Println("begin migrate")
 	it := db.NewIterator([]byte(""), []byte(""))
 	defer it.Release()
 
-	MigrateStart()
+	dispatcher := MigrateStart()
 
 	var (
-		count  int64
-		start  = time.Now()
-		logged = time.Now()
+		count       int64
+		batch_count uint64
+		start       = time.Now()
+		//	logged = time.Now()
 	)
 	// Inspect key-value database first.
-	tempKvList := make(map[string]string)
+	tempKvList := make(map[string][]byte)
 	for it.Next() {
 		var (
 			key   = it.Key()
 			value = it.Value()
 		)
-		if count%100 == 0 {
-			SendKv(tempKvList)
-			tempKvList = make(map[string]string)
+		if len(key) == common.HashLength {
+			tempKvList[string(key[:])] = value
+			count++
 		}
 
-		if count == 10000 {
+		//	fmt.Println("count:", count)
+		if (count >= 1 && count%100 == 0) || it.Next() == false {
+			dispatcher.SendKv(tempKvList)
+			batch_count++
+			tempKvList = make(map[string][]byte)
+		}
+
+		if count%1000 == 0 {
+			log.Info("migrating database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
+			//logged = time.Now()
+			start = time.Now()
+		}
+
+		if count == 10000000 {
 			break
 		}
-
-		if len(key) == common.HashLength {
-			tempKvList[string(key[:])] = string(value[:])
-		}
-		count++
-		if count%1000 == 0 && time.Since(logged) > 8*time.Second {
-			log.Info("Inspecting database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
-			logged = time.Now()
-		}
 	}
+	fmt.Println("send batch num:", batch_count, "key num", count)
 
+	dispatcher.setTaskNum(batch_count)
+	dispatcher.Close()
+
+	log.Info("migrate database stop")
 	return nil
 }

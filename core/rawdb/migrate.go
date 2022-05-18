@@ -3,7 +3,12 @@ package rawdb
 import (
 	"context"
 	"fmt"
+	"github.com/ethereum/go-ethereum/ethdb/leveldb"
+	"github.com/ethereum/go-ethereum/ethdb/remotedb"
 	"github.com/go-redis/redis/v8"
+	"os"
+	"sync/atomic"
+	"time"
 )
 
 var (
@@ -14,18 +19,39 @@ var (
 		Password: "", // no password set
 		DB:       0,  // use default DB
 	})
+	path, _         = os.Getwd()
+	persistCache, _ = leveldb.New(path+"/persistcache", 5000, 200, "chaindata", false)
+
+	kvrocksDB, _ = remotedb.NewRocksDB(remotedb.DefaultConfig(), persistCache, false)
+
+	DoneTaskNum uint64
 )
 var ctx = context.Background()
 
 func (job *Job) UploadToKvRocks() error {
+	fmt.Println("try to upload kv, batch size:", len(job.Kvbuffer))
+
+	kvBatch := kvrocksDB.NewBatch()
+
 	for key, value := range job.Kvbuffer {
-		err := rdb.Set(context.Background(), string(key), string(value), 0).Err()
-		if err != nil {
-			fmt.Println("send key:", string(key), "error")
-			return err
-		}
-		fmt.Println("send key ", string(key), "finish")
+		kvBatch.Put([]byte(key), value)
 	}
+
+	if err := kvBatch.Write(); err != nil {
+		return err
+	}
+	/*
+		for key, value := range job.Kvbuffer {
+			err := rdb.Set(context.Background(), string(key), string(value), 0).Err()
+			if err != nil {
+				//	fmt.Println("send key:", string(key), "error")
+				return err
+			}
+			//		fmt.Println("send key ", string(key), "finish")
+		}
+	*/
+
+	fmt.Println("send batch finish")
 	return nil
 }
 
@@ -33,7 +59,7 @@ func (job *Job) UploadToKvRocks() error {
 var JobQueue chan Job
 
 type Job struct {
-	Kvbuffer map[string]string
+	Kvbuffer map[string][]byte
 }
 
 // Worker represents the worker that executes the job
@@ -43,8 +69,8 @@ type Worker struct {
 	quit       chan bool
 }
 
-func NewWorker(workerPool chan chan Job) Worker {
-	return Worker{
+func NewWorker(workerPool chan chan Job) *Worker {
+	return &Worker{
 		WorkerPool: workerPool,
 		JobChannel: make(chan Job),
 		quit:       make(chan bool)}
@@ -52,7 +78,7 @@ func NewWorker(workerPool chan chan Job) Worker {
 
 // Start method starts the run loop for the worker, listening for a quit channel in
 // case we need to stop it
-func (w Worker) Start() {
+func (w *Worker) Start() {
 	go func() {
 		for {
 			// register the current worker into the worker queue.
@@ -60,10 +86,14 @@ func (w Worker) Start() {
 
 			select {
 			case job := <-w.JobChannel:
-				// we have received a work request.
-				if err := job.UploadToKvRocks(); err != nil {
-					//	log.Error("Error uploading to kvrocks: %s", err.Error())
+				// send batch to kvrocks
+				if len(job.Kvbuffer) != 0 {
+					if err := job.UploadToKvRocks(); err != nil {
+						//	log.Error("Error uploading to kvrocks: %s", err.Error())
+						fmt.Println("send kv rocks error")
+					}
 				}
+				incDoneTaskNum()
 
 			case <-w.quit:
 				// we have received a signal to stop
@@ -83,17 +113,35 @@ func (w Worker) Stop() {
 type Dispatcher struct {
 	// A pool of workers channels that are registered with the dispatcher
 	WorkerPool chan chan Job
-	maxWorkers int
+	maxWorkers uint64
+	taskQueue  chan Job
+	taskNum    uint64
+	//runningWorkers uint64
+	//status         int64
 }
 
-func NewDispatcher(maxWorkers int) *Dispatcher {
+func incDoneTaskNum() { // runningWorkers + 1
+	atomic.AddUint64(&DoneTaskNum, 1)
+}
+
+func GetDoneTaskNum() uint64 {
+	return atomic.LoadUint64(&DoneTaskNum)
+}
+
+func NewDispatcher(maxWorkers uint64) *Dispatcher {
 	pool := make(chan chan Job, maxWorkers)
-	return &Dispatcher{WorkerPool: pool}
+	return &Dispatcher{WorkerPool: pool, maxWorkers: maxWorkers,
+		taskQueue: make(chan Job)}
+}
+
+func (d *Dispatcher) setTaskNum(num uint64) {
+	d.taskNum = num
 }
 
 func (d *Dispatcher) Run() {
 	// starting n number of workers
-	for i := 0; i < d.maxWorkers; i++ {
+	fmt.Println("dispatch run with worker num:", d.maxWorkers)
+	for i := 0; i < int(d.maxWorkers); i++ {
 		worker := NewWorker(d.WorkerPool)
 		worker.Start()
 	}
@@ -104,7 +152,7 @@ func (d *Dispatcher) Run() {
 func (d *Dispatcher) dispatch() {
 	for {
 		select {
-		case job := <-JobQueue:
+		case job := <-d.taskQueue:
 			// a job request has been received
 			go func(job Job) {
 				// try to obtain a worker job channel that is available.
@@ -118,47 +166,31 @@ func (d *Dispatcher) dispatch() {
 	}
 }
 
-func SendKv(list map[string]string) {
+func (d *Dispatcher) SendKv(list map[string][]byte) {
 	// let's create a job with the payload
 	work := Job{list}
-
 	// Push the work onto the queue.
-	JobQueue <- work
+	d.taskQueue <- work
 }
 
-func MigrateStart() {
+func MigrateStart() *Dispatcher {
 	dispatcher := NewDispatcher(1000)
 	dispatcher.Run()
+	fmt.Println("dispatcher begin run")
+	return dispatcher
 }
 
-/*
-var (
-	BenchAntsSize = 1000
-)
-
-type Task struct {
-	kvlist map[string][]byte
-	client redis.Client
-}
-
-func (t *Task) Do() {
-	// t.start = time.Now()
-	//t.fetcher.loop()
-}
-
-func taskFunc(data interface{}) {
-	task := data.(*Task)
-	task.Do()
-	//	fmt.Println("task start")
-}
-
-func NewTaskPool() (*ants.PoolWithFunc, error) {
-	pool, err := ants.NewPoolWithFunc(BenchAntsSize, taskFunc)
-	if err != nil {
-		fmt.Println("create thread pool fail")
-		return nil, err
+func (p *Dispatcher) Close() {
+	// p.setStatus(STOPED) // 设置 status 为已停止
+	time.Sleep(10 * time.Second)
+	for {
+		if GetDoneTaskNum() == p.taskNum {
+			fmt.Println("get tasknu enough", GetDoneTaskNum())
+			break
+		} else {
+			time.Sleep(10 * time.Second)
+		}
 	}
-	fmt.Println("create thread pool done")
-	return pool, nil
+
+	close(p.taskQueue) // 关闭任务队列
 }
-*/
