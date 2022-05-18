@@ -85,15 +85,11 @@ Remove blockchain and state databases`,
 	dbMigrateCmd = cli.Command{
 		Action:    utils.MigrateFlags(migrate),
 		Name:      "migrate",
-		ArgsUsage: "<ip> <port>",
+		ArgsUsage: "<blocknumber>",
 		Flags: []cli.Flag{
 			utils.DataDirFlag,
 			utils.SyncModeFlag,
-			utils.MainnetFlag,
-			utils.RopstenFlag,
-			utils.RinkebyFlag,
-			utils.GoerliFlag,
-			utils.YoloV3Flag,
+			utils.RemoteDBAddr,
 		},
 		Usage:       "Migrate data in the database",
 		Description: `This commands iterates the entire database. If the optional 'prefix' and 'start' arguments are provided, then the iteration is limited to the given subset of data.`,
@@ -227,16 +223,27 @@ of ancientStore, will also displays the reserved number of blocks in ancientStor
 
 func migrate(ctx *cli.Context) error {
 	var (
-		ip []byte
+		blockNumber        uint64
+		onlyMigrateAncient bool
 	)
-	if ctx.NArg() > 1 {
+
+	if ctx.NArg() > 3 {
 		return fmt.Errorf("Max 2 arguments: %v", ctx.Command.ArgsUsage)
 	}
+
 	if ctx.NArg() >= 1 {
-		if d, err := hexutil.Decode(ctx.Args().Get(0)); err != nil {
-			return fmt.Errorf("failed to hex-decode 'prefix': %v", err)
+		if num, err := strconv.ParseUint(ctx.Args().Get(0), 10, 64); err != nil {
+			return fmt.Errorf("failed to decode 'blockNumber': %v", err)
 		} else {
-			ip = d
+			blockNumber = num
+		}
+	}
+	// set onlyMigrateAncient as true when we just want to restart send ancient
+	if ctx.NArg() >= 2 {
+		if onlyAncient, err := strconv.ParseBool(ctx.Args().Get(1)); err != nil {
+			return fmt.Errorf("failed to decode 'migrateAncient': %v", err)
+		} else {
+			onlyMigrateAncient = onlyAncient
 		}
 	}
 
@@ -246,7 +253,19 @@ func migrate(ctx *cli.Context) error {
 	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
 
-	return rawdb.MigrateDatabase(db, ip)
+	// fmt.Println("ctx,", ctx.String(""))
+	var addr string
+	if ctx.GlobalIsSet(utils.RemoteDBAddr.Name) {
+		addr = ctx.GlobalString(utils.RemoteDBAddr.Name)
+	}
+
+	var result error
+	if onlyMigrateAncient {
+		result = rawdb.MigrateAncientInDb(db, addr, blockNumber)
+	} else {
+		result = rawdb.MigrateDatabase(db, addr, blockNumber)
+	}
+	return result
 }
 
 func removeDB(ctx *cli.Context) error {

@@ -144,7 +144,7 @@ func NewCustom(file string, namespace string, customize func(options *opt.Option
 	ldb.seekCompGauge = metrics.NewRegisteredGauge(namespace+"compact/seek", nil)
 
 	// Start up the metrics gathering and return
-	go ldb.meter(metricsGatheringInterval)
+	// go ldb.meter(metricsGatheringInterval)
 	return ldb, nil
 }
 
@@ -516,5 +516,6 @@ func (r *replayer) Delete(key []byte) {
 func bytesPrefixRange(prefix, start []byte) *util.Range {
 	r := util.BytesPrefix(prefix)
 	r.Start = append(r.Start, start...)
+	fmt.Println("r.Start", start)
 	return r
 }

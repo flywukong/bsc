@@ -22,10 +22,13 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/olekukonko/tablewriter"
+
+	"container/list"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -33,6 +36,8 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb/memorydb"
 	"github.com/ethereum/go-ethereum/log"
 )
+
+var SerchHash []byte
 
 // freezerdb is a database wrapper that enabled freezer data retrievals.
 type freezerdb struct {
@@ -383,6 +388,59 @@ func AncientInspect(db ethdb.Database) error {
 	} else {
 		endNumber = offset + ancients - 1
 	}
+
+	fmt.Println("offset:", db.AncientOffSet())
+
+	var i uint64
+	ancient_num := 0
+	frozenOffest, _ := db.Ancients()
+	table1 := 0
+	table2 := 0
+	table3 := 0
+	table4 := 0
+	table5 := 0
+	// inpect ancient, from f.offset to fo f.frozen
+	for i = db.AncientOffSet(); i < frozenOffest; i++ {
+		for _, category := range []string{freezerHeaderTable, freezerBodiesTable, freezerReceiptTable,
+			freezerHashTable, freezerDifficultyTable} {
+			hash := ReadCanonicalHash(db, frozenOffest)
+			var ancientKey []byte
+			if value, err := db.Ancient(category, i); err == nil {
+				ancient_num++
+
+				if category == freezerHeaderTable {
+					ancientKey = headerKey(i, hash)
+					table1++
+					//fmt.Println("ancient key:", ancientKey)
+				}
+				if category == freezerBodiesTable {
+					ancientKey = blockBodyKey(i, hash)
+					table2++
+					//fmt.Println("ancient key:", ancientKey, "conetent:", value)
+				}
+				if category == freezerReceiptTable {
+					ancientKey = blockReceiptsKey(i, hash)
+					table3++
+					//fmt.Println("ancient key:", ancientKey, "conetent:", value)
+				}
+				if category == freezerHashTable {
+					table4++
+					//fmt.Println("ancient key:", hash, "conetent:", value)
+					fmt.Println("key len:", len(ancientKey),
+						"value len:", len(value))
+				}
+				if category == freezerDifficultyTable {
+					table5++
+					ancientKey = headerTDKey(i, hash)
+				}
+
+				if ancient_num%1000000 == 0 {
+					fmt.Println("ancient value:", value, "key.", ancientKey)
+				}
+			}
+		}
+	}
+	fmt.Println("ancient test total num:", ancient_num, "num1:", table1, "num2:", table2, "num3:", table3, "num4:", table4, "num5:", table5)
 	stats := [][]string{
 		{"Offset/StartBlockNumber", "Offset/StartBlockNumber of ancientDB", offset.String()},
 		{"Amount of remained items in AncientStore", "Remaining items of ancientDB", ancients.String()},
@@ -520,6 +578,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			logged = time.Now()
 		}
 	}
+
 	// Inspect append-only file store then.
 	ancientSizes := []*common.StorageSize{&ancientHeadersSize, &ancientBodiesSize, &ancientReceiptsSize, &ancientHashesSize, &ancientTdsSize}
 	for i, category := range []string{freezerHeaderTable, freezerBodiesTable, freezerReceiptTable, freezerHashTable, freezerDifficultyTable} {
@@ -574,42 +633,291 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	return nil
 }
 
-func MigrateDatabase(db ethdb.Database, ip []byte) error {
-	it := db.NewIterator([]byte(""), []byte(""))
-	defer it.Release()
-
-	MigrateStart()
-
-	var (
-		count  int64
-		start  = time.Now()
-		logged = time.Now()
-	)
-	// Inspect key-value database first.
-	tempKvList := make(map[string]string)
-	for it.Next() {
-		var (
-			key   = it.Key()
-			value = it.Value()
-		)
-		if count%100 == 0 {
-			SendKv(tempKvList)
-			tempKvList = make(map[string]string)
+func splitArray(arr []uint64, num int64) [][]uint64 {
+	max := int64(len(arr))
+	if max < num {
+		return nil
+	}
+	var segmens = make([][]uint64, 0)
+	quantity := max / num
+	end := int64(0)
+	for i := int64(1); i <= num; i++ {
+		qu := i * quantity
+		if i != num {
+			segmens = append(segmens, arr[i-1+end:qu])
+		} else {
+			segmens = append(segmens, arr[i-1+end:])
 		}
+		end = qu - i
+	}
+	return segmens
+}
 
-		if count == 10000 {
-			break
-		}
+func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber uint64) (tasknum uint64) {
+	frozenOffest, _ := db.Ancients()
+	var i uint64
+	// inpect ancient, from f.offset to fo f.frozen
+	blockNumList := []uint64{}
 
-		if len(key) == common.HashLength {
-			tempKvList[string(key[:])] = string(value[:])
-		}
-		count++
-		if count%1000 == 0 && time.Since(logged) > 8*time.Second {
-			log.Info("Inspecting database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
-			logged = time.Now()
-		}
+	for i = startBlockNumber; i < frozenOffest; i++ {
+		blockNumList = append(blockNumList, i)
+	}
+	// split block number list into 3
+	segments := splitArray(blockNumList, 3)
+	tasknum = uint64(0)
+	var wg sync.WaitGroup
+	wg.Add(3)
+	start := time.Now()
+	// use threads to migrate ancient data
+	for j := 0; j < len(segments); j++ {
+		go func(arr *[]uint64) {
+			defer wg.Done()
+			var idx int
+
+			for idx = 0; idx < len(*arr); idx++ {
+				for _, category := range []string{freezerHeaderTable, freezerBodiesTable, freezerReceiptTable,
+					freezerHashTable, freezerDifficultyTable} {
+					hash := ReadCanonicalHash(db, (*arr)[idx])
+					var ancientKey []byte
+					if value, err := db.Ancient(category, (*arr)[idx]); err == nil {
+						if category == freezerHeaderTable {
+							ancientKey = headerKey((*arr)[idx], hash)
+						}
+						if category == freezerBodiesTable {
+							ancientKey = blockBodyKey((*arr)[idx], hash)
+						}
+						if category == freezerReceiptTable {
+							ancientKey = blockReceiptsKey((*arr)[idx], hash)
+						}
+
+						if category == freezerHashTable {
+							ancientKey = headerHashKey((*arr)[idx])
+						}
+
+						if category == freezerDifficultyTable {
+							ancientKey = headerTDKey((*arr)[idx], hash)
+						}
+
+						atomic.AddUint64(&tasknum, 1)
+
+						countTask := atomic.LoadUint64(&tasknum)
+						if atomic.LoadUint64(&tasknum) > GetDoneTaskNum()+10000 {
+							time.Sleep(5 * time.Second)
+						}
+						if atomic.LoadUint64(&tasknum)%100000 == 0 {
+							fmt.Println("ancient send num:", atomic.LoadUint64(&tasknum), "cost time:", time.Since(start).Nanoseconds()/1000000000,
+								"s")
+						}
+						dispatcher.SendAncient(ancientKey, value, countTask)
+					}
+				}
+			}
+		}(&segments[j])
 	}
 
+	wg.Wait()
+	fmt.Println("ancient send task num:", atomic.LoadUint64(&tasknum))
+	return atomic.LoadUint64(&tasknum)
+}
+
+func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
+	fmt.Println("begin migrate")
+
+	// get startKey from db if exist
+	var startKey []byte
+	path, _ := os.Getwd()
+	startDB, _ := leveldb.New(path+"/startdb", 5000, 200, "chaindata", false)
+	startKey, err := startDB.Get([]byte("startKey"))
+	if err == nil {
+		fmt.Println("get start key:", startKey)
+	} else {
+		fmt.Println("get first key error", err.Error())
+	}
+
+	it := db.NewIterator([]byte(""), startKey)
+
+	// taskCache store recent 15000 batch info,
+	// only store the first key of batch as the startKey if task fail
+	taskCache := list.New()
+
+	// this routine mark the startKey in the queue half an hour once
+	ticker := time.NewTicker(1 * time.Second)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if GetFailFlag() == 1 && taskCache.Len() > 0 {
+					fmt.Println("find some task fail, need mark and panic")
+					if startDB == nil {
+						startPath, _ := os.Getwd()
+						startDB, _ = leveldb.New(startPath+"/startdb", 5000, 200, "chaindata", false)
+					}
+					key := taskCache.Front().Value
+
+					// mark the fail key, and panic
+					if startDB != nil {
+						err = startDB.Put([]byte("startKey"), []byte(key.(string)))
+						if err != nil {
+							fmt.Println("write first key error:", err.Error())
+						}
+					}
+					fmt.Println("leveldb migrate fail , finish key:", GetDoneTaskNum()*100)
+					panic("task fail")
+				}
+			}
+		}
+	}()
+	// this routine mark the startKey in the queue half an hour once
+	marker := time.NewTicker(20 * time.Minute)
+	go func() {
+		defer marker.Stop()
+		for {
+			select {
+			case <-marker.C:
+				if taskCache.Len() > 0 {
+					fmt.Println("mark start key half an hour once")
+					if startDB == nil {
+						startPath, _ := os.Getwd()
+						startDB, _ = leveldb.New(startPath+"/startdb", 5000, 200, "chaindata", false)
+					}
+					key := taskCache.Front().Value
+					// mark the done key
+					if startDB != nil {
+						err = startDB.Put([]byte("startKey"), []byte(key.(string)))
+						if err != nil {
+							fmt.Println("write first key error:", err.Error())
+						}
+					}
+				}
+			}
+		}
+	}()
+
+	start := time.Now()
+	// start a task dispatcher with 1000 threads
+	dispatcher := MigrateStart(1000)
+
+	var (
+		count       uint64
+		batch_count uint64
+		snapcount   uint64
+	)
+	// init remote db for data sending
+	InitDb(addr)
+
+	count = 0
+	snapcount = 0
+	defer it.Release()
+	tempBatch := make(map[string][]byte)
+
+	isbatchFirstKey := false
+
+	for it.Next() {
+		var (
+			key = it.Key()
+			v   = it.Value()
+		)
+		value := make([]byte, len(v))
+		copy(value, v)
+
+		// ignore snapshot data
+		if (bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)) || (bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)) {
+			snapcount++
+			continue
+		}
+
+		// push the first key of batch into queue,
+		// if migrate error happen, key of queue head will store into kvstore before panic
+		if isbatchFirstKey {
+			taskCache.PushBack(string(key))
+
+			isbatchFirstKey = false
+			if taskCache.Len() > 15000 {
+				taskCache.Remove(taskCache.Front())
+			}
+		}
+
+		tempBatch[string(key[:])] = value
+		count++
+		// make a batch contain 100 keys , and send job work pool
+		if count >= 1 && count%100 == 0 {
+			// make a batch as a job, send it to worker pool
+			batch_count++
+			dispatcher.SendKv(tempBatch, batch_count)
+			// if producer much faster than workers(more than 8000 jobs), make it slower
+			distance := batch_count - GetDoneTaskNum()
+			if distance > 8000 {
+				if distance > 12000 {
+					fmt.Println("worker lag too much", distance)
+					time.Sleep(1 * time.Minute)
+				}
+				time.Sleep(5 * time.Second)
+			}
+			// print cost time every 50000000 keys
+			if batch_count%500000 == 0 {
+				fmt.Println("finish level db k,v num:", batch_count*100,
+					"cost time:", time.Since(start).Nanoseconds()/1000000000, "s")
+			}
+			isbatchFirstKey = true
+			tempBatch = make(map[string][]byte)
+		}
+
+	}
+	if len(tempBatch) > 0 {
+		batch_count++
+		dispatcher.SendKv(tempBatch, batch_count)
+	}
+
+	fmt.Println("send batch num:", batch_count, "key num:", count, "pass snapshout:", snapcount)
+	dispatcher.setTaskNum(batch_count)
+
+	finish := dispatcher.WaitDbFinish()
+	if finish == false {
+		fmt.Println("leveldb key migrate fail")
+		panic("task fail")
+	}
+
+	// all leveldb keys migrating has been done, reset cache and jobs num
+	taskCache.Init()
+	leveldbCost := time.Since(start).Nanoseconds() / 1000000
+
+	start = time.Now()
+	ResetDoneTaskNum()
+
+	ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
+	dispatcher.setTaskNum(ancientTaskNum)
+	//if set flag true, we will try to retry error keys
+	migrateSucc := dispatcher.Close(false)
+
+	if migrateSucc == true {
+		fmt.Println("migrate succ , migrate leveldb cost time:", leveldbCost,
+			"migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
+	} else {
+		fmt.Println("migrate fail , need restart ancient jobs")
+	}
+	return nil
+}
+
+func MigrateAncientInDb(db ethdb.Database, addr string, blockNumber uint64) error {
+	fmt.Println("begin migrate")
+
+	start := time.Now()
+	// start a task dispatcher with 1000 threads
+	dispatcher := MigrateStart(1000)
+
+	// init kvrocks client of worker pool
+	InitDb(addr)
+
+	ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
+	dispatcher.setTaskNum(ancientTaskNum)
+
+	migrateSucc := dispatcher.Close(false)
+
+	if migrateSucc == true {
+		fmt.Println("migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
+	} else {
+		fmt.Println("migrate fail , need restart ancient jobs")
+	}
 	return nil
 }
