@@ -483,7 +483,7 @@ func (s *StateObject) updateTrie(db Database) Trie {
 	tr := s.getTrie(db)
 
 	usedStorage := make([][]byte, 0, len(s.pendingStorage))
-	dirtyBatch := make(map[common.Hash][]byte)
+	dirtyStorage := make(map[common.Hash][]byte)
 	for key, value := range s.pendingStorage {
 		// Skip noop changes, persist actual changes
 		if value == s.originStorage[key] {
@@ -495,27 +495,27 @@ func (s *StateObject) updateTrie(db Database) Trie {
 			// Encoding []byte cannot fail, ok to ignore the error.
 			v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
 		}
-		dirtyBatch[key] = v
+		dirtyStorage[key] = v
 	}
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	go func(batch *map[common.Hash][]byte, s *StateObject) {
+	go func() {
 		defer wg.Done()
-		for key, value := range *batch {
+		for key, value := range dirtyStorage {
 			if len(value) == 0 {
 				s.setError(tr.TryDelete(key[:]))
 			} else {
 				s.setError(tr.TryUpdate(key[:], value))
 			}
 		}
-	}(&dirtyBatch, s)
+	}()
 
-	go func(batch *map[common.Hash][]byte, s *StateObject) {
+	go func() {
 		defer wg.Done()
 		// The snapshot storage map for the object
 		var storage map[string][]byte
-		for key, value := range *batch {
+		for key, value := range dirtyStorage {
 			// If state snapshotting is active, cache the data til commit
 			if s.db.snap != nil {
 				s.db.snapMux.Lock()
@@ -527,12 +527,12 @@ func (s *StateObject) updateTrie(db Database) Trie {
 					}
 				}
 
-				storage[string(key[:])] = value // v will be nil if value is 0x00
+				storage[string(key[:])] = value // value will be nil if value is 0x00
 				s.db.snapMux.Unlock()
 			}
 			usedStorage = append(usedStorage, common.CopyBytes(key[:])) // Copy needed for closure
 		}
-	}(&dirtyBatch, s)
+	}()
 
 	wg.Wait()
 	if s.db.prefetcher != nil {
