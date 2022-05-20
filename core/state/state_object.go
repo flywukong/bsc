@@ -483,30 +483,40 @@ func (s *StateObject) updateTrie(db Database) Trie {
 	tr := s.getTrie(db)
 
 	usedStorage := make([][]byte, 0, len(s.pendingStorage))
-	dirtyStorage := make(map[common.Hash][]byte)
-	for key, value := range s.pendingStorage {
-		// Skip noop changes, persist actual changes
-		if value == s.originStorage[key] {
-			continue
+	/*
+		dirtyStorage := make(map[common.Hash][]byte)
+		for key, value := range s.pendingStorage {
+			// Skip noop changes, persist actual changes
+			if value == s.originStorage[key] {
+				continue
+			}
+			s.originStorage[key] = value
+			var v []byte
+			if (value != common.Hash{}) {
+				// Encoding []byte cannot fail, ok to ignore the error.
+				v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
+			}
+			dirtyStorage[key] = v
 		}
-		s.originStorage[key] = value
-		var v []byte
-		if (value != common.Hash{}) {
-			// Encoding []byte cannot fail, ok to ignore the error.
-			v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
-		}
-		dirtyStorage[key] = v
-	}
+	*/
+
 	var wg sync.WaitGroup
 	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
-		for key, value := range dirtyStorage {
-			if len(value) == 0 {
+		for key, value := range s.pendingStorage {
+			if value == s.originStorage[key] {
+				continue
+			}
+			s.originStorage[key] = value
+			var v []byte
+			if (value == common.Hash{}) {
 				s.setError(tr.TryDelete(key[:]))
 			} else {
-				s.setError(tr.TryUpdate(key[:], value))
+				// Encoding []byte cannot fail, ok to ignore the error.
+				v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
+				s.setError(tr.TryUpdate(key[:], v))
 			}
 		}
 	}()
@@ -515,7 +525,10 @@ func (s *StateObject) updateTrie(db Database) Trie {
 		defer wg.Done()
 		// The snapshot storage map for the object
 		var storage map[string][]byte
-		for key, value := range dirtyStorage {
+		for key, value := range s.pendingStorage {
+			if value == s.originStorage[key] {
+				continue
+			}
 			// If state snapshotting is active, cache the data til commit
 			if s.db.snap != nil {
 				s.db.snapMux.Lock()
@@ -526,8 +539,11 @@ func (s *StateObject) updateTrie(db Database) Trie {
 						s.db.snapStorage[s.address] = storage
 					}
 				}
-
-				storage[string(key[:])] = value // value will be nil if value is 0x00
+				var v []byte
+				if (value != common.Hash{}) {
+					v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
+				}
+				storage[string(key[:])] = v // value will be nil if value is 0x00
 				s.db.snapMux.Unlock()
 			}
 			usedStorage = append(usedStorage, common.CopyBytes(key[:])) // Copy needed for closure
