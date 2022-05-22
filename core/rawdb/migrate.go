@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+var addr = []string{"127.0.0.1:6666", "127.0.0.1:6667"}
+
 var (
 	// MaxWorker = os.Getenv("MAX_WORKERS")
 	//MaxQueue = os.Getenv("MAX_QUEUE")
@@ -22,10 +24,11 @@ var (
 	path, _         = os.Getwd()
 	persistCache, _ = leveldb.New(path+"/persistcache", 5000, 200, "chaindata", false)
 
-	kvrocksDB, _ = remotedb.NewRocksDB(remotedb.DefaultConfig(), persistCache, false)
+	kvrocksDB, _ = remotedb.NewRocksDB(remotedb.DefaultConfig2(addr), persistCache, false)
 
 	DoneTaskNum uint64
 )
+
 var ctx = context.Background()
 
 func (job *Job) UploadToKvRocks() error {
@@ -38,6 +41,7 @@ func (job *Job) UploadToKvRocks() error {
 	}
 
 	if err := kvBatch.Write(); err != nil {
+		fmt.Println("send kv rocks error", err.Error())
 		return err
 	}
 	/*
@@ -90,7 +94,7 @@ func (w *Worker) Start() {
 				if len(job.Kvbuffer) != 0 {
 					if err := job.UploadToKvRocks(); err != nil {
 						//	log.Error("Error uploading to kvrocks: %s", err.Error())
-						fmt.Println("send kv rocks error")
+						// fmt.Println("send kv rocks error", err.Error())
 					}
 				}
 				incDoneTaskNum()

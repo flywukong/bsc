@@ -45,6 +45,17 @@ func DefaultConfig() *Config {
 	}
 }
 
+func DefaultConfig2(addr []string) *Config {
+	return &Config{
+		Addrs:           addr,
+		ReadTimeout:     REMOTEDB_BATCH_WRITE_TIMEOUT,
+		WriteTimeout:    REMOTEDB_BATCH_READ_TIMEOUT,
+		MinRetryBackoff: REMOTEDB_RETRY_MIN_TIMEOUT,
+		MaxRetryBackoff: REMOTEDB_RETRY_MAX_TIMEOUT,
+		MinIdleConns:    REMOTEDB_IDLE_CONNS,
+	}
+}
+
 // GetClusterOption return remote store cluster options from config
 func (cfg *Config) GetClusterOption() *rocks.ClusterOptions {
 	return &rocks.ClusterOptions{
