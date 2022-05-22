@@ -91,12 +91,16 @@ func (w *Worker) Start() {
 			select {
 			case job := <-w.JobChannel:
 				// send batch to kvrocks
+				fmt.Println("receive job")
 				if len(job.Kvbuffer) != 0 {
+					fmt.Println("receive jobs, not empty1")
 					if err := job.UploadToKvRocks(); err != nil {
 						//	log.Error("Error uploading to kvrocks: %s", err.Error())
-						fmt.Println("send kv rocks error", err.Error())
+						fmt.Println("send kv rocks error")
 					}
+					fmt.Println("receive jobs, not empty2")
 				}
+				fmt.Println("done job")
 				incDoneTaskNum()
 
 			case <-w.quit:
@@ -137,7 +141,8 @@ func NewDispatcher(maxWorkers uint64) *Dispatcher {
 }
 
 func (d *Dispatcher) setTaskNum(num uint64) {
-	d.taskNum = num
+	fmt.Println("set task num", num)
+	atomic.StoreUint64(&DoneTaskNum, num)
 }
 
 func (d *Dispatcher) Run() {
