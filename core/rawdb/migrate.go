@@ -94,7 +94,7 @@ func (w *Worker) Start() {
 				if len(job.Kvbuffer) != 0 {
 					if err := job.UploadToKvRocks(); err != nil {
 						//	log.Error("Error uploading to kvrocks: %s", err.Error())
-						// fmt.Println("send kv rocks error", err.Error())
+						fmt.Println("send kv rocks error", err.Error())
 					}
 				}
 				incDoneTaskNum()
@@ -120,8 +120,6 @@ type Dispatcher struct {
 	maxWorkers uint64
 	taskQueue  chan Job
 	taskNum    uint64
-	//runningWorkers uint64
-	//status         int64
 }
 
 func incDoneTaskNum() { // runningWorkers + 1
@@ -192,6 +190,7 @@ func (p *Dispatcher) Close() {
 			fmt.Println("get tasknu enough", GetDoneTaskNum())
 			break
 		} else {
+			fmt.Println("get tasknu not enough", GetDoneTaskNum())
 			time.Sleep(10 * time.Second)
 		}
 	}
