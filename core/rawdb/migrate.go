@@ -98,10 +98,9 @@ func (w *Worker) Start() {
 						//	log.Error("Error uploading to kvrocks: %s", err.Error())
 						fmt.Println("send kv rocks error")
 					}
-					fmt.Println("receive jobs, not empty2")
+					incDoneTaskNum()
 				}
-				fmt.Println("done job")
-				incDoneTaskNum()
+				fmt.Println("receive job is empty")
 
 			case <-w.quit:
 				// we have received a signal to stop
@@ -142,7 +141,7 @@ func NewDispatcher(maxWorkers uint64) *Dispatcher {
 
 func (d *Dispatcher) setTaskNum(num uint64) {
 	fmt.Println("set task num", num)
-	atomic.StoreUint64(&DoneTaskNum, num)
+	atomic.StoreUint64(&d.taskNum, num)
 }
 
 func (d *Dispatcher) Run() {
@@ -191,11 +190,11 @@ func (p *Dispatcher) Close() {
 	// p.setStatus(STOPED) // 设置 status 为已停止
 	time.Sleep(10 * time.Second)
 	for {
-		if GetDoneTaskNum() == p.taskNum {
-			fmt.Println("get tasknu enough", GetDoneTaskNum())
+		if GetDoneTaskNum() >= p.taskNum {
+			fmt.Println("get tasknu enough", GetDoneTaskNum(), p.taskNum)
 			break
 		} else {
-			fmt.Println("get tasknu not enough", GetDoneTaskNum())
+			fmt.Println("get tasknu not enough", GetDoneTaskNum(), p.taskNum)
 			time.Sleep(10 * time.Second)
 		}
 	}
