@@ -31,7 +31,7 @@ var (
 var ctx = context.Background()
 
 func InitDb() {
-	var addr = []string{"127.0.0.1:6666", "127.0.0.1:6667"}
+	var addr = []string{"172.25.41.114:6666", "172.25.41.114:6667"}
 	path, _ := os.Getwd()
 	persistCache, _ := leveldb.New(path+"/persistcache", 5000, 200, "chaindata", false)
 	config := remotedb.DefaultConfig()
