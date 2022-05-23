@@ -645,7 +645,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 				batch_count2++
 				tempKvList = make(map[string][]byte)
 			}
-			if count > 10000000 {
+			if count2 > 10000000 {
 				break
 			}
 		}
@@ -654,9 +654,11 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 	wg.Wait()
 	fmt.Println("send batch num:", batch_count, "key num", count)
 	fmt.Println("send batch2 num:", batch_count2, "key num", count2)
+	fmt.Println("migrate database stop, cost time:", time.Since(start).Nanoseconds()/1000000)
+	start = time.Now()
 	dispatcher.setTaskNum(batch_count + batch_count2)
 	dispatcher.Close(true)
 
-	fmt.Println("migrate database stop, cost time:", time.Since(start).Nanoseconds()/1000000)
+	fmt.Println("dispathcher stop, cost time:", time.Since(start).Nanoseconds()/1000000)
 	return nil
 }
