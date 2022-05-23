@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -587,7 +586,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 
 	it := db.NewIterator([]byte(""), []byte(""))
 
-	it2 := db.NewIterator([]byte(""), buf2)
+	// it2 := db.NewIterator([]byte(""), buf2)
 
 	start := time.Now()
 	// start a task dispatcher with 1000 threads
@@ -601,57 +600,77 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 	)
 	// init remote db for data sending
 	InitDb()
+	defer it.Release()
+	tempKvList := make(map[string][]byte)
+	for it.Next() {
+		var (
+			key   = it.Key()
+			value = it.Value()
+		)
+		tempKvList[string(key[:])] = value
+		count++
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-	// generate two producer to inspect key-value database and make jobs
-	go func() {
-		defer wg.Done()
-		defer it.Release()
-		tempKvList := make(map[string][]byte)
-		for it.Next() {
-			var (
-				key   = it.Key()
-				value = it.Value()
-			)
-			tempKvList[string(key[:])] = value
-			count++
-
-			if (count >= 1 && count%100 == 0) || it.Next() == false {
-				dispatcher.SendKv(tempKvList)
-				batch_count++
-				tempKvList = make(map[string][]byte)
-			}
-			if count > 10000000 {
-				break
-			}
+		if (count >= 1 && count%100 == 0) || it.Next() == false {
+			dispatcher.SendKv(tempKvList)
+			batch_count++
+			tempKvList = make(map[string][]byte)
 		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		defer it2.Release()
-		tempKvList := make(map[string][]byte)
-		for it2.Next() {
-			var (
-				key   = it2.Key()
-				value = it2.Value()
-			)
-			tempKvList[string(key[:])] = value
-			count2++
-
-			if (count2 >= 1 && count2%100 == 0) || it2.Next() == false {
-				dispatcher.SendKv(tempKvList)
-				batch_count2++
-				tempKvList = make(map[string][]byte)
-			}
-			if count2 > 10000000 {
-				break
-			}
+		if count > 20000000 {
+			break
 		}
-	}()
+	}
+	/*
+		var wg sync.WaitGroup
+		wg.Add(2)
+		// generate two producer to inspect key-value database and make jobs
+		go func() {
+			defer wg.Done()
+			defer it.Release()
+			tempKvList := make(map[string][]byte)
+			for it.Next() {
+				var (
+					key   = it.Key()
+					value = it.Value()
+				)
+				tempKvList[string(key[:])] = value
+				count++
 
-	wg.Wait()
+				if (count >= 1 && count%100 == 0) || it.Next() == false {
+					dispatcher.SendKv(tempKvList)
+					batch_count++
+					tempKvList = make(map[string][]byte)
+				}
+				if count > 10000000 {
+					break
+				}
+			}
+		}()
+
+		go func() {
+			defer wg.Done()
+			defer it2.Release()
+			tempKvList := make(map[string][]byte)
+			for it2.Next() {
+				var (
+					key   = it2.Key()
+					value = it2.Value()
+				)
+				tempKvList[string(key[:])] = value
+				count2++
+
+				if (count2 >= 1 && count2%100 == 0) || it2.Next() == false {
+					dispatcher.SendKv(tempKvList)
+					batch_count2++
+					tempKvList = make(map[string][]byte)
+				}
+				if count2 > 10000000 {
+					break
+				}
+			}
+		}()
+
+	*/
+
 	fmt.Println("send batch num:", batch_count, "key num", count)
 	fmt.Println("send batch2 num:", batch_count2, "key num", count2)
 	fmt.Println("migrate database stop, cost time:", time.Since(start).Nanoseconds()/1000000)
