@@ -207,14 +207,14 @@ func (p *Dispatcher) Close(checkErr bool) bool {
 		}
 	}
 	// check if some task fail
-	doneAllTask := false
+	doneAllTask := true
 	if checkErr {
 		err := KvrocksDB.CheckError()
 		if err != nil {
+			// some data still not finish after retrying
 			doneAllTask = false
 		}
 	}
-	doneAllTask = true
 
 	close(p.taskQueue) // close task queue
 	if doneAllTask {

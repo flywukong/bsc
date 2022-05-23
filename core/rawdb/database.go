@@ -583,7 +583,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 	buf1 := make([]byte, 8)
 	binary.BigEndian.PutUint64(buf1, 0)
 	buf2 := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf2, 500000000)
+	binary.BigEndian.PutUint64(buf2, 50000000)
 
 	it := db.NewIterator([]byte(""), []byte(""))
 
