@@ -19,8 +19,8 @@ var (
 		Password: "", // no password set
 		DB:       0,  // use default DB
 	})
-	path, _         = os.Getwd()
-	persistCache, _ = leveldb.New(path+"/persistcache", 5000, 200, "chaindata", false)
+	//path, _         = os.Getwd()
+	//persistCache, _ = leveldb.New(path+"/persistcache", 5000, 200, "chaindata", false)
 
 	KvrocksDB *remotedb.RocksDB
 	// kvrocksDB, _ = remotedb.NewRocksDB(remotedb.DefaultConfig2(addr), persistCache, false)
@@ -30,10 +30,10 @@ var (
 
 var ctx = context.Background()
 
-func initDb() {
+func InitDb() {
 	var addr = []string{"127.0.0.1:6666", "127.0.0.1:6667"}
-	path, _ = os.Getwd()
-	persistCache, _ = leveldb.New(path+"/persistcache", 5000, 200, "chaindata", false)
+	path, _ := os.Getwd()
+	persistCache, _ := leveldb.New(path+"/persistcache", 5000, 200, "chaindata", false)
 	config := remotedb.DefaultConfig()
 	config.Addrs = addr
 	KvrocksDB, _ = remotedb.NewRocksDB(remotedb.DefaultConfig2(addr), persistCache, false)
@@ -143,7 +143,6 @@ func GetDoneTaskNum() uint64 {
 
 func NewDispatcher(maxWorkers uint64) *Dispatcher {
 	pool := make(chan chan Job, maxWorkers)
-	initDb()
 	return &Dispatcher{WorkerPool: pool, maxWorkers: maxWorkers,
 		taskQueue: make(chan Job)}
 }

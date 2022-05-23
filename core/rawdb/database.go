@@ -587,6 +587,8 @@ func MigrateDatabase(db ethdb.Database, ip []byte) error {
 		start       = time.Now()
 		//	logged = time.Now()
 	)
+
+	InitDb()
 	// Inspect key-value database first.
 	tempKvList := make(map[string][]byte)
 	for it.Next() {
