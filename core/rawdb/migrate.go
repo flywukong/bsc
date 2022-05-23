@@ -197,13 +197,13 @@ func MigrateStart(workersize uint64) *Dispatcher {
 
 func (p *Dispatcher) Close(checkErr bool) bool {
 	// p.setStatus(STOPED) // 设置 status 为已停止
-	time.Sleep(10 * time.Second)
+	time.Sleep(3 * time.Second)
 	for {
 		if GetDoneTaskNum() >= p.taskNum {
 			fmt.Println("get tasknu enough", GetDoneTaskNum(), p.taskNum)
 			break
 		} else {
-			time.Sleep(10 * time.Second)
+			time.Sleep(3 * time.Second)
 		}
 	}
 	// check if some task fail
