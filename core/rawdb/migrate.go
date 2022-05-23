@@ -36,7 +36,7 @@ func InitDb() {
 	persistCache, _ := leveldb.New(path+"/persistcache", 5000, 200, "chaindata", false)
 	config := remotedb.DefaultConfig()
 	config.Addrs = addr
-	KvrocksDB, _ = remotedb.NewRocksDB(remotedb.DefaultConfig2(addr), persistCache, false)
+	KvrocksDB, _ = remotedb.NewRocksDB(config, persistCache, false)
 }
 
 func (job *Job) UploadToKvRocks() error {
