@@ -601,7 +601,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte) error {
 		}
 
 		//	fmt.Println("count:", count)
-		if (count >= 1 && count%500 == 0) || it.Next() == false {
+		if (count >= 1 && count%200 == 0) || it.Next() == false {
 			dispatcher.SendKv(tempKvList)
 			batch_count++
 			tempKvList = make(map[string][]byte)
