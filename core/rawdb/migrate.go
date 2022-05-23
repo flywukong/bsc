@@ -11,8 +11,6 @@ import (
 	"time"
 )
 
-var addr = []string{"127.0.0.1:6666", "127.0.0.1:6667"}
-
 var (
 	// MaxWorker = os.Getenv("MAX_WORKERS")
 	//MaxQueue = os.Getenv("MAX_QUEUE")
@@ -24,17 +22,27 @@ var (
 	path, _         = os.Getwd()
 	persistCache, _ = leveldb.New(path+"/persistcache", 5000, 200, "chaindata", false)
 
-	kvrocksDB, _ = remotedb.NewRocksDB(remotedb.DefaultConfig2(addr), persistCache, false)
+	KvrocksDB *remotedb.RocksDB
+	// kvrocksDB, _ = remotedb.NewRocksDB(remotedb.DefaultConfig2(addr), persistCache, false)
 
 	DoneTaskNum uint64
 )
 
 var ctx = context.Background()
 
+func initDb() {
+	var addr = []string{"127.0.0.1:6666", "127.0.0.1:6667"}
+	path, _ = os.Getwd()
+	persistCache, _ = leveldb.New(path+"/persistcache", 5000, 200, "chaindata", false)
+	config := remotedb.DefaultConfig()
+	config.Addrs = addr
+	KvrocksDB, _ = remotedb.NewRocksDB(remotedb.DefaultConfig2(addr), persistCache, false)
+}
+
 func (job *Job) UploadToKvRocks() error {
 	fmt.Println("try to upload kv, batch size:", len(job.Kvbuffer))
 
-	kvBatch := kvrocksDB.NewBatch()
+	kvBatch := KvrocksDB.NewBatch()
 
 	for key, value := range job.Kvbuffer {
 		kvBatch.Put([]byte(key), value)
@@ -135,6 +143,7 @@ func GetDoneTaskNum() uint64 {
 
 func NewDispatcher(maxWorkers uint64) *Dispatcher {
 	pool := make(chan chan Job, maxWorkers)
+	initDb()
 	return &Dispatcher{WorkerPool: pool, maxWorkers: maxWorkers,
 		taskQueue: make(chan Job)}
 }
@@ -147,6 +156,7 @@ func (d *Dispatcher) setTaskNum(num uint64) {
 func (d *Dispatcher) Run() {
 	// starting n number of workers
 	fmt.Println("dispatch run with worker num:", d.maxWorkers)
+
 	for i := 0; i < int(d.maxWorkers); i++ {
 		worker := NewWorker(d.WorkerPool)
 		worker.Start()
