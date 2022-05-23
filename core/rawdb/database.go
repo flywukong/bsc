@@ -583,7 +583,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 	buf1 := make([]byte, 8)
 	binary.BigEndian.PutUint64(buf1, 0)
 	buf2 := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf2, 20000000)
+	binary.BigEndian.PutUint64(buf2, 200000000)
 
 	it := db.NewIterator([]byte(""), []byte(""))
 
@@ -653,11 +653,11 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 
 	fmt.Println("send batch num:", batch_count, "key num", count)
 	fmt.Println("send batch2 num:", batch_count2, "key num", count2)
-	fmt.Println("migrate database stop, cost time:", time.Since(start).Nanoseconds()/1000000)
+
 	start = time.Now()
 	dispatcher.setTaskNum(batch_count + batch_count2)
 	dispatcher.Close(true)
 
-	fmt.Println("dispathcher stop, cost time:", time.Since(start).Nanoseconds()/1000000)
+	fmt.Println("migrate database stop, cost time:", time.Since(start).Nanoseconds()/1000000)
 	return nil
 }
