@@ -42,26 +42,28 @@ func InitDb() {
 func (job *Job) UploadToKvRocks() error {
 	fmt.Println("try to upload kv, batch size:", len(job.Kvbuffer))
 
-	kvBatch := KvrocksDB.NewBatch()
-
-	for key, value := range job.Kvbuffer {
-		kvBatch.Put([]byte(key), value)
-	}
-
-	if err := kvBatch.Write(); err != nil {
-		fmt.Println("send kv rocks error", err.Error())
-		return err
-	}
 	/*
+		kvBatch := KvrocksDB.NewBatch()
+
 		for key, value := range job.Kvbuffer {
-			err := rdb.Set(context.Background(), string(key), string(value), 0).Err()
-			if err != nil {
-				//	fmt.Println("send key:", string(key), "error")
-				return err
-			}
-			//		fmt.Println("send key ", string(key), "finish")
+			kvBatch.Put([]byte(key), value)
+		}
+
+		if err := kvBatch.Write(); err != nil {
+			fmt.Println("send kv rocks error", err.Error())
+			return err
 		}
 	*/
+
+	for key, value := range job.Kvbuffer {
+		//	err := rdb.Set(context.Background(), string(key), string(value), 0).Err()
+		err := KvrocksDB.Put([]byte(key), value)
+		if err != nil {
+			//	fmt.Println("send key:", string(key), "error")
+			return err
+		}
+		//		fmt.Println("send key ", string(key), "finish")
+	}
 
 	fmt.Println("send batch finish")
 	return nil

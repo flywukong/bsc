@@ -623,6 +623,6 @@ func MigrateDatabase(db ethdb.Database, ip []byte) error {
 	dispatcher.setTaskNum(batch_count)
 	dispatcher.Close()
 
-	log.Info("migrate database stop, cost time:", time.Since(start).Nanoseconds()/1000000)
+	fmt.Println("migrate database stop, cost time:", time.Since(start).Nanoseconds()/1000000)
 	return nil
 }
