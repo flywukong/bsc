@@ -18,10 +18,12 @@ package rawdb
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -576,51 +578,88 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 
 func MigrateDatabase(db ethdb.Database, ip []byte) error {
 	fmt.Println("begin migrate")
+	//it := db.NewIterator([]byte(""), []byte(""))
+
+	buf1 := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf1, 0)
+	buf2 := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf2, 3000000)
 	it := db.NewIterator([]byte(""), []byte(""))
-	defer it.Release()
+	it2 := db.NewIterator([]byte(""), buf2)
+
 	start := time.Now()
 	dispatcher := MigrateStart()
 
 	var (
-		count       int64
-		batch_count uint64
+		count        int64
+		batch_count  uint64
+		count2       int64
+		batch_count2 uint64
 		// start       = time.Now()
 		//	logged = time.Now()
 	)
 	InitDb()
+	var wg sync.WaitGroup
+	wg.Add(2)
 	// Inspect key-value database first.
-	tempKvList := make(map[string][]byte)
-	for it.Next() {
-		var (
-			key   = it.Key()
-			value = it.Value()
-		)
-		if len(key) == common.HashLength {
-			tempKvList[string(key[:])] = value
-			count++
-		}
-
-		//	fmt.Println("count:", count)
-		if (count >= 1 && count%200 == 0) || it.Next() == false {
-			dispatcher.SendKv(tempKvList)
-			batch_count++
-			tempKvList = make(map[string][]byte)
-		}
-
-		/*
-			if count%1000 == 0 {
-				log.Info("migrating database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
-				//logged = time.Now()
-				start = time.Now()
+	go func() {
+		defer wg.Done()
+		defer it.Release()
+		tempKvList := make(map[string][]byte)
+		for it.Next() {
+			var (
+				key   = it.Key()
+				value = it.Value()
+			)
+			if len(key) == common.HashLength {
+				tempKvList[string(key[:])] = value
+				count++
 			}
-		*/
-		if count == 10000000 {
-			break
-		}
-	}
-	fmt.Println("send batch num:", batch_count, "key num", count)
 
-	dispatcher.setTaskNum(batch_count)
+			//	fmt.Println("count:", count)
+			if (count >= 1 && count%200 == 0) || it.Next() == false {
+				dispatcher.SendKv(tempKvList)
+				batch_count++
+				tempKvList = make(map[string][]byte)
+			}
+
+			if count == 5000000 {
+				break
+			}
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		defer it2.Release()
+		tempKvList2 := make(map[string][]byte)
+		for it2.Next() {
+			var (
+				key   = it2.Key()
+				value = it2.Value()
+			)
+			if len(key) == common.HashLength {
+				tempKvList2[string(key[:])] = value
+				count2++
+			}
+
+			//	fmt.Println("count:", count)
+			if (count >= 1 && count%100 == 0) || it.Next() == false {
+				dispatcher.SendKv(tempKvList2)
+				batch_count2++
+				tempKvList2 = make(map[string][]byte)
+			}
+
+			if count2 == 5000000 {
+				break
+			}
+		}
+	}()
+
+	wg.Wait()
+	fmt.Println("send batch num:", batch_count, "key num", count)
+	fmt.Println("send batch2 num:", batch_count2, "key num", count2)
+	dispatcher.setTaskNum(batch_count + batch_count2)
 	dispatcher.Close()
 
 	fmt.Println("migrate database stop, cost time:", time.Since(start).Nanoseconds()/1000000)
