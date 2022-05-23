@@ -583,7 +583,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte) error {
 	buf1 := make([]byte, 8)
 	binary.BigEndian.PutUint64(buf1, 0)
 	buf2 := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf2, 3000000)
+	binary.BigEndian.PutUint64(buf2, 2000000)
 	it := db.NewIterator([]byte(""), []byte(""))
 	it2 := db.NewIterator([]byte(""), buf2)
 
@@ -611,10 +611,8 @@ func MigrateDatabase(db ethdb.Database, ip []byte) error {
 				key   = it.Key()
 				value = it.Value()
 			)
-			if len(key) == common.HashLength {
-				tempKvList[string(key[:])] = value
-				count++
-			}
+			tempKvList[string(key[:])] = value
+			count++
 
 			//	fmt.Println("count:", count)
 			if (count >= 1 && count%200 == 0) || it.Next() == false {
@@ -623,7 +621,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte) error {
 				tempKvList = make(map[string][]byte)
 			}
 
-			if count == 5000000 {
+			if count == 10000000 {
 				break
 			}
 		}
@@ -638,10 +636,8 @@ func MigrateDatabase(db ethdb.Database, ip []byte) error {
 				key   = it2.Key()
 				value = it2.Value()
 			)
-			if len(key) == common.HashLength {
-				tempKvList2[string(key[:])] = value
-				count2++
-			}
+			tempKvList2[string(key[:])] = value
+			count2++
 
 			//	fmt.Println("count:", count)
 			if (count2 >= 1 && count2%100 == 0) || it2.Next() == false {
@@ -650,7 +646,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte) error {
 				tempKvList2 = make(map[string][]byte)
 			}
 
-			if count2 == 5000000 {
+			if count2 == 10000000 {
 				break
 			}
 		}
