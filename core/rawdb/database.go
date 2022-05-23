@@ -576,32 +576,35 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	return nil
 }
 
-func MigrateDatabase(db ethdb.Database, ip []byte) error {
+func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapData bool, needAncient bool) error {
 	fmt.Println("begin migrate")
 	//it := db.NewIterator([]byte(""), []byte(""))
 
 	buf1 := make([]byte, 8)
 	binary.BigEndian.PutUint64(buf1, 0)
 	buf2 := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf2, 2000000)
+	binary.BigEndian.PutUint64(buf2, 500000000)
+
 	it := db.NewIterator([]byte(""), []byte(""))
+
 	it2 := db.NewIterator([]byte(""), buf2)
 
 	start := time.Now()
-	dispatcher := MigrateStart()
+	// start a task dispatcher with 1000 threads
+	dispatcher := MigrateStart(1000)
 
 	var (
 		count        int64
 		batch_count  uint64
 		count2       int64
 		batch_count2 uint64
-		// start       = time.Now()
-		//	logged = time.Now()
 	)
+	// init remote db for data sending
 	InitDb()
+
 	var wg sync.WaitGroup
 	wg.Add(2)
-	// Inspect key-value database first.
+	// generate two producer to inspect key-value database and make jobs
 	go func() {
 		defer wg.Done()
 		defer it.Release()
@@ -614,14 +617,12 @@ func MigrateDatabase(db ethdb.Database, ip []byte) error {
 			tempKvList[string(key[:])] = value
 			count++
 
-			//	fmt.Println("count:", count)
-			if (count >= 1 && count%200 == 0) || it.Next() == false {
+			if (count >= 1 && count%100 == 0) || it.Next() == false {
 				dispatcher.SendKv(tempKvList)
 				batch_count++
 				tempKvList = make(map[string][]byte)
 			}
-
-			if count == 10000000 {
+			if count > 10000000 {
 				break
 			}
 		}
@@ -630,23 +631,21 @@ func MigrateDatabase(db ethdb.Database, ip []byte) error {
 	go func() {
 		defer wg.Done()
 		defer it2.Release()
-		tempKvList2 := make(map[string][]byte)
+		tempKvList := make(map[string][]byte)
 		for it2.Next() {
 			var (
 				key   = it2.Key()
 				value = it2.Value()
 			)
-			tempKvList2[string(key[:])] = value
+			tempKvList[string(key[:])] = value
 			count2++
 
-			//	fmt.Println("count:", count)
 			if (count2 >= 1 && count2%100 == 0) || it2.Next() == false {
-				dispatcher.SendKv(tempKvList2)
+				dispatcher.SendKv(tempKvList)
 				batch_count2++
-				tempKvList2 = make(map[string][]byte)
+				tempKvList = make(map[string][]byte)
 			}
-
-			if count2 == 10000000 {
+			if count > 10000000 {
 				break
 			}
 		}
@@ -656,7 +655,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte) error {
 	fmt.Println("send batch num:", batch_count, "key num", count)
 	fmt.Println("send batch2 num:", batch_count2, "key num", count2)
 	dispatcher.setTaskNum(batch_count + batch_count2)
-	dispatcher.Close()
+	dispatcher.Close(true)
 
 	fmt.Println("migrate database stop, cost time:", time.Since(start).Nanoseconds()/1000000)
 	return nil

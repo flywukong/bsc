@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -221,6 +222,38 @@ func (db *RocksDB) handleExceptionKey() {
 			it.Release()
 		}
 	}
+}
+
+func (db *RocksDB) CheckError() error {
+	var failNum int64
+	var failRemain int64
+
+	failKvList := make(map[string][]byte)
+	ctx := context.Background()
+	it := db.persistCache.NewIterator(reWriteKeyPrefix, nil)
+	for it.Next() {
+		exceptionKey := it.Key()
+		failNum++
+		key := exceptionKey[len(reWriteKeyPrefix):]
+		val := it.Value()
+		if err := db.client.Set(ctx, string(key), string(val), 0).Err(); err != nil {
+			log.Debug("remotedb rewrite exception failed", "err", err)
+			failRemain++
+			failKvList[string(key)] = val
+			continue
+		}
+		db.persistCache.Delete(exceptionKey)
+	}
+	it.Release()
+	if failNum > 0 {
+		log.Error("first check ail kv num:" + strconv.FormatInt(failNum, 10))
+	}
+	if failRemain > 0 {
+		// todo (wayen) write fail kv to a file or db
+		log.Error("second check fail again  kv num:" + strconv.FormatInt(failRemain, 10))
+		return errors.New("try to migrate kv fail")
+	}
+	return nil
 }
 
 // batch is a write-only that commits changes to its host database

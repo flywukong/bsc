@@ -246,7 +246,7 @@ func migrate(ctx *cli.Context) error {
 	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
 
-	return rawdb.MigrateDatabase(db, ip)
+	return rawdb.MigrateDatabase(db, ip, true, true, true)
 }
 
 func removeDB(ctx *cli.Context) error {

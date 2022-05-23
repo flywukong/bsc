@@ -149,8 +149,7 @@ func NewDispatcher(maxWorkers uint64) *Dispatcher {
 }
 
 func (d *Dispatcher) setTaskNum(num uint64) {
-	fmt.Println("set task num", num)
-	atomic.StoreUint64(&d.taskNum, num)
+	d.taskNum = num
 }
 
 func (d *Dispatcher) Run() {
@@ -189,14 +188,14 @@ func (d *Dispatcher) SendKv(list map[string][]byte) {
 	d.taskQueue <- work
 }
 
-func MigrateStart() *Dispatcher {
-	dispatcher := NewDispatcher(1000)
+func MigrateStart(workersize uint64) *Dispatcher {
+	dispatcher := NewDispatcher(workersize)
 	dispatcher.Run()
-	fmt.Println("dispatcher begin run")
+
 	return dispatcher
 }
 
-func (p *Dispatcher) Close() {
+func (p *Dispatcher) Close(checkErr bool) bool {
 	// p.setStatus(STOPED) // 设置 status 为已停止
 	time.Sleep(10 * time.Second)
 	for {
@@ -204,10 +203,22 @@ func (p *Dispatcher) Close() {
 			fmt.Println("get tasknu enough", GetDoneTaskNum(), p.taskNum)
 			break
 		} else {
-			fmt.Println("get tasknu not enough", GetDoneTaskNum(), p.taskNum)
 			time.Sleep(10 * time.Second)
 		}
 	}
+	// check if some task fail
+	doneAllTask := false
+	if checkErr {
+		err := KvrocksDB.CheckError()
+		if err != nil {
+			doneAllTask = false
+		}
+	}
+	doneAllTask = true
 
-	close(p.taskQueue) // 关闭任务队列
+	close(p.taskQueue) // close task queue
+	if doneAllTask {
+		fmt.Println("finish all migrate tasks")
+	}
+	return doneAllTask
 }
