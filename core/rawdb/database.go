@@ -576,14 +576,47 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	return nil
 }
 
+func isBlockData(key []byte) bool {
+	if bytes.HasPrefix(key, headerPrefix) && len(key) == (len(headerPrefix)+8+common.HashLength) {
+		return true
+	}
+	if bytes.HasPrefix(key, blockBodyPrefix) && len(key) == (len(blockBodyPrefix)+8+common.HashLength) {
+		return true
+	}
+
+	if bytes.HasPrefix(key, blockReceiptsPrefix) && len(key) == (len(blockReceiptsPrefix)+8+common.HashLength) {
+		return true
+	}
+
+	if bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerTDSuffix) {
+		return true
+	}
+
+	if bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerHashSuffix) {
+		return true
+	}
+
+	if bytes.HasPrefix(key, headerNumberPrefix) && len(key) == (len(headerNumberPrefix)+common.HashLength) {
+		return true
+	}
+
+	return false
+}
+
+func isSnapData(key []byte) bool {
+	if (bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)) || (bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)) {
+		return true
+	}
+	return false
+}
+
 func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapData bool, needAncient bool) error {
 	fmt.Println("begin migrate")
-	//it := db.NewIterator([]byte(""), []byte(""))
 
 	buf1 := make([]byte, 8)
 	binary.BigEndian.PutUint64(buf1, 0)
 	buf2 := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf2, 200000000)
+	binary.BigEndian.PutUint64(buf2, 20000000)
 
 	it := db.NewIterator([]byte(""), []byte(""))
 
@@ -614,6 +647,15 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 				key   = it.Key()
 				value = it.Value()
 			)
+			/*
+				if !needBlockData && isBlockData(key) {
+					continue
+				}
+				if !needSnapData && isSnapData(key) {
+					continue
+				}
+			*/
+			 
 			tempKvList[string(key[:])] = value
 			count++
 
@@ -637,6 +679,16 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 				key   = it2.Key()
 				value = it2.Value()
 			)
+			/*
+				if !needBlockData && isBlockData(key) {
+					continue
+				}
+
+				if !needSnapData && isSnapData(key) {
+					continue
+				}
+			*/
+
 			tempKvList[string(key[:])] = value
 			count2++
 
@@ -650,7 +702,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 			}
 		}
 	}()
-
+	wg.Wait()
 	fmt.Println("send batch num:", batch_count, "key num", count)
 	fmt.Println("send batch2 num:", batch_count2, "key num", count2)
 
