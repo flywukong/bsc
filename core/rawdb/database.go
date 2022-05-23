@@ -647,15 +647,14 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 				key   = it.Key()
 				value = it.Value()
 			)
-			/*
-				if !needBlockData && isBlockData(key) {
-					continue
-				}
-				if !needSnapData && isSnapData(key) {
-					continue
-				}
-			*/
-			 
+
+			if !needBlockData && isBlockData(key) {
+				continue
+			}
+			if !needSnapData && isSnapData(key) {
+				continue
+			}
+
 			tempKvList[string(key[:])] = value
 			count++
 
@@ -679,15 +678,14 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 				key   = it2.Key()
 				value = it2.Value()
 			)
-			/*
-				if !needBlockData && isBlockData(key) {
-					continue
-				}
 
-				if !needSnapData && isSnapData(key) {
-					continue
-				}
-			*/
+			if !needBlockData && isBlockData(key) {
+				continue
+			}
+
+			if !needSnapData && isSnapData(key) {
+				continue
+			}
 
 			tempKvList[string(key[:])] = value
 			count2++

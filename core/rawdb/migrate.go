@@ -100,16 +100,13 @@ func (w *Worker) Start() {
 			select {
 			case job := <-w.JobChannel:
 				// send batch to kvrocks
-				fmt.Println("receive job")
 				if len(job.Kvbuffer) != 0 {
-					fmt.Println("receive jobs, not empty1")
 					if err := job.UploadToKvRocks(); err != nil {
 						//	log.Error("Error uploading to kvrocks: %s", err.Error())
 						fmt.Println("send kv rocks error")
 					}
 					incDoneTaskNum()
 				}
-				fmt.Println("receive job is empty")
 
 			case <-w.quit:
 				// we have received a signal to stop
