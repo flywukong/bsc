@@ -578,16 +578,15 @@ func MigrateDatabase(db ethdb.Database, ip []byte) error {
 	fmt.Println("begin migrate")
 	it := db.NewIterator([]byte(""), []byte(""))
 	defer it.Release()
-
+	start := time.Now()
 	dispatcher := MigrateStart()
 
 	var (
 		count       int64
 		batch_count uint64
-		start       = time.Now()
+		// start       = time.Now()
 		//	logged = time.Now()
 	)
-
 	InitDb()
 	// Inspect key-value database first.
 	tempKvList := make(map[string][]byte)
@@ -608,12 +607,13 @@ func MigrateDatabase(db ethdb.Database, ip []byte) error {
 			tempKvList = make(map[string][]byte)
 		}
 
-		if count%1000 == 0 {
-			log.Info("migrating database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
-			//logged = time.Now()
-			start = time.Now()
-		}
-
+		/*
+			if count%1000 == 0 {
+				log.Info("migrating database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
+				//logged = time.Now()
+				start = time.Now()
+			}
+		*/
 		if count == 10000000 {
 			break
 		}
@@ -623,6 +623,6 @@ func MigrateDatabase(db ethdb.Database, ip []byte) error {
 	dispatcher.setTaskNum(batch_count)
 	dispatcher.Close()
 
-	log.Info("migrate database stop")
+	log.Info("migrate database stop, cost time:", time.Since(start).Nanoseconds()/1000000)
 	return nil
 }
