@@ -663,7 +663,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 				batch_count++
 				tempKvList = make(map[string][]byte)
 			}
-			if count > 10000000 {
+			if count > 30000000 {
 				break
 			}
 		}
@@ -695,7 +695,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 				batch_count2++
 				tempKvList = make(map[string][]byte)
 			}
-			if count2 > 10000000 {
+			if count2 > 30000000 {
 				break
 			}
 		}
