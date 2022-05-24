@@ -706,6 +706,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 
 	start = time.Now()
 	dispatcher.setTaskNum(batch_count + batch_count2)
+
 	dispatcher.Close(true)
 
 	fmt.Println("migrate database stop, cost time:", time.Since(start).Nanoseconds()/1000000)
