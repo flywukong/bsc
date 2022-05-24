@@ -614,9 +614,9 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 	fmt.Println("begin migrate")
 
 	buf1 := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf1, 0)
+	binary.LittleEndian.PutUint64(buf1, 0)
 	buf2 := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf2, 200000000)
+	binary.LittleEndian.PutUint64(buf2, 200000000)
 
 	it := db.NewIterator([]byte(""), []byte(""))
 
@@ -663,7 +663,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 				batch_count++
 				tempKvList = make(map[string][]byte)
 			}
-			if count > 30000000 {
+			if count > 30000 {
 				break
 			}
 		}
@@ -695,7 +695,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 				batch_count2++
 				tempKvList = make(map[string][]byte)
 			}
-			if count2 > 30000000 {
+			if count2 > 300000 {
 				break
 			}
 		}

@@ -516,5 +516,6 @@ func (r *replayer) Delete(key []byte) {
 func bytesPrefixRange(prefix, start []byte) *util.Range {
 	r := util.BytesPrefix(prefix)
 	r.Start = append(r.Start, start...)
+	fmt.Println("r.Start", start)
 	return r
 }
