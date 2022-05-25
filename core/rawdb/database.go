@@ -669,8 +669,13 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 			isbatchFirstKey = true
 			tempBatch = make(map[string][]byte)
 		}
+
+		if count >= 2000000 {
+			break
+		}
 	}
 
+	checkNum := 1
 	ticker := time.NewTicker(1 * time.Second)
 	go func() {
 		defer ticker.Stop()
@@ -681,6 +686,11 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 					fmt.Println("some task fail after retry")
 					panic("task fail")
 				}
+			}
+			checkNum++
+			if checkNum == 3 {
+				fmt.Println("some task fail after retry")
+				panic("task fail")
 			}
 		}
 	}()
