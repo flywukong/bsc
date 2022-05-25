@@ -18,17 +18,16 @@ package rawdb
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
 	"os"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/olekukonko/tablewriter"
 
+	"container/list"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
@@ -612,100 +611,83 @@ func isSnapData(key []byte) bool {
 
 func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapData bool, needAncient bool) error {
 	fmt.Println("begin migrate")
+	// buf1 := make([]byte, 8)
+	// binary.LittleEndian.PutUint64(buf1, 0)
 
-	buf1 := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf1, 0)
-	buf2 := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf2, 200000000)
+	var startKey []byte
+	// todo(wayen) get startKey from db if exist
+	it := db.NewIterator([]byte(""), startKey)
 
-	it := db.NewIterator([]byte(""), []byte(""))
+	// todo(wayen) store tasklist keys
 
-	it2 := db.NewIterator([]byte(""), buf2)
+	// taskList store recent 5000 batch conteets
+	taskList := list.New()
 
 	start := time.Now()
 	// start a task dispatcher with 1000 threads
 	dispatcher := MigrateStart(1000)
 
 	var (
-		count        int64
-		batch_count  uint64
-		count2       int64
-		batch_count2 uint64
+		count       int64
+		batch_count uint64
 	)
 	// init remote db for data sending
 	InitDb()
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-	// generate two producer to inspect key-value database and make jobs
+	defer it.Release()
+	tempBatch := make(map[string][]byte)
+	isbatchFirstKey := false
+
+	for it.Next() {
+		var (
+			key   = it.Key()
+			value = it.Value()
+		)
+
+		if isbatchFirstKey {
+			taskList.PushBack(key)
+			isbatchFirstKey = false
+			if taskList.Len() > 5000 {
+				taskList.Remove(taskList.Front())
+			}
+		}
+
+		if !needBlockData && isBlockData(key) {
+			continue
+		}
+		if !needSnapData && isSnapData(key) {
+			continue
+		}
+
+		tempBatch[string(key[:])] = value
+		count++
+
+		if (count >= 1 && count%100 == 0) || it.Next() == false {
+			// make a batch as a job, send it to worker pool
+			dispatcher.SendKv(tempBatch)
+			batch_count++
+			isbatchFirstKey = true
+			tempBatch = make(map[string][]byte)
+		}
+	}
+
+	ticker := time.NewTicker(1 * time.Second)
 	go func() {
-		defer wg.Done()
-		defer it.Release()
-		tempKvList := make(map[string][]byte)
-		for it.Next() {
-			var (
-				key   = it.Key()
-				value = it.Value()
-			)
-
-			if !needBlockData && isBlockData(key) {
-				continue
-			}
-			if !needSnapData && isSnapData(key) {
-				continue
-			}
-
-			tempKvList[string(key[:])] = value
-			count++
-
-			if (count >= 1 && count%100 == 0) || it.Next() == false {
-				dispatcher.SendKv(tempKvList)
-				batch_count++
-				tempKvList = make(map[string][]byte)
-			}
-			if count > 30000 {
-				break
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if GetFailFlag() == 1 {
+					fmt.Println("some task fail after retry")
+					panic("task fail")
+				}
 			}
 		}
 	}()
 
-	go func() {
-		defer wg.Done()
-		defer it2.Release()
-		tempKvList := make(map[string][]byte)
-		for it2.Next() {
-			var (
-				key   = it2.Key()
-				value = it2.Value()
-			)
-
-			if !needBlockData && isBlockData(key) {
-				continue
-			}
-
-			if !needSnapData && isSnapData(key) {
-				continue
-			}
-
-			tempKvList[string(key[:])] = value
-			count2++
-
-			if (count2 >= 1 && count2%100 == 0) || it2.Next() == false {
-				dispatcher.SendKv(tempKvList)
-				batch_count2++
-				tempKvList = make(map[string][]byte)
-			}
-			if count2 > 300000 {
-				break
-			}
-		}
-	}()
-	wg.Wait()
 	fmt.Println("send batch num:", batch_count, "key num", count)
-	fmt.Println("send batch2 num:", batch_count2, "key num", count2)
 
-	start = time.Now()
-	dispatcher.setTaskNum(batch_count + batch_count2)
+	dispatcher.setTaskNum(batch_count)
 
 	dispatcher.Close(true)
 

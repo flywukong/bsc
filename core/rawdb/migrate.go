@@ -26,6 +26,8 @@ var (
 	// kvrocksDB, _ = remotedb.NewRocksDB(remotedb.DefaultConfig2(addr), persistCache, false)
 
 	DoneTaskNum uint64
+
+	TaskFail int64
 )
 
 var ctx = context.Background()
@@ -102,8 +104,19 @@ func (w *Worker) Start() {
 				// send batch to kvrocks
 				if len(job.Kvbuffer) != 0 {
 					if err := job.UploadToKvRocks(); err != nil {
-						//	log.Error("Error uploading to kvrocks: %s", err.Error())
-						fmt.Println("send kv rocks error")
+						retrySucc := false
+						// retry for 5 times
+						for i := 0; i < 5; i++ {
+							err = job.UploadToKvRocks()
+							if err == nil {
+								retrySucc = true
+								break
+							}
+						}
+						if !retrySucc {
+							fmt.Println("send kv rocks error", err.Error())
+							MarkTaskFail()
+						}
 					}
 					incDoneTaskNum()
 				}
@@ -123,6 +136,17 @@ func (w Worker) Stop() {
 	}()
 }
 
+func initFailFlag() {
+	atomic.StoreInt64(&TaskFail, 0)
+}
+func MarkTaskFail() {
+	atomic.StoreInt64(&TaskFail, 1)
+}
+
+func GetFailFlag() int64 {
+	return atomic.LoadInt64(&TaskFail)
+}
+
 type Dispatcher struct {
 	// A pool of workers channels that are registered with the dispatcher
 	WorkerPool chan chan Job
@@ -140,6 +164,7 @@ func GetDoneTaskNum() uint64 {
 }
 
 func NewDispatcher(maxWorkers uint64) *Dispatcher {
+	initFailFlag()
 	pool := make(chan chan Job, maxWorkers)
 	return &Dispatcher{WorkerPool: pool, maxWorkers: maxWorkers,
 		taskQueue: make(chan Job)}
