@@ -631,8 +631,6 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 
 	it := db.NewIterator([]byte(""), startKey)
 
-	// todo(wayen) store tasklist keys
-
 	// taskList store recent 5000 batch conteets
 	taskList := list.New()
 
@@ -659,14 +657,14 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 		)
 
 		if isbatchFirstKey {
-			fmt.Println("batch first key,", key)
-			taskList.PushBack(key)
+			//	fmt.Println("batch first key,", key)
+			taskList.PushBack(string(key))
 			isbatchFirstKey = false
 			if taskList.Len() > 2000000 {
 				taskList.Remove(taskList.Front())
 			}
 			fmt.Println("queue first key:", taskList.Front().Value)
-			fmt.Println("queue last key:", taskList.Back().Value)
+			//	fmt.Println("queue last key:", taskList.Back().Value)
 		}
 
 		if !needBlockData && isBlockData(key) {
@@ -719,8 +717,8 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 					startDB, _ := leveldb.New(path+"/startdb", 5000, 200, "chaindata", false)
 					key := taskList.Front().Value
 					//	byteKey := []byte(fmt.Sprintf("%v", key.(interface{})))
-					fmt.Println("write first key:", key.([]byte))
-					err := startDB.Put([]byte("startKey"), key.([]byte))
+					fmt.Println("write first key:", key)
+					err := startDB.Put([]byte("startKey"), []byte(key.(string)))
 					if err != nil {
 						fmt.Println("write first key error:", err.Error())
 					}
