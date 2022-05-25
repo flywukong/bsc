@@ -120,7 +120,6 @@ func (w *Worker) Start() {
 							MarkTaskFail()
 						}
 					}
-					fmt.Println("finish job id:", job.JobId)
 					incDoneTaskNum()
 				}
 

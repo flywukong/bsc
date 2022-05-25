@@ -28,6 +28,7 @@ import (
 	"github.com/olekukonko/tablewriter"
 
 	"container/list"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
@@ -609,17 +610,12 @@ func isSnapData(key []byte) bool {
 	return false
 }
 
-func getUnFinishTask() {
-
-}
-
 func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapData bool, needAncient bool) error {
 	fmt.Println("begin migrate")
 	// buf1 := make([]byte, 8)
 	// binary.LittleEndian.PutUint64(buf1, 0)
-
 	var startKey []byte
-	// todo(wayen) get startKey from db if exist
+	// get startKey from db if exist
 	path, _ := os.Getwd()
 	startDB, _ := leveldb.New(path+"/startdb", 5000, 200, "chaindata", false)
 	startKey, err := startDB.Get([]byte("startKey"))
@@ -631,8 +627,37 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 
 	it := db.NewIterator([]byte(""), startKey)
 
-	// taskList store recent 5000 batch conteets
-	taskList := list.New()
+	// taskQueue store recent 5000 batch conteets
+	taskQueue := list.New()
+
+	ticker := time.NewTicker(1 * time.Second)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if GetFailFlag() == 1 {
+					fmt.Println("some task fail after retry")
+					path, _ := os.Getwd()
+					if startDB == nil {
+						startDB, _ = leveldb.New(path+"/startdb", 5000, 200, "chaindata", false)
+					}
+					key := taskQueue.Front().Value
+					//	byteKey := []byte(fmt.Sprintf("%v", key.(interface{})))
+					fmt.Println("write first key:", key)
+
+					// mark the fail key, and panic
+					if startDB != nil {
+						err = startDB.Put([]byte("startKey"), []byte(key.(string)))
+						if err != nil {
+							fmt.Println("write first key error:", err.Error())
+						}
+					}
+					panic("task fail")
+				}
+			}
+		}
+	}()
 
 	start := time.Now()
 	// start a task dispatcher with 1000 threads
@@ -657,14 +682,13 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 		)
 
 		if isbatchFirstKey {
-			//	fmt.Println("batch first key,", key)
-			taskList.PushBack(string(key))
+			// push the first key of batch into queue
+			taskQueue.PushBack(string(key))
+
 			isbatchFirstKey = false
-			if taskList.Len() > 2000000 {
-				taskList.Remove(taskList.Front())
+			if taskQueue.Len() > 2000000 {
+				taskQueue.Remove(taskQueue.Front())
 			}
-			fmt.Println("queue first key:", taskList.Front().Value)
-			//	fmt.Println("queue last key:", taskList.Back().Value)
 		}
 
 		if !needBlockData && isBlockData(key) {
@@ -683,56 +707,19 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 			dispatcher.SendKv(tempBatch, batch_count)
 			// if producer much faster than workers, make it slower
 			if batch_count > GetDoneTaskNum()+5000 {
+				fmt.Println("producer diff:", batch_count-GetDoneTaskNum())
 				time.Sleep(3 * time.Second)
 			}
 			isbatchFirstKey = true
 			tempBatch = make(map[string][]byte)
 		}
-
-		if count >= 300000 {
-			fmt.Println("queue first key:", taskList.Front().Value)
-			break
-		}
 	}
-
-	ticker := time.NewTicker(1 * time.Second)
-	write := false
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if GetFailFlag() == 1 {
-					fmt.Println("some task fail after retry")
-					path, _ := os.Getwd()
-					startDB, _ := leveldb.New(path+"/startdb", 5000, 200, "chaindata", false)
-					key := taskList.Front().Value
-					byteKey := []byte(fmt.Sprintf("%v", key.(interface{})))
-					startDB.Put([]byte("startKey"), byteKey)
-					panic("task fail")
-				}
-
-				if write == false && taskList.Len() > 0 {
-					path, _ := os.Getwd()
-					startDB, _ := leveldb.New(path+"/startdb", 5000, 200, "chaindata", false)
-					key := taskList.Front().Value
-					//	byteKey := []byte(fmt.Sprintf("%v", key.(interface{})))
-					fmt.Println("write first key:", key)
-					err := startDB.Put([]byte("startKey"), []byte(key.(string)))
-					if err != nil {
-						fmt.Println("write first key error:", err.Error())
-					}
-					write = true
-				}
-			}
-		}
-	}()
 
 	fmt.Println("send batch num:", batch_count, "key num", count)
 
 	dispatcher.setTaskNum(batch_count)
 
-	dispatcher.Close(true)
+	dispatcher.Close(false)
 
 	fmt.Println("migrate database stop, cost time:", time.Since(start).Nanoseconds()/1000000)
 	return nil
