@@ -628,7 +628,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 	} else {
 		fmt.Println("get first key error", err.Error())
 	}
-	
+
 	it := db.NewIterator([]byte(""), startKey)
 
 	// todo(wayen) store tasklist keys
@@ -659,13 +659,14 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 		)
 
 		if isbatchFirstKey {
-			//	fmt.Println("batch first key,", key)
+			fmt.Println("batch first key,", key)
 			taskList.PushBack(key)
 			isbatchFirstKey = false
 			if taskList.Len() > 2000000 {
 				taskList.Remove(taskList.Front())
 			}
 			fmt.Println("queue first key:", taskList.Front().Value)
+			fmt.Println("queue last key:", taskList.Back().Value)
 		}
 
 		if !needBlockData && isBlockData(key) {
@@ -691,12 +692,13 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 		}
 
 		if count >= 300000 {
+			fmt.Println("queue first key:", taskList.Front().Value)
 			break
 		}
 	}
 
 	ticker := time.NewTicker(1 * time.Second)
-	num := 0
+	write := false
 	go func() {
 		defer ticker.Stop()
 		for {
@@ -711,8 +713,8 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 					startDB.Put([]byte("startKey"), byteKey)
 					panic("task fail")
 				}
-				num++
-				if num == 1 {
+
+				if write == false && taskList.Len() > 0 {
 					path, _ := os.Getwd()
 					startDB, _ := leveldb.New(path+"/startdb", 5000, 200, "chaindata", false)
 					key := taskList.Front().Value
