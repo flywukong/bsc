@@ -385,6 +385,23 @@ func AncientInspect(db ethdb.Database) error {
 	} else {
 		endNumber = offset + ancients - 1
 	}
+
+	fmt.Println("offset:", db.AncientOffSet())
+	aa, _ := db.Ancients()
+	fmt.Println("fozen:", aa)
+
+	var i uint64
+	ancient_num := 0
+	for i = db.AncientOffSet(); i < aa; i++ {
+		//ancientSizes := []*common.StorageSize{&ancientHeadersSize, &ancientBodiesSize, &ancientReceiptsSize, &ancientHashesSize, &ancientTdsSize}
+		for _, category := range []string{freezerHeaderTable, freezerBodiesTable, freezerReceiptTable, freezerHashTable, freezerDifficultyTable} {
+			if content, err := db.Ancient(category, i); err == nil {
+				ancient_num++
+				fmt.Println("ancient conetent:", content)
+			}
+		}
+	}
+	fmt.Println("ancient test total num:", ancient_num)
 	stats := [][]string{
 		{"Offset/StartBlockNumber", "Offset/StartBlockNumber of ancientDB", offset.String()},
 		{"Amount of remained items in AncientStore", "Remaining items of ancientDB", ancients.String()},
@@ -715,6 +732,26 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool, needSna
 		}
 	}
 
+	// deal with ancient data
+	/*
+		offset := counter(ReadOffSetOfCurrentAncientFreezer(db))
+		// Get number of ancient rows inside the freezer.
+		ancients := counter(0)
+		if count, err := db.ItemAmountInAncient(); err != nil {
+			log.Error("failed to get the items amount in ancientDB", "err", err)
+			return err
+		} else {
+			ancients = counter(count)
+		}
+		var endNumber counter
+		if offset+ancients <= 0 {
+			endNumber = 0
+		} else {
+			endNumber = offset + ancients - 1
+		}
+
+		for i:= offset; i <
+	*/
 	fmt.Println("send batch num:", batch_count, "key num", count)
 
 	dispatcher.setTaskNum(batch_count)
