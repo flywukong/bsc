@@ -724,6 +724,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 					if err != nil {
 						fmt.Println("write first key error:", err.Error())
 					}
+					write = true
 				}
 			}
 		}
