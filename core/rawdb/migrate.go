@@ -142,8 +142,10 @@ func (w Worker) Stop() {
 func initFailFlag() {
 	atomic.StoreInt64(&TaskFail, 0)
 }
+
 func MarkTaskFail() {
 	atomic.StoreInt64(&TaskFail, 1)
+	atomic.AddUint64(&FailTaskNum, 1)
 }
 
 func GetFailFlag() int64 {

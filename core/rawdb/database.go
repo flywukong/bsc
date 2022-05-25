@@ -620,6 +620,12 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 
 	var startKey []byte
 	// todo(wayen) get startKey from db if exist
+	path, _ := os.Getwd()
+	startDB, _ := leveldb.New(path+"/startdb", 5000, 200, "chaindata", false)
+	startKey, err := startDB.Get([]byte("startKey"))
+	if err == nil {
+		fmt.Println("get start key:", startKey)
+	}
 	it := db.NewIterator([]byte(""), startKey)
 
 	// todo(wayen) store tasklist keys
@@ -650,11 +656,13 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 		)
 
 		if isbatchFirstKey {
+			//	fmt.Println("batch first key,", key)
 			taskList.PushBack(key)
 			isbatchFirstKey = false
-			if taskList.Len() > 5000 {
+			if taskList.Len() > 2000000 {
 				taskList.Remove(taskList.Front())
 			}
+			fmt.Println("queue first key:", taskList.Front().Value)
 		}
 
 		if !needBlockData && isBlockData(key) {
@@ -671,33 +679,44 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 			// make a batch as a job, send it to worker pool
 			batch_count++
 			dispatcher.SendKv(tempBatch, batch_count)
+			// if producer much faster than workers, make it slower
+			if batch_count > GetDoneTaskNum()+5000 {
+				time.Sleep(3 * time.Second)
+			}
 			isbatchFirstKey = true
 			tempBatch = make(map[string][]byte)
 		}
 
-		if count >= 3000000 {
+		if count >= 300000 {
 			break
 		}
 	}
-	/*
-		ticker := time.NewTicker(1 * time.Second)
-		go func() {
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					if GetFailFlag() == 1 {
-						fmt.Println("some task fail after retry")
-						path, _ := os.Getwd()
-						startDB, _ := leveldb.New(path+"/startdb", 5000, 200, "chaindata", false)
-						//a := *taskList.Front()
-						startDB.Put([]byte("startKey"), []byte("startKey"))
-						panic("task fail")
-					}
+
+	ticker := time.NewTicker(1 * time.Second)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if GetFailFlag() == 1 {
+					fmt.Println("some task fail after retry")
+					path, _ := os.Getwd()
+					startDB, _ := leveldb.New(path+"/startdb", 5000, 200, "chaindata", false)
+					key := taskList.Front().Value
+					byteKey := []byte(fmt.Sprintf("%v", key.(interface{})))
+					startDB.Put([]byte("startKey"), byteKey)
+					panic("task fail")
 				}
+				path, _ := os.Getwd()
+				startDB, _ := leveldb.New(path+"/startdb", 5000, 200, "chaindata", false)
+				key := taskList.Front().Value
+				//	byteKey := []byte(fmt.Sprintf("%v", key.(interface{})))
+				fmt.Println("write first key:", key.([]byte))
+				startDB.Put([]byte("startKey"), key.([]byte))
 			}
-		}()
-	*/
+		}
+	}()
+
 	fmt.Println("send batch num:", batch_count, "key num", count)
 
 	dispatcher.setTaskNum(batch_count)
