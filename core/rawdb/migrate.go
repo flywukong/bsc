@@ -26,8 +26,9 @@ var (
 	// kvrocksDB, _ = remotedb.NewRocksDB(remotedb.DefaultConfig2(addr), persistCache, false)
 
 	DoneTaskNum uint64
-
-	TaskFail int64
+	SuccTaskNum uint64
+	FailTaskNum uint64
+	TaskFail    int64
 )
 
 var ctx = context.Background()
@@ -75,6 +76,7 @@ var JobQueue chan Job
 
 type Job struct {
 	Kvbuffer map[string][]byte
+	JobId    uint64
 }
 
 // Worker represents the worker that executes the job
@@ -118,6 +120,7 @@ func (w *Worker) Start() {
 							MarkTaskFail()
 						}
 					}
+					fmt.Println("finish job id:", job.JobId)
 					incDoneTaskNum()
 				}
 
@@ -203,9 +206,9 @@ func (d *Dispatcher) dispatch() {
 	}
 }
 
-func (d *Dispatcher) SendKv(list map[string][]byte) {
+func (d *Dispatcher) SendKv(list map[string][]byte, jobid uint64) {
 	// let's create a job with the payload
-	work := Job{list}
+	work := Job{list, jobid}
 	// Push the work onto the queue.
 	d.taskQueue <- work
 }

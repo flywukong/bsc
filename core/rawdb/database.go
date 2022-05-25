@@ -609,6 +609,10 @@ func isSnapData(key []byte) bool {
 	return false
 }
 
+func getUnFinishTask() {
+
+}
+
 func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapData bool, needAncient bool) error {
 	fmt.Println("begin migrate")
 	// buf1 := make([]byte, 8)
@@ -636,6 +640,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 
 	defer it.Release()
 	tempBatch := make(map[string][]byte)
+
 	isbatchFirstKey := false
 
 	for it.Next() {
@@ -664,37 +669,35 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 
 		if (count >= 1 && count%100 == 0) || it.Next() == false {
 			// make a batch as a job, send it to worker pool
-			dispatcher.SendKv(tempBatch)
 			batch_count++
+			dispatcher.SendKv(tempBatch, batch_count)
 			isbatchFirstKey = true
 			tempBatch = make(map[string][]byte)
 		}
 
-		if count >= 2000000 {
+		if count >= 3000000 {
 			break
 		}
 	}
-
-	checkNum := 1
-	ticker := time.NewTicker(1 * time.Second)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if GetFailFlag() == 1 {
-					fmt.Println("some task fail after retry")
-					panic("task fail")
+	/*
+		ticker := time.NewTicker(1 * time.Second)
+		go func() {
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					if GetFailFlag() == 1 {
+						fmt.Println("some task fail after retry")
+						path, _ := os.Getwd()
+						startDB, _ := leveldb.New(path+"/startdb", 5000, 200, "chaindata", false)
+						//a := *taskList.Front()
+						startDB.Put([]byte("startKey"), []byte("startKey"))
+						panic("task fail")
+					}
 				}
 			}
-			checkNum++
-			if checkNum == 3 {
-				fmt.Println("some task fail after retry")
-				panic("task fail")
-			}
-		}
-	}()
-
+		}()
+	*/
 	fmt.Println("send batch num:", batch_count, "key num", count)
 
 	dispatcher.setTaskNum(batch_count)
