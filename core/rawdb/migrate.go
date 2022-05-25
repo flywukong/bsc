@@ -7,6 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb/remotedb"
 	"github.com/go-redis/redis/v8"
 	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -33,18 +34,15 @@ var (
 
 var ctx = context.Background()
 
-func InitDb() {
-	var addr = []string{"172.25.41.114:6666", "172.25.41.114:6667"}
+func InitDb(addr string) {
 	path, _ := os.Getwd()
 	persistCache, _ := leveldb.New(path+"/persistcache", 5000, 200, "chaindata", false)
 	config := remotedb.DefaultConfig()
-	config.Addrs = addr
+	config.Addrs = strings.Split(addr, ",")
 	KvrocksDB, _ = remotedb.NewRocksDB(config, persistCache, false)
 }
 
 func (job *Job) UploadToKvRocks() error {
-	fmt.Println("try to upload kv, batch size:", len(job.Kvbuffer))
-
 	kvBatch := KvrocksDB.NewBatch()
 
 	for key, value := range job.Kvbuffer {
@@ -55,19 +53,6 @@ func (job *Job) UploadToKvRocks() error {
 		fmt.Println("send kv rocks error", err.Error())
 		return err
 	}
-
-	/*
-		for key, value := range job.Kvbuffer {
-			//	err := rdb.Set(context.Background(), string(key), string(value), 0).Err()
-			err := KvrocksDB.Put([]byte(key), value)
-			if err != nil {
-				//	fmt.Println("send key:", string(key), "error")
-				return err
-			}
-			//		fmt.Println("send key ", string(key), "finish")
-		}*/
-
-	fmt.Println("send batch finish")
 	return nil
 }
 

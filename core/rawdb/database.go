@@ -610,7 +610,7 @@ func isSnapData(key []byte) bool {
 	return false
 }
 
-func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapData bool, needAncient bool) error {
+func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool, needSnapData bool, needAncient bool) error {
 	fmt.Println("begin migrate")
 	// buf1 := make([]byte, 8)
 	// binary.LittleEndian.PutUint64(buf1, 0)
@@ -668,7 +668,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 		batch_count uint64
 	)
 	// init remote db for data sending
-	InitDb()
+	InitDb(addr)
 
 	defer it.Release()
 	tempBatch := make(map[string][]byte)

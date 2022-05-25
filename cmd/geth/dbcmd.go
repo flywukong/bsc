@@ -89,11 +89,7 @@ Remove blockchain and state databases`,
 		Flags: []cli.Flag{
 			utils.DataDirFlag,
 			utils.SyncModeFlag,
-			utils.MainnetFlag,
-			utils.RopstenFlag,
-			utils.RinkebyFlag,
-			utils.GoerliFlag,
-			utils.YoloV3Flag,
+			utils.RemoteDBAddr,
 		},
 		Usage:       "Migrate data in the database",
 		Description: `This commands iterates the entire database. If the optional 'prefix' and 'start' arguments are provided, then the iteration is limited to the given subset of data.`,
@@ -226,18 +222,8 @@ of ancientStore, will also displays the reserved number of blocks in ancientStor
 )
 
 func migrate(ctx *cli.Context) error {
-	var (
-		ip []byte
-	)
 	if ctx.NArg() > 1 {
 		return fmt.Errorf("Max 2 arguments: %v", ctx.Command.ArgsUsage)
-	}
-	if ctx.NArg() >= 1 {
-		if d, err := hexutil.Decode(ctx.Args().Get(0)); err != nil {
-			return fmt.Errorf("failed to hex-decode 'prefix': %v", err)
-		} else {
-			ip = d
-		}
 	}
 
 	stack, _ := makeConfigNode(ctx)
@@ -246,7 +232,13 @@ func migrate(ctx *cli.Context) error {
 	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
 
-	return rawdb.MigrateDatabase(db, ip, true, true, true)
+	// fmt.Println("ctx,", ctx.String(""))
+	var addr string
+	if ctx.GlobalIsSet(utils.RemoteDBAddr.Name) {
+		addr = ctx.GlobalString(utils.RemoteDBAddr.Name)
+	}
+
+	return rawdb.MigrateDatabase(db, addr, true, true, true)
 }
 
 func removeDB(ctx *cli.Context) error {
