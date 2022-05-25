@@ -625,7 +625,10 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 	startKey, err := startDB.Get([]byte("startKey"))
 	if err == nil {
 		fmt.Println("get start key:", startKey)
+	} else {
+		fmt.Println("get first key error", err.Error())
 	}
+	
 	it := db.NewIterator([]byte(""), startKey)
 
 	// todo(wayen) store tasklist keys
@@ -693,6 +696,7 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 	}
 
 	ticker := time.NewTicker(1 * time.Second)
+	num := 0
 	go func() {
 		defer ticker.Stop()
 		for {
@@ -707,12 +711,18 @@ func MigrateDatabase(db ethdb.Database, ip []byte, needBlockData bool, needSnapD
 					startDB.Put([]byte("startKey"), byteKey)
 					panic("task fail")
 				}
-				path, _ := os.Getwd()
-				startDB, _ := leveldb.New(path+"/startdb", 5000, 200, "chaindata", false)
-				key := taskList.Front().Value
-				//	byteKey := []byte(fmt.Sprintf("%v", key.(interface{})))
-				fmt.Println("write first key:", key.([]byte))
-				startDB.Put([]byte("startKey"), key.([]byte))
+				num++
+				if num == 1 {
+					path, _ := os.Getwd()
+					startDB, _ := leveldb.New(path+"/startdb", 5000, 200, "chaindata", false)
+					key := taskList.Front().Value
+					//	byteKey := []byte(fmt.Sprintf("%v", key.(interface{})))
+					fmt.Println("write first key:", key.([]byte))
+					err := startDB.Put([]byte("startKey"), key.([]byte))
+					if err != nil {
+						fmt.Println("write first key error:", err.Error())
+					}
+				}
 			}
 		}
 	}()
