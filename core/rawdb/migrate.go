@@ -26,10 +26,11 @@ var (
 	KvrocksDB *remotedb.RocksDB
 	// kvrocksDB, _ = remotedb.NewRocksDB(remotedb.DefaultConfig2(addr), persistCache, false)
 
-	DoneTaskNum uint64
-	SuccTaskNum uint64
-	FailTaskNum uint64
-	TaskFail    int64
+	DoneTaskNum     uint64
+	SuccTaskNum     uint64
+	FailTaskNum     uint64
+	TaskFail        int64
+	AncientTaskFail uint64
 )
 
 var ctx = context.Background()
@@ -60,8 +61,9 @@ func (job *Job) UploadToKvRocks() error {
 var JobQueue chan Job
 
 type Job struct {
-	Kvbuffer map[string][]byte
-	JobId    uint64
+	Kvbuffer  map[string][]byte
+	JobId     uint64
+	isAncient bool
 }
 
 // Worker represents the worker that executes the job
@@ -192,9 +194,9 @@ func (d *Dispatcher) dispatch() {
 	}
 }
 
-func (d *Dispatcher) SendKv(list map[string][]byte, jobid uint64) {
+func (d *Dispatcher) SendKv(list map[string][]byte, jobid uint64, isAncient bool) {
 	// let's create a job with the payload
-	work := Job{list, jobid}
+	work := Job{list, jobid, isAncient}
 	// Push the work onto the queue.
 	d.taskQueue <- work
 }

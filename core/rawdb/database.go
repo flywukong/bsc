@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -661,7 +662,108 @@ func isSnapData(key []byte) bool {
 	return false
 }
 
-func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool, needSnapData bool, needAncient bool) error {
+func splitArray(arr []uint64, num int64) [][]uint64 {
+	max := int64(len(arr))
+	if max < num {
+		return nil
+	}
+	var segmens = make([][]uint64, 0)
+	quantity := max / num
+	end := int64(0)
+	for i := int64(1); i <= num; i++ {
+		qu := i * quantity
+		if i != num {
+			segmens = append(segmens, arr[i-1+end:qu])
+		} else {
+			segmens = append(segmens, arr[i-1+end:])
+		}
+		end = qu - i
+	}
+	return segmens
+}
+
+func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber uint64) (tasknum uint64) {
+	frozenOffest, _ := db.Ancients()
+	var i uint64
+	// inpect ancient, from f.offset to fo f.frozen
+	blockNumList := []uint64{}
+	for i = startBlockNumber; i < frozenOffest; i++ {
+		blockNumList = append(blockNumList, i)
+	}
+	// make 8 thread to read ancient data
+	segments := splitArray(blockNumList, 8)
+	tasknum = uint64(0)
+	var wg sync.WaitGroup
+	wg.Add(8)
+	table1 := uint64(0)
+	//table1 = uint64(0)
+	table2 := uint64(0)
+	table3 := uint64(0)
+	table4 := uint64(0)
+	table5 := uint64(0)
+	start := time.Now()
+	for j := 0; j < len(segments); j++ {
+		go func(arr []uint64) {
+			var idx int
+			count := 0
+			batch_count := uint64(0)
+			tempBatch := make(map[string][]byte)
+			fmt.Println("segment", j, "has height:", len(arr))
+			for idx = 0; idx < len(arr); idx++ {
+				for _, category := range []string{freezerHeaderTable, freezerBodiesTable, freezerReceiptTable,
+					freezerHashTable, freezerDifficultyTable} {
+					hash := ReadCanonicalHash(db, arr[idx])
+					var ancientKey []byte
+					if value, err := db.Ancient(category, arr[idx]); err == nil {
+						count++
+						if category == freezerHeaderTable {
+							ancientKey = headerKey(i, hash)
+							atomic.AddUint64(&table1, 1)
+						}
+						if category == freezerBodiesTable {
+							ancientKey = blockBodyKey(arr[idx], hash)
+							atomic.AddUint64(&table2, 1)
+						}
+						if category == freezerReceiptTable {
+							ancientKey = blockReceiptsKey(arr[idx], hash)
+							atomic.AddUint64(&table3, 1)
+						}
+
+						if category == freezerHashTable {
+							ancientKey = headerHashKey(arr[idx])
+							atomic.AddUint64(&table4, 1)
+							if string(hash.Bytes()) != string(value[:]) {
+								fmt.Println("diff hash table key")
+							}
+						}
+
+						if category == freezerDifficultyTable {
+							ancientKey = headerTDKey(arr[idx], hash)
+							atomic.AddUint64(&table5, 1)
+						}
+
+						tempBatch[string(ancientKey[:])] = value
+
+						if (count >= 1 && count%100 == 0) || idx == len(arr)-1 {
+							// make a batch as a job, send it to worker pool
+							atomic.AddUint64(&tasknum, 1)
+							dispatcher.SendKv(tempBatch, batch_count, true)
+							tempBatch = make(map[string][]byte)
+						}
+					}
+				}
+			}
+		}(segments[j])
+	}
+
+	wg.Wait()
+	fmt.Println("ancient read data cost time:", time.Since(start))
+	fmt.Println("ancient send task num:", atomic.LoadUint64(&tasknum))
+	return atomic.LoadUint64(&tasknum)
+}
+
+func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
+	needSnapData bool, needAncient bool, blockNumber uint64) error {
 	fmt.Println("begin migrate")
 	// buf1 := make([]byte, 8)
 	// binary.LittleEndian.PutUint64(buf1, 0)
@@ -755,7 +857,7 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool, needSna
 		if (count >= 1 && count%100 == 0) || it.Next() == false {
 			// make a batch as a job, send it to worker pool
 			batch_count++
-			dispatcher.SendKv(tempBatch, batch_count)
+			dispatcher.SendKv(tempBatch, batch_count, false)
 			// if producer much faster than workers, make it slower
 			if batch_count > GetDoneTaskNum()+5000 {
 				fmt.Println("producer diff:", batch_count-GetDoneTaskNum())
@@ -767,30 +869,33 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool, needSna
 	}
 
 	// deal with ancient data
-	/*
-		offset := counter(ReadOffSetOfCurrentAncientFreezer(db))
-		// Get number of ancient rows inside the freezer.
-		ancients := counter(0)
-		if count, err := db.ItemAmountInAncient(); err != nil {
-			log.Error("failed to get the items amount in ancientDB", "err", err)
-			return err
-		} else {
-			ancients = counter(count)
-		}
-		var endNumber counter
-		if offset+ancients <= 0 {
-			endNumber = 0
-		} else {
-			endNumber = offset + ancients - 1
-		}
-
-		for i:= offset; i <
-	*/
 	fmt.Println("send batch num:", batch_count, "key num", count)
 
-	dispatcher.setTaskNum(batch_count)
+	ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
+	dispatcher.setTaskNum(batch_count + ancientTaskNum)
 
 	dispatcher.Close(false)
+
+	fmt.Println("migrate database stop, cost time:", time.Since(start).Nanoseconds()/1000000)
+	return nil
+}
+
+func MigrateDatabase2(db ethdb.Database, addr string, needBlockData bool,
+	needSnapData bool, needAncient bool, blockNumber uint64) error {
+	fmt.Println("begin migrate")
+
+	fmt.Println("ancient blocknumber:", blockNumber)
+	start := time.Now()
+	// start a task dispatcher with 1000 threads
+	dispatcher := MigrateStart(1000)
+
+	// init remote db for data sending
+	InitDb(addr)
+
+	ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
+	dispatcher.setTaskNum(ancientTaskNum)
+
+	dispatcher.Close(true)
 
 	fmt.Println("migrate database stop, cost time:", time.Since(start).Nanoseconds()/1000000)
 	return nil

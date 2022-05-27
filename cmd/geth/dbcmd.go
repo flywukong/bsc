@@ -85,7 +85,7 @@ Remove blockchain and state databases`,
 	dbMigrateCmd = cli.Command{
 		Action:    utils.MigrateFlags(migrate),
 		Name:      "migrate",
-		ArgsUsage: "<ip> <port>",
+		ArgsUsage: "<blocknumber>",
 		Flags: []cli.Flag{
 			utils.DataDirFlag,
 			utils.SyncModeFlag,
@@ -222,10 +222,21 @@ of ancientStore, will also displays the reserved number of blocks in ancientStor
 )
 
 func migrate(ctx *cli.Context) error {
+	var (
+		blockNumber uint64
+	)
+
 	if ctx.NArg() > 1 {
 		return fmt.Errorf("Max 2 arguments: %v", ctx.Command.ArgsUsage)
 	}
 
+	if ctx.NArg() == 1 {
+		if num, err := strconv.ParseUint(ctx.Args().Get(0), 10, 64); err != nil {
+			return fmt.Errorf("failed to decode 'blockNumber': %v", err)
+		} else {
+			blockNumber = num
+		}
+	}
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
@@ -238,7 +249,7 @@ func migrate(ctx *cli.Context) error {
 		addr = ctx.GlobalString(utils.RemoteDBAddr.Name)
 	}
 
-	return rawdb.MigrateDatabase(db, addr, true, true, true)
+	return rawdb.MigrateDatabase2(db, addr, true, true, true, blockNumber)
 }
 
 func removeDB(ctx *cli.Context) error {
