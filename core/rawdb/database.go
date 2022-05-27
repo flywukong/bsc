@@ -703,35 +703,35 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 	table5 := uint64(0)
 	start := time.Now()
 	for j := 0; j < len(segments); j++ {
-		go func(arr []uint64) {
+		go func(arr *[]uint64) {
 			defer wg.Done()
 			var idx int
 			count := 0
 			batch_count := uint64(0)
 			tempBatch := make(map[string][]byte)
-			fmt.Println("segment", j, "has height:", len(arr))
-			for idx = 0; idx < len(arr); idx++ {
+			fmt.Println("segment", j, "has height:", len(*arr))
+			for idx = 0; idx < len(*arr); idx++ {
 				for _, category := range []string{freezerHeaderTable, freezerBodiesTable, freezerReceiptTable,
 					freezerHashTable, freezerDifficultyTable} {
-					hash := ReadCanonicalHash(db, arr[idx])
+					hash := ReadCanonicalHash(db, (*arr)[idx])
 					var ancientKey []byte
-					if value, err := db.Ancient(category, arr[idx]); err == nil {
+					if value, err := db.Ancient(category, (*arr)[idx]); err == nil {
 						count++
 						if category == freezerHeaderTable {
-							ancientKey = headerKey(i, hash)
+							ancientKey = headerKey((*arr)[idx], hash)
 							atomic.AddUint64(&table1, 1)
 						}
 						if category == freezerBodiesTable {
-							ancientKey = blockBodyKey(arr[idx], hash)
+							ancientKey = blockBodyKey((*arr)[idx], hash)
 							atomic.AddUint64(&table2, 1)
 						}
 						if category == freezerReceiptTable {
-							ancientKey = blockReceiptsKey(arr[idx], hash)
+							ancientKey = blockReceiptsKey((*arr)[idx], hash)
 							atomic.AddUint64(&table3, 1)
 						}
 
 						if category == freezerHashTable {
-							ancientKey = headerHashKey(arr[idx])
+							ancientKey = headerHashKey((*arr)[idx])
 							atomic.AddUint64(&table4, 1)
 							if string(hash.Bytes()) != string(value[:]) {
 								fmt.Println("diff hash table key")
@@ -739,13 +739,13 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 						}
 
 						if category == freezerDifficultyTable {
-							ancientKey = headerTDKey(arr[idx], hash)
+							ancientKey = headerTDKey((*arr)[idx], hash)
 							atomic.AddUint64(&table5, 1)
 						}
 
 						tempBatch[string(ancientKey[:])] = value
 
-						if (count >= 1 && count%100 == 0) || idx == len(arr)-1 {
+						if (count >= 1 && count%100 == 0) || idx == len(*arr)-1 {
 							// make a batch as a job, send it to worker pool
 							atomic.AddUint64(&tasknum, 1)
 							fmt.Println("send ancient batch ")
@@ -755,7 +755,7 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 					}
 				}
 			}
-		}(segments[j])
+		}(&segments[j])
 	}
 
 	wg.Wait()
