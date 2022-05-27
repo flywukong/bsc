@@ -387,21 +387,55 @@ func AncientInspect(db ethdb.Database) error {
 	}
 
 	fmt.Println("offset:", db.AncientOffSet())
-	aa, _ := db.Ancients()
-	fmt.Println("fozen:", aa)
 
 	var i uint64
 	ancient_num := 0
-	for i = db.AncientOffSet(); i < aa; i++ {
-		//ancientSizes := []*common.StorageSize{&ancientHeadersSize, &ancientBodiesSize, &ancientReceiptsSize, &ancientHashesSize, &ancientTdsSize}
-		for _, category := range []string{freezerHeaderTable, freezerBodiesTable, freezerReceiptTable, freezerHashTable, freezerDifficultyTable} {
-			if content, err := db.Ancient(category, i); err == nil {
+	frozenOffest, _ := db.Ancients()
+	table1 := 0
+	table2 := 0
+	table3 := 0
+	table4 := 0
+	table5 := 0
+	// inpect ancient, from f.offset to fo f.frozen
+	for i = db.AncientOffSet(); i < frozenOffest; i++ {
+		for _, category := range []string{freezerHeaderTable, freezerBodiesTable, freezerReceiptTable,
+			freezerHashTable, freezerDifficultyTable} {
+			hash := ReadCanonicalHash(db, frozenOffest)
+			var ancientKey []byte
+			if value, err := db.Ancient(category, i); err == nil {
 				ancient_num++
-				fmt.Println("ancient conetent:", content)
+
+				if category == freezerHeaderTable {
+					ancientKey = headerKey(i, hash)
+					table1++
+					//fmt.Println("ancient key:", ancientKey)
+				}
+				if category == freezerBodiesTable {
+					ancientKey = blockBodyKey(i, hash)
+					table2++
+					//fmt.Println("ancient key:", ancientKey, "conetent:", value)
+				}
+				if category == freezerReceiptTable {
+					ancientKey = blockReceiptsKey(i, hash)
+					table3++
+					//fmt.Println("ancient key:", ancientKey, "conetent:", value)
+				}
+				if category == freezerHashTable {
+					table4++
+					//fmt.Println("ancient key:", hash, "conetent:", value)
+				}
+				if category == freezerDifficultyTable {
+					table5++
+					ancientKey = headerTDKey(i, hash)
+				}
+
+				if ancient_num%1000000 == 0 {
+					fmt.Println("ancient value:", value, "key.", ancientKey)
+				}
 			}
 		}
 	}
-	fmt.Println("ancient test total num:", ancient_num)
+	fmt.Println("ancient test total num:", ancient_num, "num1:", table1, "num2:", table2, "num3:", table3, "num4:", table4, "num5:", table5)
 	stats := [][]string{
 		{"Offset/StartBlockNumber", "Offset/StartBlockNumber of ancientDB", offset.String()},
 		{"Amount of remained items in AncientStore", "Remaining items of ancientDB", ancients.String()},
