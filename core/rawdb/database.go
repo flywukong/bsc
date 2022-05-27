@@ -424,6 +424,8 @@ func AncientInspect(db ethdb.Database) error {
 				if category == freezerHashTable {
 					table4++
 					//fmt.Println("ancient key:", hash, "conetent:", value)
+					fmt.Println("key len:", len(ancientKey),
+						"value len:", len(value))
 				}
 				if category == freezerDifficultyTable {
 					table5++
@@ -691,16 +693,14 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 		blockNumList = append(blockNumList, i)
 	}
 	// make 8 thread to read ancient data
-	segments := splitArray(blockNumList, 3)
+	segments := splitArray(blockNumList, 5)
 	tasknum = uint64(0)
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(5)
 	table1 := uint64(0)
 	//table1 = uint64(0)
 	table2 := uint64(0)
 	table3 := uint64(0)
-	table4 := uint64(0)
-	table5 := uint64(0)
 	start := time.Now()
 	for j := 0; j < len(segments); j++ {
 		go func(arr *[]uint64) {
@@ -720,10 +720,12 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 						if category == freezerHeaderTable {
 							ancientKey = headerKey((*arr)[idx], hash)
 							atomic.AddUint64(&table1, 1)
+							fmt.Println("Header value,", value)
 						}
 						if category == freezerBodiesTable {
 							ancientKey = blockBodyKey((*arr)[idx], hash)
 							atomic.AddUint64(&table2, 1)
+							fmt.Println("body value,", value)
 						}
 						if category == freezerReceiptTable {
 							ancientKey = blockReceiptsKey((*arr)[idx], hash)
@@ -732,15 +734,10 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 
 						if category == freezerHashTable {
 							ancientKey = headerHashKey((*arr)[idx])
-							atomic.AddUint64(&table4, 1)
-							if string(hash.Bytes()) != string(value[:]) {
-								fmt.Println("diff hash table key")
-							}
 						}
 
 						if category == freezerDifficultyTable {
 							ancientKey = headerTDKey((*arr)[idx], hash)
-							atomic.AddUint64(&table5, 1)
 						}
 
 						tempBatch[string(ancientKey[:])] = value
@@ -748,10 +745,10 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 						if (count >= 1 && count%30 == 0) || idx == len(*arr)-1 {
 							// make a batch as a job, send it to worker pool
 							atomic.AddUint64(&tasknum, 1)
-							fmt.Println("send ancient batch ")
+							// fmt.Println("send ancient batch ")
 							if atomic.LoadUint64(&tasknum) > GetDoneTaskNum()+3000 {
-								fmt.Println("producer diff:", batch_count-GetDoneTaskNum())
-								time.Sleep(3 * time.Second)
+								//	fmt.Println("producer diff:", atomic.LoadUint64(&tasknum)-GetDoneTaskNum())
+								time.Sleep(1 * time.Second)
 							}
 							dispatcher.SendKv(tempBatch, batch_count, true)
 							tempBatch = make(map[string][]byte)
@@ -764,7 +761,8 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 
 	wg.Wait()
 	fmt.Println("ancient read data cost time:", time.Since(start))
-	fmt.Println("ancient send task num:", atomic.LoadUint64(&tasknum))
+	fmt.Println("ancient send task num:", atomic.LoadUint64(&tasknum), "table1",
+		atomic.LoadUint64(&table1), atomic.LoadUint64(&table2))
 	return atomic.LoadUint64(&tasknum)
 }
 
@@ -876,13 +874,18 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 
 	// deal with ancient data
 	fmt.Println("send batch num:", batch_count, "key num", count)
+	dispatcher.setTaskNum(batch_count)
+	dispatcher.WaitDbFinish()
 
+	fmt.Println("migrate leveldb stop, cost time:", time.Since(start).Nanoseconds()/1000000)
+
+	start = time.Now()
 	ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
-	dispatcher.setTaskNum(batch_count + ancientTaskNum)
+	dispatcher.setTaskNum(ancientTaskNum + batch_count)
 
-	dispatcher.Close(false)
+	dispatcher.Close(true)
 
-	fmt.Println("migrate database stop, cost time:", time.Since(start).Nanoseconds()/1000000)
+	fmt.Println("migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
 	return nil
 }
 

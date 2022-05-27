@@ -44,15 +44,24 @@ func InitDb(addr string) {
 }
 
 func (job *Job) UploadToKvRocks() error {
-	kvBatch := KvrocksDB.NewBatch()
+	if job.isAncient {
+		for key, value := range job.Kvbuffer {
+			if err := KvrocksDB.Put([]byte(key), value); err != nil {
+				return nil
+			}
+		}
 
-	for key, value := range job.Kvbuffer {
-		kvBatch.Put([]byte(key), value)
-	}
+	} else {
+		kvBatch := KvrocksDB.NewBatch()
 
-	if err := kvBatch.Write(); err != nil {
-		fmt.Println("send kv rocks error", err.Error())
-		return err
+		for key, value := range job.Kvbuffer {
+			kvBatch.Put([]byte(key), value)
+		}
+
+		if err := kvBatch.Write(); err != nil {
+			fmt.Println("send kv rocks error", err.Error())
+			return err
+		}
 	}
 	return nil
 }
@@ -208,12 +217,24 @@ func MigrateStart(workersize uint64) *Dispatcher {
 	return dispatcher
 }
 
-func (p *Dispatcher) Close(checkErr bool) bool {
-	// p.setStatus(STOPED) // 设置 status 为已停止
+func (p *Dispatcher) WaitDbFinish() {
 	time.Sleep(3 * time.Second)
 	for {
 		if GetDoneTaskNum() >= p.taskNum {
 			fmt.Println("get tasknu enough", GetDoneTaskNum(), p.taskNum)
+			break
+		} else {
+			time.Sleep(3 * time.Second)
+		}
+	}
+}
+
+func (d *Dispatcher) Close(checkErr bool) bool {
+	// p.setStatus(STOPED) // 设置 status 为已停止
+	time.Sleep(3 * time.Second)
+	for {
+		if GetDoneTaskNum() >= d.taskNum {
+			fmt.Println("get tasknu enough", GetDoneTaskNum(), d.taskNum)
 			break
 		} else {
 			time.Sleep(3 * time.Second)
@@ -229,7 +250,7 @@ func (p *Dispatcher) Close(checkErr bool) bool {
 		}
 	}
 
-	close(p.taskQueue) // close task queue
+	close(d.taskQueue) // close task queue
 	if doneAllTask {
 		fmt.Println("finish all migrate tasks")
 	}
