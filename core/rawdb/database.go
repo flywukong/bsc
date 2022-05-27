@@ -691,10 +691,10 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 		blockNumList = append(blockNumList, i)
 	}
 	// make 8 thread to read ancient data
-	segments := splitArray(blockNumList, 8)
+	segments := splitArray(blockNumList, 3)
 	tasknum = uint64(0)
 	var wg sync.WaitGroup
-	wg.Add(8)
+	wg.Add(3)
 	table1 := uint64(0)
 	//table1 = uint64(0)
 	table2 := uint64(0)
@@ -704,6 +704,7 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 	start := time.Now()
 	for j := 0; j < len(segments); j++ {
 		go func(arr []uint64) {
+			defer wg.Done()
 			var idx int
 			count := 0
 			batch_count := uint64(0)
@@ -747,6 +748,7 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 						if (count >= 1 && count%100 == 0) || idx == len(arr)-1 {
 							// make a batch as a job, send it to worker pool
 							atomic.AddUint64(&tasknum, 1)
+							fmt.Println("send ancient batch ")
 							dispatcher.SendKv(tempBatch, batch_count, true)
 							tempBatch = make(map[string][]byte)
 						}
