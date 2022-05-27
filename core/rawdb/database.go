@@ -745,10 +745,14 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 
 						tempBatch[string(ancientKey[:])] = value
 
-						if (count >= 1 && count%100 == 0) || idx == len(*arr)-1 {
+						if (count >= 1 && count%30 == 0) || idx == len(*arr)-1 {
 							// make a batch as a job, send it to worker pool
 							atomic.AddUint64(&tasknum, 1)
 							fmt.Println("send ancient batch ")
+							if atomic.LoadUint64(&tasknum) > GetDoneTaskNum()+3000 {
+								fmt.Println("producer diff:", batch_count-GetDoneTaskNum())
+								time.Sleep(3 * time.Second)
+							}
 							dispatcher.SendKv(tempBatch, batch_count, true)
 							tempBatch = make(map[string][]byte)
 						}
