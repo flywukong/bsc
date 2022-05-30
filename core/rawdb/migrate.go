@@ -45,22 +45,21 @@ func InitDb(addr string) {
 
 func (job *Job) UploadToKvRocks() error {
 	if job.isAncient {
-		for key, value := range job.Kvbuffer {
-			if err := KvrocksDB.Put([]byte(key), value); err != nil {
-				return nil
-			}
-		}
-
-	} else {
-		kvBatch := KvrocksDB.NewBatch()
-
-		for key, value := range job.Kvbuffer {
-			kvBatch.Put([]byte(key), value)
-		}
-
-		if err := kvBatch.Write(); err != nil {
-			fmt.Println("send kv rocks error", err.Error())
+		if err := KvrocksDB.Put(job.ancientKey, job.ancientValue); err != nil {
 			return err
+		}
+	} else {
+		if len(job.Kvbuffer) > 0 {
+			kvBatch := KvrocksDB.NewBatch()
+
+			for key, value := range job.Kvbuffer {
+				kvBatch.Put([]byte(key), value)
+			}
+
+			if err := kvBatch.Write(); err != nil {
+				fmt.Println("send kv rocks error", err.Error())
+				return err
+			}
 		}
 	}
 	return nil
@@ -70,9 +69,11 @@ func (job *Job) UploadToKvRocks() error {
 var JobQueue chan Job
 
 type Job struct {
-	Kvbuffer  map[string][]byte
-	JobId     uint64
-	isAncient bool
+	Kvbuffer     map[string][]byte
+	JobId        uint64
+	isAncient    bool
+	ancientKey   []byte
+	ancientValue []byte
 }
 
 // Worker represents the worker that executes the job
@@ -100,14 +101,15 @@ func (w *Worker) Start() {
 			select {
 			case job := <-w.JobChannel:
 				// send batch to kvrocks
-				if len(job.Kvbuffer) != 0 {
-					if err := job.UploadToKvRocks(); err != nil {
+				if err := job.UploadToKvRocks(); err != nil {
+					/*
 						retrySucc := false
 						// retry for 5 times
 						for i := 0; i < 5; i++ {
 							err = job.UploadToKvRocks()
 							if err == nil {
 								retrySucc = true
+								fmt.Println("retry send kv rocks succ")
 								break
 							}
 						}
@@ -115,9 +117,11 @@ func (w *Worker) Start() {
 							fmt.Println("send kv rocks error", err.Error())
 							MarkTaskFail()
 						}
-					}
-					incDoneTaskNum()
+					*/
+					fmt.Println("send kv rocks error", err.Error())
+					MarkTaskFail()
 				}
+				incDoneTaskNum()
 
 			case <-w.quit:
 				// we have received a signal to stop
@@ -153,6 +157,7 @@ type Dispatcher struct {
 	maxWorkers uint64
 	taskQueue  chan Job
 	taskNum    uint64
+	StopCh     chan struct{}
 }
 
 func incDoneTaskNum() { // runningWorkers + 1
@@ -163,11 +168,16 @@ func GetDoneTaskNum() uint64 {
 	return atomic.LoadUint64(&DoneTaskNum)
 }
 
+func ResetDoneTaskNum() {
+	atomic.StoreUint64(&DoneTaskNum, 0)
+}
+
 func NewDispatcher(maxWorkers uint64) *Dispatcher {
 	initFailFlag()
 	pool := make(chan chan Job, maxWorkers)
+	stopCh := make(chan struct{})
 	return &Dispatcher{WorkerPool: pool, maxWorkers: maxWorkers,
-		taskQueue: make(chan Job)}
+		taskQueue: make(chan Job), StopCh: stopCh}
 }
 
 func (d *Dispatcher) setTaskNum(num uint64) {
@@ -199,13 +209,23 @@ func (d *Dispatcher) dispatch() {
 				// dispatch the job to the worker job channel
 				jobChannel <- job
 			}(job)
+		case <-d.StopCh:
+			fmt.Println("dispatch stop")
+			return
 		}
 	}
 }
 
 func (d *Dispatcher) SendKv(list map[string][]byte, jobid uint64, isAncient bool) {
-	// let's create a job with the payload
-	work := Job{list, jobid, isAncient}
+	// let's create a job
+	work := Job{list, jobid, isAncient, nil, nil}
+	// Push the work onto the queue.
+	d.taskQueue <- work
+}
+
+func (d *Dispatcher) SendKv2(key []byte, val []byte, jobid uint64, isAncient bool) {
+	// let's create a job
+	work := Job{nil, jobid, isAncient, key, val}
 	// Push the work onto the queue.
 	d.taskQueue <- work
 }
@@ -230,6 +250,8 @@ func (p *Dispatcher) WaitDbFinish() {
 }
 
 func (d *Dispatcher) Close(checkErr bool) bool {
+	defer close(d.taskQueue)
+	defer close(d.StopCh)
 	// p.setStatus(STOPED) // 设置 status 为已停止
 	time.Sleep(3 * time.Second)
 	for {

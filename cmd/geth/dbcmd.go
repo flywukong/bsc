@@ -249,7 +249,7 @@ func migrate(ctx *cli.Context) error {
 		addr = ctx.GlobalString(utils.RemoteDBAddr.Name)
 	}
 
-	return rawdb.MigrateDatabase2(db, addr, true, true, true, blockNumber)
+	return rawdb.MigrateDatabase(db, addr, true, true, true, blockNumber)
 }
 
 func removeDB(ctx *cli.Context) error {

@@ -64,7 +64,7 @@ func NewRocksDB(cfg *Config, cache ethdb.KeyValueStore, readonly bool) (*RocksDB
 		quitChan:     make(chan struct{}),
 	}
 	db.client = rocks.NewClusterClient(cfg.GetClusterOption())
-	go db.handleExceptionKey()
+	// go db.handleExceptionKey()
 	return db, nil
 }
 
