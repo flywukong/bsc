@@ -227,7 +227,7 @@ func migrate(ctx *cli.Context) error {
 		migrateAncient bool
 	)
 
-	if ctx.NArg() > 1 {
+	if ctx.NArg() > 2 {
 		return fmt.Errorf("Max 2 arguments: %v", ctx.Command.ArgsUsage)
 	}
 
