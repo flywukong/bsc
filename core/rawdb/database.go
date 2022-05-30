@@ -706,9 +706,6 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 		go func(arr *[]uint64) {
 			defer wg.Done()
 			var idx int
-			count := 0
-			batch_count := uint64(0)
-			tempBatch := make(map[string][]byte)
 			fmt.Println("segment", j, "has height:", len(*arr))
 			for idx = 0; idx < len(*arr); idx++ {
 				for _, category := range []string{freezerHeaderTable, freezerBodiesTable, freezerReceiptTable,
@@ -716,7 +713,6 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 					hash := ReadCanonicalHash(db, (*arr)[idx])
 					var ancientKey []byte
 					if value, err := db.Ancient(category, (*arr)[idx]); err == nil {
-						count++
 						if category == freezerHeaderTable {
 							ancientKey = headerKey((*arr)[idx], hash)
 							atomic.AddUint64(&table1, 1)
@@ -740,19 +736,15 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 							ancientKey = headerTDKey((*arr)[idx], hash)
 						}
 
-						tempBatch[string(ancientKey[:])] = value
-
-						if (count >= 1 && count%30 == 0) || idx == len(*arr)-1 {
-							// make a batch as a job, send it to worker pool
-							atomic.AddUint64(&tasknum, 1)
-							// fmt.Println("send ancient batch ")
-							if atomic.LoadUint64(&tasknum) > GetDoneTaskNum()+3000 {
-								//	fmt.Println("producer diff:", atomic.LoadUint64(&tasknum)-GetDoneTaskNum())
-								time.Sleep(1 * time.Second)
-							}
-							dispatcher.SendKv(tempBatch, batch_count, true)
-							tempBatch = make(map[string][]byte)
+						// make a batch as a job, send it to worker pool
+						atomic.AddUint64(&tasknum, 1)
+						// fmt.Println("send ancient batch ")
+						countTask := atomic.LoadUint64(&tasknum)
+						if countTask > GetDoneTaskNum()+20000 {
+							//	fmt.Println("producer diff:", atomic.LoadUint64(&tasknum)-GetDoneTaskNum())
+							time.Sleep(1 * time.Second)
 						}
+						dispatcher.SendKv2(ancientKey, value, countTask, true)
 					}
 				}
 			}
