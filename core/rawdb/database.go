@@ -902,18 +902,21 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 
 	fmt.Println("migrate leveldb stop, cost time:", time.Since(start).Nanoseconds()/1000000)
 
-	start = time.Now()
-	ResetDoneTaskNum()
-	ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
-	dispatcher.setTaskNum(ancientTaskNum)
+	if needAncient {
+		start = time.Now()
+		ResetDoneTaskNum()
+		ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
+		dispatcher.setTaskNum(ancientTaskNum)
 
-	dispatcher.Close(true)
-
+		dispatcher.Close(true)
+	} else {
+		dispatcher.Close(false)
+	}
 	fmt.Println("migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
 	return nil
 }
 
-func MigrateDatabase2(db ethdb.Database, addr string, needBlockData bool,
+func MigrateAncientInDb(db ethdb.Database, addr string, needBlockData bool,
 	needSnapData bool, needAncient bool, blockNumber uint64) error {
 	fmt.Println("begin migrate")
 

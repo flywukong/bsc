@@ -223,20 +223,29 @@ of ancientStore, will also displays the reserved number of blocks in ancientStor
 
 func migrate(ctx *cli.Context) error {
 	var (
-		blockNumber uint64
+		blockNumber    uint64
+		migrateAncient bool
 	)
 
 	if ctx.NArg() > 1 {
 		return fmt.Errorf("Max 2 arguments: %v", ctx.Command.ArgsUsage)
 	}
 
-	if ctx.NArg() == 1 {
+	if ctx.NArg() >= 1 {
 		if num, err := strconv.ParseUint(ctx.Args().Get(0), 10, 64); err != nil {
 			return fmt.Errorf("failed to decode 'blockNumber': %v", err)
 		} else {
 			blockNumber = num
 		}
 	}
+	if ctx.NArg() >= 2 {
+		if needAncient, err := strconv.ParseBool(ctx.Args().Get(1)); err != nil {
+			return fmt.Errorf("failed to decode 'migrateAncient': %v", err)
+		} else {
+			migrateAncient = needAncient
+		}
+	}
+
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
@@ -249,7 +258,7 @@ func migrate(ctx *cli.Context) error {
 		addr = ctx.GlobalString(utils.RemoteDBAddr.Name)
 	}
 
-	return rawdb.MigrateDatabase(db, addr, true, true, true, blockNumber)
+	return rawdb.MigrateDatabase(db, addr, true, true, migrateAncient, blockNumber)
 }
 
 func removeDB(ctx *cli.Context) error {
