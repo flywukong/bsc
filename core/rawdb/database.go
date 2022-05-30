@@ -931,7 +931,7 @@ func MigrateAncientInDb(db ethdb.Database, addr string, needBlockData bool,
 	ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
 	dispatcher.setTaskNum(ancientTaskNum)
 
-	dispatcher.Close(false)
+	dispatcher.Close(true)
 
 	fmt.Println("migrate database stop, cost time:", time.Since(start).Nanoseconds()/1000000)
 	return nil
