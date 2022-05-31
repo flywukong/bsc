@@ -812,7 +812,7 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 		batch_count uint64
 	)
 	// init remote db for data sending
-	InitDb(addr)
+	rocksdb := InitDb(addr)
 
 	count = 0
 	defer it.Release()
@@ -877,6 +877,29 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 	} else {
 		dispatcher.Close(false)
 	}
+
+	data1, _ := rocksdb.Get(headHeaderKey)
+	data2, _ := db.Get(headHeaderKey)
+	if string(data1[:]) != string(data2[:]) {
+		fmt.Println("data error in kvrocks")
+	}
+	fmt.Println("data1,", string(data1[:]))
+	fmt.Println("data2,", string(data2[:]))
+
+	hash_key := common.BytesToHash(data1)
+	data3, _ := rocksdb.Get(headerNumberKey(hash_key))
+	data4, _ := db.Get(headerNumberKey(hash_key))
+
+	fmt.Println("data3,", string(data3[:]))
+	fmt.Println("data4,", string(data4[:]))
+	if len(data3) != 8 {
+		fmt.Println("get key error in ReadHeaderNumber", len(data3))
+	}
+
+	if len(data4) != 8 {
+		fmt.Println("get key error in ReadHeaderNumber", len(data4))
+	}
+
 	fmt.Println("migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
 	return nil
 }
