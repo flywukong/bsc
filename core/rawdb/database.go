@@ -460,10 +460,9 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	defer it.Release()
 
 	var (
-		count    int64
-		countKey uint64
-		start    = time.Now()
-		logged   = time.Now()
+		count  int64
+		start  = time.Now()
+		logged = time.Now()
 
 		// Key-value store statistics
 		headers         stat
@@ -508,7 +507,6 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			key  = it.Key()
 			size = common.StorageSize(len(key) + len(it.Value()))
 		)
-		countKey++
 		total += size
 		switch {
 		case bytes.HasPrefix(key, headerPrefix) && len(key) == (len(headerPrefix)+8+common.HashLength):
@@ -579,7 +577,6 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		}
 	}
 
-	fmt.Println("leveldb key num:", countKey)
 	// Inspect append-only file store then.
 	ancientSizes := []*common.StorageSize{&ancientHeadersSize, &ancientBodiesSize, &ancientReceiptsSize, &ancientHashesSize, &ancientTdsSize}
 	for i, category := range []string{freezerHeaderTable, freezerBodiesTable, freezerReceiptTable, freezerHashTable, freezerDifficultyTable} {
@@ -701,7 +698,7 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 	start := time.Now()
 
 	var idx uint64
-	for idx = frozenOffest; idx >= startBlockNumber; idx-- {
+	for idx = startBlockNumber; idx <= frozenOffest; idx++ {
 		for _, category := range []string{freezerHeaderTable, freezerBodiesTable,
 			freezerReceiptTable, freezerHashTable, freezerDifficultyTable} {
 			hash := ReadCanonicalHash(db, idx)
@@ -744,10 +741,12 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 				}
 			}
 		}
-		if idx == 0 {
-			fmt.Println("finish all")
-			break
-		}
+		/*
+			if idx == 0 {
+				fmt.Println("finish all")
+				break
+			}
+		*/
 	}
 
 	fmt.Println("ancient read data cost time:", time.Since(start))
@@ -773,7 +772,7 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 		fmt.Println("get first key error", err.Error())
 	}
 
-	it := db.NewIterator([]byte(""), nil)
+	it := db.NewIterator([]byte(""), startKey)
 
 	// taskQueue store recent 5000 batch conteets
 	taskQueue := list.New()
