@@ -697,7 +697,8 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 
 	var idx uint64
 	for idx = frozenOffest; idx >= startBlockNumber; idx-- {
-		for _, category := range []string{freezerHeaderTable, freezerBodiesTable, freezerReceiptTable, freezerHashTable, freezerDifficultyTable} {
+		for _, category := range []string{freezerHeaderTable, freezerBodiesTable,
+			freezerReceiptTable, freezerHashTable, freezerDifficultyTable} {
 			hash := ReadCanonicalHash(db, idx)
 			var ancientKey []byte
 			if value, err := db.Ancient(category, idx); err == nil {
@@ -737,7 +738,10 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 					fmt.Println("finish")
 				}
 			}
-
+		}
+		if idx == 0 {
+			fmt.Println("finish all")
+			break
 		}
 	}
 
