@@ -460,9 +460,10 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	defer it.Release()
 
 	var (
-		count  int64
-		start  = time.Now()
-		logged = time.Now()
+		count    int64
+		countKey uint64
+		start    = time.Now()
+		logged   = time.Now()
 
 		// Key-value store statistics
 		headers         stat
@@ -500,12 +501,14 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		// Totals
 		total common.StorageSize
 	)
+	countKey = 0
 	// Inspect key-value database first.
 	for it.Next() {
 		var (
 			key  = it.Key()
 			size = common.StorageSize(len(key) + len(it.Value()))
 		)
+		countKey++
 		total += size
 		switch {
 		case bytes.HasPrefix(key, headerPrefix) && len(key) == (len(headerPrefix)+8+common.HashLength):
@@ -575,6 +578,8 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			logged = time.Now()
 		}
 	}
+
+	fmt.Println("leveldb key num:", countKey)
 	// Inspect append-only file store then.
 	ancientSizes := []*common.StorageSize{&ancientHeadersSize, &ancientBodiesSize, &ancientReceiptsSize, &ancientHashesSize, &ancientTdsSize}
 	for i, category := range []string{freezerHeaderTable, freezerBodiesTable, freezerReceiptTable, freezerHashTable, freezerDifficultyTable} {
@@ -768,7 +773,7 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 		fmt.Println("get first key error", err.Error())
 	}
 
-	it := db.NewIterator([]byte(""), startKey)
+	it := db.NewIterator([]byte(""), nil)
 
 	// taskQueue store recent 5000 batch conteets
 	taskQueue := list.New()
@@ -805,12 +810,13 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 	dispatcher := MigrateStart(1000)
 
 	var (
-		count       int64
+		count       uint64
 		batch_count uint64
 	)
 	// init remote db for data sending
 	InitDb(addr)
 
+	count = 0
 	defer it.Release()
 	tempBatch := make(map[string][]byte)
 
@@ -832,17 +838,10 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 			}
 		}
 
-		if !needBlockData && isBlockData(key) {
-			continue
-		}
-		if !needSnapData && isSnapData(key) {
-			continue
-		}
-
 		tempBatch[string(key[:])] = value
 		count++
 
-		if (count >= 1 && count%100 == 0) || it.Next() == false {
+		if count >= 1 && count%100 == 0 {
 			// make a batch as a job, send it to worker pool
 			batch_count++
 			dispatcher.SendKv(tempBatch, batch_count, false)
@@ -857,6 +856,10 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 			isbatchFirstKey = true
 			tempBatch = make(map[string][]byte)
 		}
+	}
+	if len(tempBatch) > 0 {
+		batch_count++
+		dispatcher.SendKv(tempBatch, batch_count, false)
 	}
 
 	// deal with ancient data
