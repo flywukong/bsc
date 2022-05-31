@@ -698,7 +698,7 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 	countTask := uint64(0)
 	//	count := uint64(0)
 	var wg sync.WaitGroup
-	wg.Add(1)
+	wg.Add(2)
 
 	// table3 := uint64(0)
 	start := time.Now()
@@ -707,6 +707,7 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 	go func() {
 		defer wg.Done()
 		var idx uint64
+
 		for idx = frozenOffest; idx >= startBlockNumber; idx-- {
 			for _, category := range []string{freezerHeaderTable, freezerBodiesTable, freezerReceiptTable, freezerHashTable, freezerDifficultyTable} {
 				hash := ReadCanonicalHash(db, idx)
@@ -714,6 +715,7 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 				if value, err := db.Ancient(category, idx); err == nil {
 					if category == freezerBodiesTable {
 						ancientKey = blockBodyKey(idx, hash)
+						fmt.Println("get height :", idx)
 					}
 					if category == freezerReceiptTable {
 						ancientKey = blockReceiptsKey(idx, hash)
@@ -746,6 +748,7 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 			}
 		}
 	}()
+
 	/*
 		for j := 0; j < len(segments); j++ {
 			go func(arr *[]uint64) {
@@ -825,6 +828,11 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 			}
 		}()
 	*/
+	go func() {
+		defer wg.Done()
+		fmt.Println("hello")
+	}()
+
 	wg.Wait()
 	fmt.Println("ancient read data cost time:", time.Since(start))
 	fmt.Println("ancient send task num:", atomic.LoadUint64(&tasknum))
