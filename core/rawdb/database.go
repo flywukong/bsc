@@ -866,16 +866,11 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 	dispatcher.WaitDbFinish()
 
 	fmt.Println("migrate leveldb stop, cost time:", time.Since(start).Nanoseconds()/1000000)
-
 	if needAncient {
 		start = time.Now()
 		ResetDoneTaskNum()
 		ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
 		dispatcher.setTaskNum(ancientTaskNum)
-
-		dispatcher.Close(true)
-	} else {
-		dispatcher.Close(false)
 	}
 
 	data1, _ := rocksdb.Get(headHeaderKey)
@@ -900,6 +895,7 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 		fmt.Println("get key error in ReadHeaderNumber", len(data4))
 	}
 
+	dispatcher.Close(false)
 	fmt.Println("migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
 	return nil
 }
