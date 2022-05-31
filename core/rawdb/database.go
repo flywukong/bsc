@@ -822,10 +822,15 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 
 	for it.Next() {
 		var (
-			key   = it.Key()
+			key = it.Key()
+
 			value = it.Value()
 		)
 
+		if bytes.Compare(key, headHeaderKey) == 0 {
+			fmt.Println("db get headHeaderKey", string(value))
+		}
+		
 		if isbatchFirstKey {
 			// push the first key of batch into queue
 			taskQueue.PushBack(string(key))
@@ -881,9 +886,10 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 	fmt.Println("data1,", string(data1[:]))
 	fmt.Println("data2,", string(data2[:]))
 
-	hash_key := common.BytesToHash(data1)
-	data3, _ := rocksdb.Get(headerNumberKey(hash_key))
-	data4, _ := db.Get(headerNumberKey(hash_key))
+	hash_key1 := common.BytesToHash(data1)
+	data3, _ := rocksdb.Get(headerNumberKey(hash_key1))
+	hash_key2 := common.BytesToHash(data2)
+	data4, _ := db.Get(headerNumberKey(hash_key2))
 
 	fmt.Println("data3,", string(data3[:]))
 	fmt.Println("data4,", string(data4[:]))
