@@ -500,7 +500,6 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		// Totals
 		total common.StorageSize
 	)
-	countKey = 0
 	// Inspect key-value database first.
 	for it.Next() {
 		var (
@@ -698,7 +697,7 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 	start := time.Now()
 
 	var idx uint64
-	for idx = startBlockNumber; idx <= frozenOffest; idx++ {
+	for idx = frozenOffest; idx >= startBlockNumber; idx-- {
 		for _, category := range []string{freezerHeaderTable, freezerBodiesTable,
 			freezerReceiptTable, freezerHashTable, freezerDifficultyTable} {
 			hash := ReadCanonicalHash(db, idx)
@@ -741,12 +740,12 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 				}
 			}
 		}
-		/*
-			if idx == 0 {
-				fmt.Println("finish all")
-				break
-			}
-		*/
+
+		if idx == 0 {
+			fmt.Println("finish all")
+			break
+		}
+
 	}
 
 	fmt.Println("ancient read data cost time:", time.Since(start))

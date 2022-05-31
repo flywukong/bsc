@@ -19,6 +19,7 @@ package rawdb
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"math/big"
 	"sort"
 
@@ -117,7 +118,10 @@ func ReadAllCanonicalHashes(db ethdb.Iteratee, from uint64, to uint64, limit int
 // ReadHeaderNumber returns the header number assigned to a hash.
 func ReadHeaderNumber(db ethdb.KeyValueReader, hash common.Hash) *uint64 {
 	data, _ := db.Get(headerNumberKey(hash))
+	fmt.Println("get key", headerNumberKey(hash), "in ReadHeaderNumber",
+		"data", data, "hash", common.BytesToHash(data))
 	if len(data) != 8 {
+		fmt.Println("get key error in ReadHeaderNumber", len(data))
 		return nil
 	}
 	number := binary.BigEndian.Uint64(data)
@@ -131,7 +135,7 @@ func WriteHeaderNumber(db ethdb.KeyValueWriter, hash common.Hash, number uint64)
 	if err := db.Put(key, enc); err != nil {
 		log.Crit("Failed to store hash to number mapping", "err", err)
 	}
-}
+}[]
 
 // DeleteHeaderNumber removes hash->number mapping.
 func DeleteHeaderNumber(db ethdb.KeyValueWriter, hash common.Hash) {
@@ -144,8 +148,10 @@ func DeleteHeaderNumber(db ethdb.KeyValueWriter, hash common.Hash) {
 func ReadHeadHeaderHash(db ethdb.KeyValueReader) common.Hash {
 	data, _ := db.Get(headHeaderKey)
 	if len(data) == 0 {
+		fmt.Println("ReadHeadHeaderHash hash len 0")
 		return common.Hash{}
 	}
+	fmt.Println("ReadHeadHeaderHash return", common.BytesToHash(data))
 	return common.BytesToHash(data)
 }
 
