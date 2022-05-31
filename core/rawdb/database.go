@@ -830,7 +830,7 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 		if bytes.Compare(key, headHeaderKey) == 0 {
 			fmt.Println("db get headHeaderKey", string(value))
 		}
-		
+
 		if isbatchFirstKey {
 			// push the first key of batch into queue
 			taskQueue.PushBack(string(key))

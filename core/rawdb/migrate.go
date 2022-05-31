@@ -1,6 +1,7 @@
 package rawdb
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
@@ -54,6 +55,9 @@ func (job *Job) UploadToKvRocks() error {
 			kvBatch := KvrocksDB.NewBatch()
 
 			for key, value := range job.Kvbuffer {
+				if bytes.Compare([]byte(key), headHeaderKey) == 0 {
+					fmt.Println("rocksdb set headHeaderKey", string(value))
+				}
 				kvBatch.Put([]byte(key), value)
 			}
 
