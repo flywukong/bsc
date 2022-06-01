@@ -829,9 +829,12 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 
 	for it.Next() {
 		var (
-			key   = it.Key()
-			value = it.Value()
+			key = it.Key()
+			//value = it.Value()
+			v = it.Value()
 		)
+		value := make([]byte, len(v))
+		copy(value, v)
 
 		if isbatchFirstKey {
 			// push the first key of batch into queue
@@ -845,18 +848,6 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 
 		tempBatch[string(key[:])] = value
 		count++
-		if bytes.Compare(key, headHeaderKey) == 0 {
-			fmt.Println("db get headHeaderKey", string(value), "len", len(value))
-		}
-		if bytes.Compare(key, SerchHash) == 0 {
-			fmt.Println("db get serchHash key", string(key), "len", len(key))
-			fmt.Println("db get serchHash value", string(value), "len", len(value))
-		}
-
-		if bytes.Compare(key, headHeaderKey) == 0 {
-			fmt.Println("db get headHeaderKey", string(value))
-			break
-		}
 
 		if count >= 1 && count%100 == 0 {
 			// make a batch as a job, send it to worker pool
