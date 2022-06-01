@@ -847,6 +847,7 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 
 		if bytes.Compare(key, headHeaderKey) == 0 {
 			fmt.Println("db get headHeaderKey", string(value))
+			break
 		}
 
 		var testKey string = "testkey"
@@ -855,7 +856,6 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 		fmt.Println("dispatcher set testValue", string(testValue))
 		fmt.Println("dispatcher set testKey", string(testKey))
 
-		break
 		/*
 			if count >= 1 && count%100 == 0 {
 				// make a batch as a job, send it to worker pool
