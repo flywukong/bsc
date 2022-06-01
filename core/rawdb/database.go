@@ -850,12 +850,6 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 			break
 		}
 
-		var testKey string = "testkey"
-		var testValue string = "testvalue"
-		dispatcher.SendKv2([]byte(testKey), []byte(testValue), batch_count, true)
-		fmt.Println("dispatcher set testValue", string(testValue))
-		fmt.Println("dispatcher set testKey", string(testKey))
-
 		/*
 			if count >= 1 && count%100 == 0 {
 				// make a batch as a job, send it to worker pool
@@ -874,7 +868,12 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 			}
 		*/
 	}
-
+	var testKey string = "testkey"
+	var testValue string = "testvalue"
+	dispatcher.SendKv2([]byte(testKey), []byte(testValue), batch_count, true)
+	fmt.Println("dispatcher set testValue", string(testValue))
+	fmt.Println("dispatcher set testKey", string(testKey))
+	
 	// deal with ancient data
 	fmt.Println("send batch num:", batch_count, "key num", count)
 	dispatcher.setTaskNum(batch_count)
