@@ -46,41 +46,64 @@ func InitDb(addr string, db ethdb.Database) *remotedb.RocksDB {
 	config.Addrs = strings.Split(addr, ",")
 	KvrocksDB, _ = remotedb.NewRocksDB(config, persistCache, false)
 	// get k,v from leveldb
-	value, _ := db.Get(headHeaderKey)
-	fmt.Println("db get headHeaderKey", string(value), "len", len(value))
+	/*
+		value, _ := db.Get(headHeaderKey)
+		fmt.Println("db get headHeaderKey", string(value), "len", len(value))
 
-	err1 := KvrocksDB.Put(headHeaderKey, value)
-	if err1 != nil {
-		fmt.Println("kvorocks set headHeaderKey fail")
-	}
-	testValue2, err2 := KvrocksDB.Get(headHeaderKey)
-	if err2 != nil {
-		fmt.Println("kvorocks get headHeaderKey fail")
-	} else {
-		fmt.Println("rocksdb get headHeaderKey", string(testValue2), "len", len(testValue2))
-	}
+		err1 := KvrocksDB.Put(headHeaderKey, value)
+		if err1 != nil {
+			fmt.Println("kvorocks set headHeaderKey fail")
+		}
+		testValue2, err2 := KvrocksDB.Get(headHeaderKey)
+		if err2 != nil {
+			fmt.Println("kvorocks get headHeaderKey fail")
+		} else {
+			fmt.Println("rocksdb get headHeaderKey", string(testValue2), "len", len(testValue2))
+		}
 
-	if bytes.Compare(value, testValue2) != 0 {
-		fmt.Println("rocksdb set not same")
-	}
-
+		if bytes.Compare(value, testValue2) != 0 {
+			fmt.Println("rocksdb set not same")
+		}
+	*/
 	data11, _ := db.Get(headHeaderKey)
 
 	hash_key_test := common.BytesToHash(data11)
 	searchHash = headerNumberKey(hash_key_test)
-	fmt.Println("kvrocks searchHash,", searchHash, "len", len(searchHash))
+	fmt.Println("kvrocks searchHash,", string(searchHash), "len", len(searchHash))
+	if bytes.Compare(searchHash, SerchHash) != 0 {
+		fmt.Println("rocksdb serach hash set not same")
+	}
+	/*
+		searchHashValue, _ := db.Get(searchHash)
+
+			err1 = KvrocksDB.Put(searchHash, searchHashValue)
+			if err1 != nil {
+				fmt.Println("kvorocks set headHeaderKey fail")
+			}
+
+			testValue3, err3 := KvrocksDB.Get(searchHash)
+			if err3 != nil {
+				fmt.Println("kvorocks get searchHashrKey fail")
+			} else {
+				fmt.Println("rocksdb getsearchHash rKey", string(testValue3), "len", len(testValue3))
+			}
+
+			if bytes.Compare(searchHashValue, testValue3) != 0 {
+				fmt.Println("rocksdb searchHashrKey set not same")
+			}
+	*/
 	return KvrocksDB
 }
 
 func (job *Job) UploadToKvRocks() error {
 	if job.isAncient {
+		if bytes.Compare(job.ancientKey, searchHash) == 0 {
+			fmt.Println("rocks db3 get serchHash", string(job.ancientValue), "len", len(job.ancientValue))
+		}
+
 		err := KvrocksDB.Put(job.ancientKey, job.ancientValue)
 		if bytes.Compare(job.ancientKey, headHeaderKey) == 0 {
 			fmt.Println("rocksdb set headHeaderKey", string(job.ancientValue), "len", len(job.ancientValue))
-		}
-
-		if bytes.Compare(job.ancientKey, searchHash) == 0 {
-			fmt.Println("db get serchHash", string(job.ancientValue), "len", len(job.ancientValue))
 		}
 
 		var testKey string = "testkey"
@@ -276,6 +299,9 @@ func (d *Dispatcher) SendKv(list map[string][]byte, jobid uint64, isAncient bool
 func (d *Dispatcher) SendKv2(key []byte, val []byte, jobid uint64, isAncient bool) {
 	// let's create a job
 	work := Job{nil, jobid, isAncient, key, val}
+	if bytes.Compare(key, searchHash) == 0 {
+		fmt.Println("rocks db2 get serchHash", string(val), "len", len(val))
+	}
 	// Push the work onto the queue.
 	d.taskQueue <- work
 }

@@ -36,6 +36,8 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
+var SerchHash []byte
+
 // freezerdb is a database wrapper that enabled freezer data retrievals.
 type freezerdb struct {
 	ethdb.KeyValueStore
@@ -803,6 +805,11 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 		}
 	}()
 
+	data11, _ := db.Get(headHeaderKey)
+
+	hash_key_test := common.BytesToHash(data11)
+	SerchHash = headerNumberKey(hash_key_test)
+
 	start := time.Now()
 	// start a task dispatcher with 1000 threads
 	dispatcher := MigrateStart(1000)
@@ -819,11 +826,6 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 	//tempBatch := make(map[string][]byte)
 
 	isbatchFirstKey := false
-
-	data11, _ := db.Get(headHeaderKey)
-
-	hash_key_test := common.BytesToHash(data11)
-	serchHash := headerNumberKey(hash_key_test)
 
 	for it.Next() {
 		var (
@@ -847,12 +849,17 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 		if bytes.Compare(key, headHeaderKey) == 0 {
 			fmt.Println("db get headHeaderKey", string(value), "len", len(value))
 		}
-		if bytes.Compare(key, serchHash) == 0 {
+		if bytes.Compare(key, SerchHash) == 0 {
 			fmt.Println("db get serchHash", string(key), "len", len(key))
 			fmt.Println("db get serchHash", string(value), "len", len(value))
 		}
 
 		dispatcher.SendKv2(key, value, batch_count, true)
+
+		if batch_count > GetDoneTaskNum()+50000 {
+			fmt.Println("producer diff:", batch_count-GetDoneTaskNum())
+			time.Sleep(3 * time.Second)
+		}
 
 		if bytes.Compare(key, headHeaderKey) == 0 {
 			fmt.Println("db get headHeaderKey", string(value))
@@ -878,13 +885,6 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 
 	}
 
-	var testKey string = "testkey"
-	var testValue string = "testvalue"
-	batch_count++
-	dispatcher.SendKv2([]byte(testKey), []byte(testValue), batch_count, true)
-	fmt.Println("dispatcher set testValue", string(testValue))
-	fmt.Println("dispatcher set testKey", string(testKey))
-
 	// deal with ancient data
 	fmt.Println("send batch num:", batch_count, "key num", count)
 	dispatcher.setTaskNum(batch_count)
@@ -905,9 +905,6 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 	}
 	fmt.Println("data1,", string(data1[:]))
 	fmt.Println("data2,", string(data2[:]))
-
-	data5, _ := rocksdb.Get([]byte(testKey))
-	fmt.Println("data5,", string(data5[:]))
 
 	hash_key1 := common.BytesToHash(data1)
 	data3, _ := rocksdb.Get(headerNumberKey(hash_key1))
