@@ -66,7 +66,7 @@ func (job *Job) UploadToKvRocks() error {
 			return err
 		}
 	} else {
-		fmt.Println("is ancient not")
+		
 		if len(job.Kvbuffer) > 0 {
 			kvBatch := KvrocksDB.NewBatch()
 
