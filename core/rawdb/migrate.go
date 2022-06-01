@@ -66,7 +66,7 @@ func (job *Job) UploadToKvRocks() error {
 			return err
 		}
 	} else {
-		
+
 		if len(job.Kvbuffer) > 0 {
 			kvBatch := KvrocksDB.NewBatch()
 
@@ -251,9 +251,6 @@ func (d *Dispatcher) SendKv(list map[string][]byte, jobid uint64, isAncient bool
 func (d *Dispatcher) SendKv2(key []byte, val []byte, jobid uint64, isAncient bool) {
 	// let's create a job
 	work := Job{nil, jobid, isAncient, key, val}
-	if bytes.Compare(key, searchHash) == 0 {
-		fmt.Println("rocks db2 get serchHash", string(val), "len", len(val))
-	}
 	// Push the work onto the queue.
 	d.taskQueue <- work
 }
