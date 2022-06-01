@@ -47,10 +47,24 @@ func InitDb(addr string) *remotedb.RocksDB {
 
 func (job *Job) UploadToKvRocks() error {
 	if job.isAncient {
-		if err := KvrocksDB.Put(job.ancientKey, job.ancientValue); err != nil {
+		fmt.Println("is ancient")
+		err := KvrocksDB.Put(job.ancientKey, job.ancientValue)
+		if bytes.Compare(job.ancientKey, headHeaderKey) == 0 {
+			fmt.Println("rocksdb set headHeaderKey", string(job.ancientValue))
+		}
+		var testKey string = "testkey"
+		//var testValue string = "testvalue"
+		if bytes.Compare(job.ancientKey, []byte(testKey)) == 0 {
+			fmt.Println("rocksdb set testKey", string(job.ancientKey))
+			fmt.Println("rocksdb set testValue", string(job.ancientValue))
+		}
+
+		if err != nil {
+			fmt.Println("send kv error,", err.Error())
 			return err
 		}
 	} else {
+		fmt.Println("is ancient not")
 		if len(job.Kvbuffer) > 0 {
 			kvBatch := KvrocksDB.NewBatch()
 

@@ -816,20 +816,15 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 
 	count = 0
 	defer it.Release()
-	tempBatch := make(map[string][]byte)
+	//	tempBatch := make(map[string][]byte)
 
 	isbatchFirstKey := false
 
 	for it.Next() {
 		var (
-			key = it.Key()
-
+			key   = it.Key()
 			value = it.Value()
 		)
-
-		if bytes.Compare(key, headHeaderKey) == 0 {
-			fmt.Println("db get headHeaderKey", string(value))
-		}
 
 		if isbatchFirstKey {
 			// push the first key of batch into queue
@@ -841,28 +836,43 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 			}
 		}
 
-		tempBatch[string(key[:])] = value
+		//tempBatch[string(key[:])] = value
 		count++
-
-		if count >= 1 && count%100 == 0 {
-			// make a batch as a job, send it to worker pool
-			batch_count++
-			dispatcher.SendKv(tempBatch, batch_count, false)
-			// if producer much faster than workers, make it slower
-			if batch_count > GetDoneTaskNum()+5000 {
-				//		fmt.Println("producer diff:", batch_count-GetDoneTaskNum())
-				time.Sleep(3 * time.Second)
-			}
-			if batch_count%20000 == 0 {
-				fmt.Println("finish level db k,v num:", batch_count*100)
-			}
-			isbatchFirstKey = true
-			tempBatch = make(map[string][]byte)
-		}
-	}
-	if len(tempBatch) > 0 {
 		batch_count++
-		dispatcher.SendKv(tempBatch, batch_count, false)
+		if bytes.Compare(key, headHeaderKey) == 0 {
+			fmt.Println("db get headHeaderKey", string(value))
+		}
+
+		dispatcher.SendKv2(key, value, batch_count, true)
+
+		if bytes.Compare(key, headHeaderKey) == 0 {
+			fmt.Println("db get headHeaderKey", string(value))
+		}
+
+		var testKey string = "testkey"
+		var testValue string = "testvalue"
+		dispatcher.SendKv2([]byte(testKey), []byte(testValue), batch_count, true)
+		fmt.Println("dispatcher set testValue", string(testValue))
+		fmt.Println("dispatcher set testKey", string(testKey))
+
+		break
+		/*
+			if count >= 1 && count%100 == 0 {
+				// make a batch as a job, send it to worker pool
+				batch_count++
+				dispatcher.SendKv(tempBatch, batch_count, false)
+				// if producer much faster than workers, make it slower
+				if batch_count > GetDoneTaskNum()+5000 {
+					//		fmt.Println("producer diff:", batch_count-GetDoneTaskNum())
+					time.Sleep(3 * time.Second)
+				}
+				if batch_count%20000 == 0 {
+					fmt.Println("finish level db k,v num:", batch_count*100)
+				}
+				isbatchFirstKey = true
+				tempBatch = make(map[string][]byte)
+			}
+		*/
 	}
 
 	// deal with ancient data
