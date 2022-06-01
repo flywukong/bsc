@@ -812,13 +812,18 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 		batch_count uint64
 	)
 	// init remote db for data sending
-	rocksdb := InitDb(addr)
+	rocksdb := InitDb(addr, db)
 
 	count = 0
 	defer it.Release()
 	//tempBatch := make(map[string][]byte)
 
 	isbatchFirstKey := false
+
+	data11, _ := db.Get(headHeaderKey)
+
+	hash_key_test := common.BytesToHash(data11)
+	serchHash := headerNumberKey(hash_key_test)
 
 	for it.Next() {
 		var (
@@ -841,6 +846,9 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 		batch_count++
 		if bytes.Compare(key, headHeaderKey) == 0 {
 			fmt.Println("db get headHeaderKey", string(value), "len", len(value))
+		}
+		if bytes.Compare(key, serchHash) == 0 {
+			fmt.Println("db get serchHash", string(value), "len", len(value))
 		}
 
 		dispatcher.SendKv2(key, value, batch_count, true)
@@ -889,25 +897,6 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 		dispatcher.setTaskNum(ancientTaskNum)
 	}
 
-	// get k,v from leveldb
-	value, _ := db.Get(headHeaderKey)
-	fmt.Println("db get headHeaderKey", string(value), "len", len(value))
-
-	err1 := rocksdb.Put(headHeaderKey, value)
-	if err1 != nil {
-		fmt.Println("kvorocks set headHeaderKey fail")
-	}
-	testValue2, err2 := rocksdb.Get(headHeaderKey)
-	if err2 != nil {
-		fmt.Println("kvorocks get headHeaderKey fail")
-	} else {
-		fmt.Println("rocksdb get headHeaderKey", string(testValue2), "len", len(testValue2))
-	}
-
-	if bytes.Compare(value, testValue2) != 0 {
-		fmt.Println("rocksdb set not same")
-	}
-
 	data1, _ := rocksdb.Get(headHeaderKey)
 	data2, _ := db.Get(headHeaderKey)
 	if string(data1[:]) != string(data2[:]) {
@@ -949,7 +938,7 @@ func MigrateAncientInDb(db ethdb.Database, addr string, needBlockData bool,
 	dispatcher := MigrateStart(1000)
 
 	// init remote db for data sending
-	InitDb(addr)
+	InitDb(addr, db)
 
 	ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
 	dispatcher.setTaskNum(ancientTaskNum)

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
 	"github.com/ethereum/go-ethereum/ethdb/remotedb"
 	"github.com/go-redis/redis/v8"
@@ -27,6 +29,7 @@ var (
 	KvrocksDB *remotedb.RocksDB
 	// kvrocksDB, _ = remotedb.NewRocksDB(remotedb.DefaultConfig2(addr), persistCache, false)
 
+	searchHash      []byte
 	DoneTaskNum     uint64
 	SuccTaskNum     uint64
 	FailTaskNum     uint64
@@ -36,12 +39,35 @@ var (
 
 var ctx = context.Background()
 
-func InitDb(addr string) *remotedb.RocksDB {
+func InitDb(addr string, db ethdb.Database) *remotedb.RocksDB {
 	path, _ := os.Getwd()
 	persistCache, _ := leveldb.New(path+"/persistcache", 5000, 200, "chaindata", false)
 	config := remotedb.DefaultConfig()
 	config.Addrs = strings.Split(addr, ",")
 	KvrocksDB, _ = remotedb.NewRocksDB(config, persistCache, false)
+	// get k,v from leveldb
+	value, _ := db.Get(headHeaderKey)
+	fmt.Println("db get headHeaderKey", string(value), "len", len(value))
+
+	err1 := KvrocksDB.Put(headHeaderKey, value)
+	if err1 != nil {
+		fmt.Println("kvorocks set headHeaderKey fail")
+	}
+	testValue2, err2 := KvrocksDB.Get(headHeaderKey)
+	if err2 != nil {
+		fmt.Println("kvorocks get headHeaderKey fail")
+	} else {
+		fmt.Println("rocksdb get headHeaderKey", string(testValue2), "len", len(testValue2))
+	}
+
+	if bytes.Compare(value, testValue2) != 0 {
+		fmt.Println("rocksdb set not same")
+	}
+
+	data11, _ := db.Get(headHeaderKey)
+
+	hash_key_test := common.BytesToHash(data11)
+	searchHash = headerNumberKey(hash_key_test)
 	return KvrocksDB
 }
 
@@ -52,6 +78,11 @@ func (job *Job) UploadToKvRocks() error {
 		if bytes.Compare(job.ancientKey, headHeaderKey) == 0 {
 			fmt.Println("rocksdb set headHeaderKey", string(job.ancientValue), "len", len(job.ancientValue))
 		}
+
+		if bytes.Compare(job.ancientKey, searchHash) == 0 {
+			fmt.Println("db get serchHash", string(job.ancientValue), "len", len(job.ancientValue))
+		}
+
 		var testKey string = "testkey"
 		//var testValue string = "testvalue"
 		if bytes.Compare(job.ancientKey, []byte(testKey)) == 0 {
