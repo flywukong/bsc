@@ -68,12 +68,12 @@ func InitDb(addr string, db ethdb.Database) *remotedb.RocksDB {
 
 	hash_key_test := common.BytesToHash(data11)
 	searchHash = headerNumberKey(hash_key_test)
+	fmt.Println("kvrocks searchHash,", searchHash, "len", len(searchHash))
 	return KvrocksDB
 }
 
 func (job *Job) UploadToKvRocks() error {
 	if job.isAncient {
-		fmt.Println("is ancient")
 		err := KvrocksDB.Put(job.ancientKey, job.ancientValue)
 		if bytes.Compare(job.ancientKey, headHeaderKey) == 0 {
 			fmt.Println("rocksdb set headHeaderKey", string(job.ancientValue), "len", len(job.ancientValue))

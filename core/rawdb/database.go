@@ -848,6 +848,7 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 			fmt.Println("db get headHeaderKey", string(value), "len", len(value))
 		}
 		if bytes.Compare(key, serchHash) == 0 {
+			fmt.Println("db get serchHash", string(key), "len", len(key))
 			fmt.Println("db get serchHash", string(value), "len", len(value))
 		}
 
