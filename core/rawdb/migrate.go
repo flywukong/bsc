@@ -50,7 +50,7 @@ func (job *Job) UploadToKvRocks() error {
 		fmt.Println("is ancient")
 		err := KvrocksDB.Put(job.ancientKey, job.ancientValue)
 		if bytes.Compare(job.ancientKey, headHeaderKey) == 0 {
-			fmt.Println("rocksdb set headHeaderKey", string(job.ancientValue))
+			fmt.Println("rocksdb set headHeaderKey", string(job.ancientValue), "len", len(job.ancientValue))
 		}
 		var testKey string = "testkey"
 		//var testValue string = "testvalue"

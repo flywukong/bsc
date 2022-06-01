@@ -816,7 +816,7 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 
 	count = 0
 	defer it.Release()
-	//	tempBatch := make(map[string][]byte)
+	//tempBatch := make(map[string][]byte)
 
 	isbatchFirstKey := false
 
@@ -840,7 +840,7 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 		count++
 		batch_count++
 		if bytes.Compare(key, headHeaderKey) == 0 {
-			fmt.Println("db get headHeaderKey", string(value))
+			fmt.Println("db get headHeaderKey", string(value), "len", len(value))
 		}
 
 		dispatcher.SendKv2(key, value, batch_count, true)
@@ -849,7 +849,6 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 			fmt.Println("db get headHeaderKey", string(value))
 			break
 		}
-
 		/*
 			if count >= 1 && count%100 == 0 {
 				// make a batch as a job, send it to worker pool
@@ -867,13 +866,16 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 				tempBatch = make(map[string][]byte)
 			}
 		*/
+
 	}
+
 	var testKey string = "testkey"
 	var testValue string = "testvalue"
+	batch_count++
 	dispatcher.SendKv2([]byte(testKey), []byte(testValue), batch_count, true)
 	fmt.Println("dispatcher set testValue", string(testValue))
 	fmt.Println("dispatcher set testKey", string(testKey))
-	
+
 	// deal with ancient data
 	fmt.Println("send batch num:", batch_count, "key num", count)
 	dispatcher.setTaskNum(batch_count)
@@ -887,6 +889,25 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 		dispatcher.setTaskNum(ancientTaskNum)
 	}
 
+	// get k,v from leveldb
+	value, _ := db.Get(headHeaderKey)
+	fmt.Println("db get headHeaderKey", string(value), "len", len(value))
+
+	err1 := rocksdb.Put(headHeaderKey, value)
+	if err1 != nil {
+		fmt.Println("kvorocks set headHeaderKey fail")
+	}
+	testValue2, err2 := rocksdb.Get(headHeaderKey)
+	if err2 != nil {
+		fmt.Println("kvorocks get headHeaderKey fail")
+	} else {
+		fmt.Println("rocksdb get headHeaderKey", string(testValue2), "len", len(testValue2))
+	}
+
+	if bytes.Compare(value, testValue2) != 0 {
+		fmt.Println("rocksdb set not same")
+	}
+
 	data1, _ := rocksdb.Get(headHeaderKey)
 	data2, _ := db.Get(headHeaderKey)
 	if string(data1[:]) != string(data2[:]) {
@@ -894,6 +915,9 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 	}
 	fmt.Println("data1,", string(data1[:]))
 	fmt.Println("data2,", string(data2[:]))
+
+	data5, _ := rocksdb.Get([]byte(testKey))
+	fmt.Println("data5,", string(data5[:]))
 
 	hash_key1 := common.BytesToHash(data1)
 	data3, _ := rocksdb.Get(headerNumberKey(hash_key1))
