@@ -260,6 +260,7 @@ func (p *Dispatcher) WaitDbFinish() {
 			time.Sleep(3 * time.Second)
 		}
 	}
+	fmt.Println("level db migrate finish")
 }
 
 func (d *Dispatcher) Close(checkErr bool) bool {
@@ -287,6 +288,8 @@ func (d *Dispatcher) Close(checkErr bool) bool {
 
 	if doneAllTask {
 		fmt.Println("finish all migrate tasks")
+	} else {
+		fmt.Println("ancient migrate fail")
 	}
 	return doneAllTask
 }
