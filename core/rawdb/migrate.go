@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
 	"github.com/ethereum/go-ethereum/ethdb/remotedb"
 	"github.com/go-redis/redis/v8"
@@ -39,22 +37,13 @@ var (
 
 var ctx = context.Background()
 
-func InitDb(addr string, db ethdb.Database) *remotedb.RocksDB {
+func InitDb(addr string) *remotedb.RocksDB {
 	path, _ := os.Getwd()
 	persistCache, _ := leveldb.New(path+"/persistcache", 5000, 200, "chaindata", false)
 	config := remotedb.DefaultConfig()
 	config.Addrs = strings.Split(addr, ",")
 	KvrocksDB, _ = remotedb.NewRocksDB(config, persistCache, false)
-	// get k,v from leveldb
 
-	data11, _ := db.Get(headHeaderKey)
-
-	hash_key_test := common.BytesToHash(data11)
-	searchHash = headerNumberKey(hash_key_test)
-	fmt.Println("kvrocks searchHash,", string(searchHash), "len", len(searchHash))
-	if bytes.Compare(searchHash, SerchHash) != 0 {
-		fmt.Println("rocksdb serach hash set not same")
-	}
 	return KvrocksDB
 }
 

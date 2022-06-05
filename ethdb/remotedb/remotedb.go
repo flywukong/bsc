@@ -237,7 +237,7 @@ func (db *RocksDB) CheckError() error {
 		key := exceptionKey[len(reWriteKeyPrefix):]
 		val := it.Value()
 		if err := db.client.Set(ctx, string(key), string(val), 0).Err(); err != nil {
-			log.Debug("remotedb rewrite exception failed", "err", err)
+			log.Error("remotedb rewrite exception failed", "err", err)
 			failRemain++
 			failKvList[string(key)] = val
 			continue
