@@ -231,6 +231,7 @@ func (db *RocksDB) CheckError() error {
 	failKvList := make(map[string][]byte)
 	ctx := context.Background()
 	it := db.persistCache.NewIterator(reWriteKeyPrefix, nil)
+	defer it.Release()
 	for it.Next() {
 		exceptionKey := it.Key()
 		failNum++
@@ -244,7 +245,7 @@ func (db *RocksDB) CheckError() error {
 		}
 		db.persistCache.Delete(exceptionKey)
 	}
-	it.Release()
+
 	if failNum > 0 {
 		log.Error("first check ail kv num:" + strconv.FormatInt(failNum, 10))
 	}
