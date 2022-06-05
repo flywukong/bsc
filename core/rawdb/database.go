@@ -764,16 +764,17 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 		blockNumList = append(blockNumList, i)
 	}
 	// make 8 thread to read ancient data
-	segments := splitArray(blockNumList, 5)
+	segments := splitArray(blockNumList, 3)
 	tasknum = uint64(0)
 	var wg sync.WaitGroup
-	wg.Add(5)
+	wg.Add(3)
 	start := time.Now()
 	for j := 0; j < len(segments); j++ {
 		go func(arr *[]uint64) {
 			defer wg.Done()
 			var idx int
 			fmt.Println("segment", j, "has height:", len(*arr))
+			//start2 := time.Now()
 			for idx = 0; idx < len(*arr); idx++ {
 				for _, category := range []string{freezerHeaderTable, freezerBodiesTable, freezerReceiptTable,
 					freezerHashTable, freezerDifficultyTable} {
@@ -805,6 +806,10 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 						if countTask > GetDoneTaskNum()+20000 {
 							//	fmt.Println("producer diff:", atomic.LoadUint64(&tasknum)-GetDoneTaskNum())
 							time.Sleep(1 * time.Second)
+						}
+						if atomic.LoadUint64(&tasknum)%100000 == 0 {
+							fmt.Println("ancient send num:", atomic.LoadUint64(&tasknum), "cost time:", time.Since(start).Nanoseconds()/1000000,
+								"ms")
 						}
 						dispatcher.SendKv2(ancientKey, value, countTask, true)
 					}
@@ -881,7 +886,7 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 		batch_count uint64
 	)
 	// init remote db for data sending
-	rocksdb := InitDb(addr, db)
+	InitDb(addr)
 
 	count = 0
 	defer it.Release()
@@ -889,11 +894,11 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 
 	isbatchFirstKey := false
 
+	start2 := time.Now()
 	for it.Next() {
 		var (
 			key = it.Key()
-			//value = it.Value()
-			v = it.Value()
+			v   = it.Value()
 		)
 		value := make([]byte, len(v))
 		copy(value, v)
@@ -903,7 +908,7 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 			taskQueue.PushBack(string(key))
 
 			isbatchFirstKey = false
-			if taskQueue.Len() > 2000000 {
+			if taskQueue.Len() > 8000 {
 				taskQueue.Remove(taskQueue.Front())
 			}
 		}
@@ -920,8 +925,10 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 				//		fmt.Println("producer diff:", batch_count-GetDoneTaskNum())
 				time.Sleep(3 * time.Second)
 			}
-			if batch_count%20000 == 0 {
-				fmt.Println("finish level db k,v num:", batch_count*100)
+			if batch_count%500000 == 0 {
+				fmt.Println("finish level db k,v num:", batch_count*100, "cost time:", time.Since(start2)/1000000,
+					"ms")
+				start2 = time.Now()
 			}
 			isbatchFirstKey = true
 			tempBatch = make(map[string][]byte)
@@ -937,37 +944,13 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 	dispatcher.WaitDbFinish()
 
 	fmt.Println("migrate leveldb stop, cost time:", time.Since(start).Nanoseconds()/1000000)
-	if needAncient {
-		start = time.Now()
-		ResetDoneTaskNum()
-		ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
-		dispatcher.setTaskNum(ancientTaskNum)
-	}
 
-	data1, _ := rocksdb.Get(headHeaderKey)
-	data2, _ := db.Get(headHeaderKey)
-	if string(data1[:]) != string(data2[:]) {
-		fmt.Println("data error in kvrocks")
-	}
-	fmt.Println("data1,", string(data1[:]))
-	fmt.Println("data2,", string(data2[:]))
+	start = time.Now()
+	ResetDoneTaskNum()
+	ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
+	dispatcher.setTaskNum(ancientTaskNum)
+	dispatcher.Close(true)
 
-	hash_key1 := common.BytesToHash(data1)
-	data3, _ := rocksdb.Get(headerNumberKey(hash_key1))
-	hash_key2 := common.BytesToHash(data2)
-	data4, _ := db.Get(headerNumberKey(hash_key2))
-
-	fmt.Println("data3,", string(data3[:]))
-	fmt.Println("data4,", string(data4[:]))
-	if len(data3) != 8 {
-		fmt.Println("get key error in ReadHeaderNumber", len(data3))
-	}
-
-	if len(data4) != 8 {
-		fmt.Println("get key error in ReadHeaderNumber", len(data4))
-	}
-
-	dispatcher.Close(false)
 	fmt.Println("migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
 	return nil
 }
@@ -982,12 +965,12 @@ func MigrateAncientInDb(db ethdb.Database, addr string, needBlockData bool,
 	dispatcher := MigrateStart(1000)
 
 	// init remote db for data sending
-	InitDb(addr, db)
+	InitDb(addr)
 
 	ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
 	dispatcher.setTaskNum(ancientTaskNum)
 
-	dispatcher.Close(false)
+	dispatcher.Close(true)
 
 	fmt.Println("migrate database stop, cost time:", time.Since(start).Nanoseconds()/1000000)
 	return nil

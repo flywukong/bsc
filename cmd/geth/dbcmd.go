@@ -239,10 +239,10 @@ func migrate(ctx *cli.Context) error {
 		}
 	}
 	if ctx.NArg() >= 2 {
-		if needAncient, err := strconv.ParseBool(ctx.Args().Get(1)); err != nil {
+		if onlyAncient, err := strconv.ParseBool(ctx.Args().Get(1)); err != nil {
 			return fmt.Errorf("failed to decode 'migrateAncient': %v", err)
 		} else {
-			migrateAncient = needAncient
+			migrateAncient = onlyAncient
 		}
 	}
 
@@ -258,7 +258,13 @@ func migrate(ctx *cli.Context) error {
 		addr = ctx.GlobalString(utils.RemoteDBAddr.Name)
 	}
 
-	return rawdb.MigrateDatabase(db, addr, true, true, migrateAncient, blockNumber)
+	var result error
+	if migrateAncient {
+		result = rawdb.MigrateAncientInDb(db, addr, true, true, migrateAncient, blockNumber)
+	} else {
+		result = rawdb.MigrateDatabase(db, addr, true, true, migrateAncient, blockNumber)
+	}
+	return result
 }
 
 func removeDB(ctx *cli.Context) error {
