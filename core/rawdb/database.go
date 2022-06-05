@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -686,6 +687,7 @@ func splitArray(arr []uint64, num int64) [][]uint64 {
 	return segmens
 }
 
+/*
 func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber uint64) uint64 {
 	frozenOffest, _ := db.Ancients()
 	// inpect ancient, from f.offset to fo f.frozen
@@ -742,12 +744,7 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 				}
 			}
 		}
-		/*
-			if idx == 0 {
-				fmt.Println("finish all")
-				break
-			}
-		*/
+
 	}
 
 	fmt.Println("ancient read data cost time:", time.Since(start))
@@ -755,6 +752,71 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 	//fmt.Println("ancient send key num: ", countNum)
 	//	atomic.LoadUint64(&table1), atomic.LoadUint64(&table2))
 	return tasknum
+}
+*/
+
+func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber uint64) (tasknum uint64) {
+	frozenOffest, _ := db.Ancients()
+	var i uint64
+	// inpect ancient, from f.offset to fo f.frozen
+	blockNumList := []uint64{}
+	for i = startBlockNumber; i < frozenOffest; i++ {
+		blockNumList = append(blockNumList, i)
+	}
+	// make 8 thread to read ancient data
+	segments := splitArray(blockNumList, 5)
+	tasknum = uint64(0)
+	var wg sync.WaitGroup
+	wg.Add(5)
+	start := time.Now()
+	for j := 0; j < len(segments); j++ {
+		go func(arr *[]uint64) {
+			defer wg.Done()
+			var idx int
+			fmt.Println("segment", j, "has height:", len(*arr))
+			for idx = 0; idx < len(*arr); idx++ {
+				for _, category := range []string{freezerHeaderTable, freezerBodiesTable, freezerReceiptTable,
+					freezerHashTable, freezerDifficultyTable} {
+					hash := ReadCanonicalHash(db, (*arr)[idx])
+					var ancientKey []byte
+					if value, err := db.Ancient(category, (*arr)[idx]); err == nil {
+						if category == freezerHeaderTable {
+							ancientKey = headerKey((*arr)[idx], hash)
+						}
+						if category == freezerBodiesTable {
+							ancientKey = blockBodyKey((*arr)[idx], hash)
+						}
+						if category == freezerReceiptTable {
+							ancientKey = blockReceiptsKey((*arr)[idx], hash)
+						}
+
+						if category == freezerHashTable {
+							ancientKey = headerHashKey((*arr)[idx])
+						}
+
+						if category == freezerDifficultyTable {
+							ancientKey = headerTDKey((*arr)[idx], hash)
+						}
+
+						// make a batch as a job, send it to worker pool
+						atomic.AddUint64(&tasknum, 1)
+						// fmt.Println("send ancient batch ")
+						countTask := atomic.LoadUint64(&tasknum)
+						if countTask > GetDoneTaskNum()+20000 {
+							//	fmt.Println("producer diff:", atomic.LoadUint64(&tasknum)-GetDoneTaskNum())
+							time.Sleep(1 * time.Second)
+						}
+						dispatcher.SendKv2(ancientKey, value, countTask, true)
+					}
+				}
+			}
+		}(&segments[j])
+	}
+
+	wg.Wait()
+	fmt.Println("ancient read data cost time:", time.Since(start))
+	fmt.Println("ancient send task num:", atomic.LoadUint64(&tasknum))
+	return atomic.LoadUint64(&tasknum)
 }
 
 func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
