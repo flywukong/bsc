@@ -926,7 +926,7 @@ func MigrateDatabase(db ethdb.Database, addr string, needBlockData bool,
 				time.Sleep(3 * time.Second)
 			}
 			if batch_count%500000 == 0 {
-				fmt.Println("finish level db k,v num:", batch_count*100, "cost time:", time.Since(start2)/1000000,
+				fmt.Println("finish level db k,v num:", batch_count*100, "cost time:", time.Since(start2).Nanoseconds()/1000000,
 					"ms")
 				start2 = time.Now()
 			}
