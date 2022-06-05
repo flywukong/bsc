@@ -285,7 +285,6 @@ func (d *Dispatcher) Close(checkErr bool) bool {
 		}
 	}
 
-	close(d.taskQueue) // close task queue
 	if doneAllTask {
 		fmt.Println("finish all migrate tasks")
 	}
