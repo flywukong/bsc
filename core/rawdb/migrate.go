@@ -1,12 +1,10 @@
 package rawdb
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
 	"github.com/ethereum/go-ethereum/ethdb/remotedb"
-	"github.com/go-redis/redis/v8"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -15,12 +13,7 @@ import (
 
 var (
 	// MaxWorker = os.Getenv("MAX_WORKERS")
-	//MaxQueue = os.Getenv("MAX_QUEUE")
-	rdb = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6666",
-		Password: "", // no password set
-		DB:       0,  // use default DB
-	})
+	//MaxQueue = os.Getenv("MAX_QUEUE")F
 	//path, _         = os.Getwd()
 	//persistCache, _ = leveldb.New(path+"/persistcache", 5000, 200, "chaindata", false)
 
@@ -32,7 +25,7 @@ var (
 	SuccTaskNum     uint64
 	FailTaskNum     uint64
 	TaskFail        int64
-	AncientTaskFail uint64
+	AncientTaskFail int64
 )
 
 var ctx = context.Background()
@@ -59,13 +52,6 @@ func (job *Job) UploadToKvRocks() error {
 			kvBatch := KvrocksDB.NewBatch()
 
 			for key, value := range job.Kvbuffer {
-				if bytes.Compare([]byte(key), searchHash) == 0 {
-					fmt.Println("rocks db3 get serchHash", string(key), "len", len(value))
-				}
-
-				if bytes.Compare([]byte(key), headHeaderKey) == 0 {
-					fmt.Println("rocksdb set headHeaderKey", string(value))
-				}
 				kvBatch.Put([]byte(key), value)
 			}
 
@@ -132,7 +118,11 @@ func (w *Worker) Start() {
 						}
 					*/
 					fmt.Println("send kv rocks error", err.Error())
-					MarkTaskFail()
+					if job.isAncient {
+						MarkAncientTaskFail()
+					} else {
+						MarkTaskFail()
+					}
 				}
 				incDoneTaskNum()
 
@@ -153,11 +143,16 @@ func (w Worker) Stop() {
 
 func initFailFlag() {
 	atomic.StoreInt64(&TaskFail, 0)
+	atomic.StoreInt64(&AncientTaskFail, 0)
 }
 
 func MarkTaskFail() {
 	atomic.StoreInt64(&TaskFail, 1)
 	atomic.AddUint64(&FailTaskNum, 1)
+}
+
+func MarkAncientTaskFail() {
+	atomic.StoreInt64(&AncientTaskFail, 1)
 }
 
 func GetFailFlag() int64 {
@@ -250,7 +245,7 @@ func MigrateStart(workersize uint64) *Dispatcher {
 	return dispatcher
 }
 
-func (p *Dispatcher) WaitDbFinish() {
+func (p *Dispatcher) WaitDbFinish() bool {
 	time.Sleep(3 * time.Second)
 	for {
 		if GetDoneTaskNum() >= p.taskNum {
@@ -260,7 +255,11 @@ func (p *Dispatcher) WaitDbFinish() {
 			time.Sleep(3 * time.Second)
 		}
 	}
+	if atomic.LoadInt64(&TaskFail) == 1 {
+		return false
+	}
 	fmt.Println("level db migrate finish")
+	return true
 }
 
 func (d *Dispatcher) Close(checkErr bool) bool {
@@ -269,6 +268,10 @@ func (d *Dispatcher) Close(checkErr bool) bool {
 	// p.setStatus(STOPED) // 设置 status 为已停止
 	time.Sleep(3 * time.Second)
 	for {
+		if atomic.LoadInt64(&AncientTaskFail) == 1 {
+			fmt.Println("ancient job fail, need restry")
+			break
+		}
 		if GetDoneTaskNum() >= d.taskNum {
 			fmt.Println("get tasknu enough", GetDoneTaskNum(), d.taskNum)
 			break

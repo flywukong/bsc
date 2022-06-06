@@ -223,8 +223,8 @@ of ancientStore, will also displays the reserved number of blocks in ancientStor
 
 func migrate(ctx *cli.Context) error {
 	var (
-		blockNumber    uint64
-		migrateAncient bool
+		blockNumber        uint64
+		onlyMigrateAncient bool
 	)
 
 	if ctx.NArg() > 2 {
@@ -238,11 +238,12 @@ func migrate(ctx *cli.Context) error {
 			blockNumber = num
 		}
 	}
+	// set onlyMigrateAncient as true when we just want to restart send ancient
 	if ctx.NArg() >= 2 {
 		if onlyAncient, err := strconv.ParseBool(ctx.Args().Get(1)); err != nil {
 			return fmt.Errorf("failed to decode 'migrateAncient': %v", err)
 		} else {
-			migrateAncient = onlyAncient
+			onlyMigrateAncient = onlyAncient
 		}
 	}
 
@@ -259,10 +260,10 @@ func migrate(ctx *cli.Context) error {
 	}
 
 	var result error
-	if migrateAncient {
-		result = rawdb.MigrateAncientInDb(db, addr, true, true, migrateAncient, blockNumber)
+	if onlyMigrateAncient {
+		result = rawdb.MigrateAncientInDb(db, addr, onlyMigrateAncient, blockNumber)
 	} else {
-		result = rawdb.MigrateDatabase(db, addr, true, true, migrateAncient, blockNumber)
+		result = rawdb.MigrateDatabase(db, addr, onlyMigrateAncient, blockNumber)
 	}
 	return result
 }
