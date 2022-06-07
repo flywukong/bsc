@@ -783,17 +783,20 @@ func MigrateDatabase(db ethdb.Database, addr string, needAncient bool, blockNumb
 		for {
 			select {
 			case <-marker.C:
-				fmt.Println("mark start key half an hour once")
-				if startDB == nil {
-					startPath, _ := os.Getwd()
-					startDB, _ = leveldb.New(startPath+"/startdb", 5000, 200, "chaindata", false)
-				}
-				key := taskQueue.Front().Value
-				// mark the done key
-				if startDB != nil {
-					err = startDB.Put([]byte("startKey"), []byte(key.(string)))
-					if err != nil {
-						fmt.Println("write first key error:", err.Error())
+				if taskQueue.Len() > 0 {
+					fmt.Println("mark start key half an hour once")
+
+					if startDB == nil {
+						startPath, _ := os.Getwd()
+						startDB, _ = leveldb.New(startPath+"/startdb", 5000, 200, "chaindata", false)
+					}
+					key := taskQueue.Front().Value
+					// mark the done key
+					if startDB != nil {
+						err = startDB.Put([]byte("startKey"), []byte(key.(string)))
+						if err != nil {
+							fmt.Println("write first key error:", err.Error())
+						}
 					}
 				}
 			}
