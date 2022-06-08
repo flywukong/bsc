@@ -770,7 +770,7 @@ func MigrateDatabase(db ethdb.Database, addr string, needAncient bool, blockNumb
 							fmt.Println("write first key error:", err.Error())
 						}
 					}
-					fmt.Println("leveldb migrate fail , need restart!!")
+					fmt.Println("leveldb migrate fail , finish key:", GetDoneTaskNum()*100)
 					panic("task fail")
 				}
 			}
