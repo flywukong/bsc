@@ -777,7 +777,7 @@ func MigrateDatabase(db ethdb.Database, addr string, needAncient bool, blockNumb
 		}
 	}()
 	// this routine mark the startKey in the queue half an hour once
-	marker := time.NewTicker(30 * time.Minute)
+	marker := time.NewTicker(20 * time.Minute)
 	go func() {
 		defer marker.Stop()
 		for {
@@ -798,6 +798,8 @@ func MigrateDatabase(db ethdb.Database, addr string, needAncient bool, blockNumb
 							fmt.Println("write first key error:", err.Error())
 						}
 					}
+					fmt.Println("leveldb migrate test fail, finish key:", GetDoneTaskNum()*100)
+					panic("panic for test")
 				}
 			}
 		}
