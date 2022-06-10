@@ -918,6 +918,12 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		value := make([]byte, len(v))
 		copy(value, v)
 
+		// ignore snapshot data
+		if (bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)) || (bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)) {
+			snapcount++
+			continue
+		}
+
 		for i := 0; i < len(key); i++ {
 			localHash.Roll(key[i])
 		}
@@ -925,12 +931,6 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 			localHash.Roll(value[i])
 		}
 		fmt.Printf("localHash: %v", localHash)
-
-		// ignore snapshot data
-		if (bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)) || (bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)) {
-			snapcount++
-			continue
-		}
 
 		remoteValue, err := kvorcksClient.Get(key)
 		if err != nil {
@@ -948,7 +948,7 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 
 		count++
 		// compare hash every 10000000 or 5000000 keys, panic if fail
-		if count%5000 == 0 {
+		if count%50000 == 0 {
 			fmt.Println("compare level db k,v num:", count,
 				"cost time:", time.Since(start).Nanoseconds()/1000000000, "s")
 			if localHash != remoteHash {
