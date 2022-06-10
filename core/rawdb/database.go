@@ -924,6 +924,7 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		for i := 0; i < len(value); i++ {
 			localHash.Roll(value[i])
 		}
+		fmt.Printf("localHash: %v", localHash)
 
 		// ignore snapshot data
 		if (bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)) || (bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)) {
@@ -942,11 +943,12 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 			for i := 0; i < len(remoteValue); i++ {
 				remoteHash.Roll(remoteValue[i])
 			}
+			fmt.Printf("remoteHash: %v", remoteHash)
 		}
 
 		count++
 		// compare hash every 10000000 or 5000000 keys, panic if fail
-		if count%10000000 == 0 {
+		if count%5000 == 0 {
 			fmt.Println("compare level db k,v num:", count,
 				"cost time:", time.Since(start).Nanoseconds()/1000000000, "s")
 			if localHash != remoteHash {
@@ -1019,7 +1021,7 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		fmt.Println("compare fail, finish key num:", count)
 		panic("compare fail")
 	}
-	
+
 	fmt.Println("compare leveldb cost time:", leveldbCost)
 	fmt.Println("migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
 	return nil

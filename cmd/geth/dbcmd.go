@@ -228,7 +228,7 @@ func migrate(ctx *cli.Context) error {
 		onlyCompare        bool
 	)
 
-	if ctx.NArg() > 2 {
+	if ctx.NArg() > 3 {
 		return fmt.Errorf("Max 2 arguments: %v", ctx.Command.ArgsUsage)
 	}
 
