@@ -20,16 +20,16 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/olekukonko/tablewriter"
 	"math/big"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/olekukonko/tablewriter"
-
 	"container/list"
 
+	"github.com/chmduquesne/rollinghash/buzhash32"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
@@ -633,13 +633,6 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	return nil
 }
 
-func isSnapData(key []byte) bool {
-	if (bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)) || (bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)) {
-		return true
-	}
-	return false
-}
-
 func splitArray(arr []uint64, num int64) [][]uint64 {
 	max := int64(len(arr))
 	if max < num {
@@ -665,6 +658,7 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 	var i uint64
 	// inpect ancient, from f.offset to fo f.frozen
 	blockNumList := []uint64{}
+
 	for i = startBlockNumber; i < frozenOffest; i++ {
 		blockNumList = append(blockNumList, i)
 	}
@@ -726,6 +720,309 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 	fmt.Println("ancient read data cost time:", time.Since(start))
 	fmt.Println("ancient send task num:", atomic.LoadUint64(&tasknum))
 	return atomic.LoadUint64(&tasknum)
+}
+
+func InspectRemoteDb(addr string) error {
+	// init remote db for data sending
+	KvrocksClient := InitDb(addr)
+	it := KvrocksClient.NewIterator([]byte(""), []byte(""))
+	//fmt.Println("prefix:", keyPrefix, "start:", keyStart)
+	defer it.Release()
+
+	var (
+		count  int64
+		start  = time.Now()
+		logged = time.Now()
+
+		// Key-value store statistics
+		headers         stat
+		bodies          stat
+		receipts        stat
+		tds             stat
+		numHashPairings stat
+		hashNumPairings stat
+		tries           stat
+		codes           stat
+		txLookups       stat
+		accountSnaps    stat
+		storageSnaps    stat
+		preimages       stat
+		bloomBits       stat
+		cliqueSnaps     stat
+		parliaSnaps     stat
+
+		// Ancient store statistics
+		/*
+			ancientHeadersSize  common.StorageSize
+			ancientBodiesSize   common.StorageSize
+			ancientReceiptsSize common.StorageSize
+			ancientTdsSize      common.StorageSize
+			ancientHashesSize   common.StorageSize
+		*/
+		// Les statistic
+		chtTrieNodes   stat
+		bloomTrieNodes stat
+
+		// Meta- and unaccounted data
+		metadata     stat
+		unaccounted  stat
+		shutdownInfo stat
+
+		// Totals
+		total common.StorageSize
+	)
+	// Inspect key-value database first.
+	for it.Next() {
+		var (
+			key  = it.Key()
+			size = common.StorageSize(len(key) + len(it.Value()))
+		)
+		total += size
+		switch {
+		case bytes.HasPrefix(key, headerPrefix) && len(key) == (len(headerPrefix)+8+common.HashLength):
+			headers.Add(size)
+		case bytes.HasPrefix(key, blockBodyPrefix) && len(key) == (len(blockBodyPrefix)+8+common.HashLength):
+			bodies.Add(size)
+		case bytes.HasPrefix(key, blockReceiptsPrefix) && len(key) == (len(blockReceiptsPrefix)+8+common.HashLength):
+			receipts.Add(size)
+		case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerTDSuffix):
+			tds.Add(size)
+		case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerHashSuffix):
+			numHashPairings.Add(size)
+		case bytes.HasPrefix(key, headerNumberPrefix) && len(key) == (len(headerNumberPrefix)+common.HashLength):
+			hashNumPairings.Add(size)
+		case len(key) == common.HashLength:
+			tries.Add(size)
+		case bytes.HasPrefix(key, CodePrefix) && len(key) == len(CodePrefix)+common.HashLength:
+			codes.Add(size)
+		case bytes.HasPrefix(key, txLookupPrefix) && len(key) == (len(txLookupPrefix)+common.HashLength):
+			txLookups.Add(size)
+		case bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength):
+			accountSnaps.Add(size)
+		case bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength):
+			storageSnaps.Add(size)
+		case bytes.HasPrefix(key, preimagePrefix) && len(key) == (len(preimagePrefix)+common.HashLength):
+			preimages.Add(size)
+		case bytes.HasPrefix(key, bloomBitsPrefix) && len(key) == (len(bloomBitsPrefix)+10+common.HashLength):
+			bloomBits.Add(size)
+		case bytes.HasPrefix(key, BloomBitsIndexPrefix):
+			bloomBits.Add(size)
+		case bytes.HasPrefix(key, []byte("clique-")) && len(key) == 7+common.HashLength:
+			cliqueSnaps.Add(size)
+		case bytes.HasPrefix(key, []byte("parlia-")) && len(key) == 7+common.HashLength:
+			parliaSnaps.Add(size)
+
+		case bytes.HasPrefix(key, []byte("cht-")) ||
+			bytes.HasPrefix(key, []byte("chtIndexV2-")) ||
+			bytes.HasPrefix(key, []byte("chtRootV2-")): // Canonical hash trie
+			chtTrieNodes.Add(size)
+		case bytes.HasPrefix(key, []byte("blt-")) ||
+			bytes.HasPrefix(key, []byte("bltIndex-")) ||
+			bytes.HasPrefix(key, []byte("bltRoot-")): // Bloomtrie sub
+			bloomTrieNodes.Add(size)
+		case bytes.Equal(key, uncleanShutdownKey):
+			shutdownInfo.Add(size)
+		default:
+			var accounted bool
+			for _, meta := range [][]byte{
+				databaseVersionKey, headHeaderKey, headBlockKey, headFastBlockKey, lastPivotKey,
+				fastTrieProgressKey, snapshotDisabledKey, snapshotRootKey, snapshotJournalKey,
+				snapshotGeneratorKey, snapshotRecoveryKey, txIndexTailKey, fastTxLookupLimitKey,
+				uncleanShutdownKey, badBlockKey,
+			} {
+				if bytes.Equal(key, meta) {
+					metadata.Add(size)
+					accounted = true
+					break
+				}
+			}
+			if !accounted {
+				unaccounted.Add(size)
+			}
+		}
+		count++
+		if count%1000 == 0 && time.Since(logged) > 8*time.Second {
+			log.Info("Inspecting database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
+			logged = time.Now()
+		}
+	}
+
+	// Display the database statistic.
+	stats := [][]string{
+		{"Key-Value store", "Headers", headers.Size(), headers.Count()},
+		{"Key-Value store", "Bodies", bodies.Size(), bodies.Count()},
+		{"Key-Value store", "Receipt lists", receipts.Size(), receipts.Count()},
+		{"Key-Value store", "Difficulties", tds.Size(), tds.Count()},
+		{"Key-Value store", "Block number->hash", numHashPairings.Size(), numHashPairings.Count()},
+		{"Key-Value store", "Block hash->number", hashNumPairings.Size(), hashNumPairings.Count()},
+		{"Key-Value store", "Transaction index", txLookups.Size(), txLookups.Count()},
+		{"Key-Value store", "Bloombit index", bloomBits.Size(), bloomBits.Count()},
+		{"Key-Value store", "Contract codes", codes.Size(), codes.Count()},
+		{"Key-Value store", "Trie nodes", tries.Size(), tries.Count()},
+		{"Key-Value store", "Trie preimages", preimages.Size(), preimages.Count()},
+		{"Key-Value store", "Account snapshot", accountSnaps.Size(), accountSnaps.Count()},
+		{"Key-Value store", "Storage snapshot", storageSnaps.Size(), storageSnaps.Count()},
+		{"Key-Value store", "Clique snapshots", cliqueSnaps.Size(), cliqueSnaps.Count()},
+		{"Key-Value store", "Parlia snapshots", parliaSnaps.Size(), parliaSnaps.Count()},
+		{"Key-Value store", "Singleton metadata", metadata.Size(), metadata.Count()},
+		{"Key-Value store", "Shutdown metadata", shutdownInfo.Size(), shutdownInfo.Count()},
+		{"Light client", "CHT trie nodes", chtTrieNodes.Size(), chtTrieNodes.Count()},
+		{"Light client", "Bloom trie nodes", bloomTrieNodes.Size(), bloomTrieNodes.Count()},
+	}
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"Database", "Category", "Size", "Items"})
+	table.SetFooter([]string{"", "Total", total.String(), " "})
+	table.AppendBulk(stats)
+	table.Render()
+
+	if unaccounted.size > 0 {
+		log.Error("Database contains unaccounted data", "size", unaccounted.size, "count", unaccounted.count)
+	}
+
+	return nil
+}
+
+func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
+	fmt.Println("begin compare")
+
+	var startKey []byte
+
+	localHash := buzhash32.New()
+	init_s := []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	n := 32
+	localHash.Write(init_s[:n])
+
+	remoteHash := buzhash32.New()
+	//init_s = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	remoteHash.Write(init_s[:n])
+
+	it := db.NewIterator([]byte(""), startKey)
+	start := time.Now()
+
+	var (
+		count     uint64
+		snapcount uint64
+	)
+	// init remote db for data sending
+	kvorcksClient := InitDb(addr)
+
+	count = 0
+	snapcount = 0
+	defer it.Release()
+
+	for it.Next() {
+		var (
+			key = it.Key()
+			v   = it.Value()
+		)
+		value := make([]byte, len(v))
+		copy(value, v)
+
+		for i := 0; i < len(key); i++ {
+			localHash.Roll(key[i])
+		}
+		for i := 0; i < len(value); i++ {
+			localHash.Roll(value[i])
+		}
+
+		// ignore snapshot data
+		if (bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)) || (bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)) {
+			snapcount++
+			continue
+		}
+
+		remoteValue, err := kvorcksClient.Get(key)
+		if err != nil {
+			fmt.Println("could not find key,", string(key))
+			//	panic("compare fail")
+		} else {
+			for i := 0; i < len(key); i++ {
+				remoteHash.Roll(key[i])
+			}
+			for i := 0; i < len(remoteValue); i++ {
+				remoteHash.Roll(remoteValue[i])
+			}
+		}
+
+		count++
+		// compare hash every 10000000 or 5000000 keys, panic if fail
+		if count%10000000 == 0 {
+			fmt.Println("compare level db k,v num:", count,
+				"cost time:", time.Since(start).Nanoseconds()/1000000000, "s")
+			if localHash != remoteHash {
+				fmt.Println("compare fail, finish key num:", count)
+				panic("compare fail")
+			}
+		}
+	}
+
+	// deal with ancient data
+	fmt.Println("compare key num:", count, "pass snapshout:", snapcount)
+	leveldbCost := time.Since(start).Nanoseconds() / 1000000
+
+	start = time.Now()
+	frozenOffest, _ := db.Ancients()
+	blockNumList := []uint64{}
+
+	for i := blockNumber; i < frozenOffest; i++ {
+		blockNumList = append(blockNumList, i)
+	}
+
+	for idx := 0; idx < len(blockNumList); idx++ {
+		for _, category := range []string{freezerHeaderTable, freezerBodiesTable, freezerReceiptTable,
+			freezerHashTable, freezerDifficultyTable} {
+			hash := ReadCanonicalHash(db, blockNumList[idx])
+			var ancientKey []byte
+			if value, err := db.Ancient(category, blockNumList[idx]); err == nil {
+				count++
+				if category == freezerHeaderTable {
+					ancientKey = headerKey(blockNumList[idx], hash)
+				}
+				if category == freezerBodiesTable {
+					ancientKey = blockBodyKey(blockNumList[idx], hash)
+				}
+				if category == freezerReceiptTable {
+					ancientKey = blockReceiptsKey(blockNumList[idx], hash)
+				}
+
+				if category == freezerHashTable {
+					ancientKey = headerHashKey(blockNumList[idx])
+				}
+
+				if category == freezerDifficultyTable {
+					ancientKey = headerTDKey(blockNumList[idx], hash)
+				}
+
+				for i := 0; i < len(ancientKey); i++ {
+					localHash.Roll(ancientKey[i])
+				}
+				for i := 0; i < len(value); i++ {
+					localHash.Roll(value[i])
+				}
+				remoteValue, err := kvorcksClient.Get(ancientKey)
+				if err != nil {
+					fmt.Println("could not find key,", string(ancientKey))
+					//	panic("compare fail")
+				} else {
+					for i := 0; i < len(ancientKey); i++ {
+						remoteHash.Roll(ancientKey[i])
+					}
+					for i := 0; i < len(remoteValue); i++ {
+						remoteHash.Roll(remoteValue[i])
+					}
+				}
+			}
+		}
+	}
+
+	if localHash != remoteHash {
+		fmt.Println("compare fail, finish key num:", count)
+		panic("compare fail")
+	}
+	
+	fmt.Println("compare leveldb cost time:", leveldbCost)
+	fmt.Println("migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
+	return nil
 }
 
 func MigrateDatabase(db ethdb.Database, addr string, needAncient bool, blockNumber uint64) error {
@@ -863,18 +1160,6 @@ func MigrateDatabase(db ethdb.Database, addr string, needAncient bool, blockNumb
 					fmt.Println("worker lag too much", distance)
 					time.Sleep(1 * time.Minute)
 				}
-				//	fmt.Println("producer faster, job num:", distance)
-				/*
-					for {
-						if distance < 8000 {
-							break
-						}
-						fmt.Println("hello,world", count)
-						time.Sleep(5 * time.Second)
-						distance = batch_count - GetDoneTaskNum()
-					}
-				*/
-
 				time.Sleep(5 * time.Second)
 			}
 			if batch_count%500000 == 0 {
@@ -901,12 +1186,12 @@ func MigrateDatabase(db ethdb.Database, addr string, needAncient bool, blockNumb
 
 	taskQueue.Init()
 	leveldbCost := time.Since(start).Nanoseconds() / 1000000
-	fmt.Println("migrate leveldb stop, cost time:", time.Since(start).Nanoseconds()/1000000)
 
 	start = time.Now()
 	ResetDoneTaskNum()
 	ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
 	dispatcher.setTaskNum(ancientTaskNum)
+	//if set flag true, we will try to retry error keys
 	dispatcher.Close(false)
 
 	fmt.Println("migrate leveldb cost time:", leveldbCost)
@@ -917,7 +1202,6 @@ func MigrateDatabase(db ethdb.Database, addr string, needAncient bool, blockNumb
 func MigrateAncientInDb(db ethdb.Database, addr string, needAncient bool, blockNumber uint64) error {
 	fmt.Println("begin migrate")
 
-	fmt.Println("ancient blocknumber:", blockNumber)
 	start := time.Now()
 	// start a task dispatcher with 1000 threads
 	dispatcher := MigrateStart(1000)

@@ -225,6 +225,7 @@ func migrate(ctx *cli.Context) error {
 	var (
 		blockNumber        uint64
 		onlyMigrateAncient bool
+		onlyCompare        bool
 	)
 
 	if ctx.NArg() > 2 {
@@ -247,6 +248,14 @@ func migrate(ctx *cli.Context) error {
 		}
 	}
 
+	if ctx.NArg() >= 3 {
+		if onlyCom, err := strconv.ParseBool(ctx.Args().Get(2)); err != nil {
+			return fmt.Errorf("failed to decode 'migrateAncient': %v", err)
+		} else {
+			onlyCompare = onlyCom
+		}
+	}
+
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
@@ -263,7 +272,11 @@ func migrate(ctx *cli.Context) error {
 	if onlyMigrateAncient {
 		result = rawdb.MigrateAncientInDb(db, addr, onlyMigrateAncient, blockNumber)
 	} else {
-		result = rawdb.MigrateDatabase(db, addr, onlyMigrateAncient, blockNumber)
+		if !onlyCompare {
+			result = rawdb.MigrateDatabase(db, addr, onlyMigrateAncient, blockNumber)
+		} else {
+			result = rawdb.CompareDatabase(db, addr, blockNumber)
+		}
 	}
 	return result
 }
