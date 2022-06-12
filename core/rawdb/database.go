@@ -1097,8 +1097,6 @@ func MigrateDatabase(db ethdb.Database, addr string, needAncient bool, blockNumb
 							fmt.Println("write first key error:", err.Error())
 						}
 					}
-					fmt.Println("leveldb migrate test fail, finish key:", GetDoneTaskNum()*100)
-					panic("panic for test")
 				}
 			}
 		}
@@ -1106,7 +1104,7 @@ func MigrateDatabase(db ethdb.Database, addr string, needAncient bool, blockNumb
 
 	start := time.Now()
 	// start a task dispatcher with 1000 threads
-	dispatcher := MigrateStart(1000)
+	dispatcher := MigrateStart(1500)
 
 	var (
 		count       uint64
@@ -1151,13 +1149,13 @@ func MigrateDatabase(db ethdb.Database, addr string, needAncient bool, blockNumb
 		tempBatch[string(key[:])] = value
 		count++
 		// make a batch contain 100 keys , and send job work pool
-		if count >= 1 && count%100 == 0 {
+		if count >= 1 && count%50 == 0 {
 			// make a batch as a job, send it to worker pool
 			batch_count++
 			dispatcher.SendKv(tempBatch, batch_count, false)
 			// if producer much faster than workers(more than 8000 jobs), make it slower
 			distance := batch_count - GetDoneTaskNum()
-			if distance > 3000 {
+			if distance > 10000 {
 				if distance > 10000 {
 					fmt.Println("worker lag too much", distance)
 					time.Sleep(1 * time.Minute)
