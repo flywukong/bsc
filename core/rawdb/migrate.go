@@ -73,16 +73,19 @@ type CompareError struct {
 
 func (job *Job) CompareKvRocks() error {
 	if job.isAncient {
-		err := KvrocksDB.Put(job.ancientKey, job.ancientValue)
-		remoteValue, err := KvrocksDB.Get(job.ancientKey)
-		if err != nil {
-			fmt.Println("could not find key,", string(job.ancientKey))
-			return err
-		}
-		if bytes.Compare(remoteValue, job.ancientValue) != 0 {
-			fmt.Println("compare key error,", string(job.ancientKey))
-			return errors.New("compare not same")
-		}
+		/*
+			err := KvrocksDB.Put(job.ancientKey, job.ancientValue)
+			remoteValue, err := KvrocksDB.Get(job.ancientKey)
+			if err != nil {
+				fmt.Println("could not find key,", string(job.ancientKey))
+				return err
+			}
+			if bytes.Compare(remoteValue, job.ancientValue) != 0 {
+				fmt.Println("compare key error,", string(job.ancientKey))
+				return errors.New("compare not same")
+			}
+		*/
+		return nil
 	} else {
 		if len(job.Kvbuffer) > 0 {
 			for key, value := range job.Kvbuffer {
@@ -92,7 +95,7 @@ func (job *Job) CompareKvRocks() error {
 					return err
 				}
 				if bytes.Compare(remoteValue, value) != 0 {
-					fmt.Println("could not find key,", string(key))
+					fmt.Println("compare key error,", string(key))
 					return errors.New("compare not same")
 				}
 			}
@@ -139,10 +142,11 @@ func (w *Worker) Start() {
 			case job := <-w.JobChannel:
 				// send batch to kvrocks
 				if err := job.CompareKvRocks(); err != nil {
-					fmt.Println("send kv rocks error", err.Error())
 					if job.isAncient {
+						fmt.Println("send ancient kv rocks error", err.Error())
 						MarkAncientTaskFail()
 					} else {
+						fmt.Println("send rocks kv rocks error", err.Error())
 						MarkTaskFail()
 					}
 				}
