@@ -1157,8 +1157,8 @@ func MigrateDatabase(db ethdb.Database, addr string, needAncient bool, blockNumb
 			dispatcher.SendKv(tempBatch, batch_count, false)
 			// if producer much faster than workers(more than 8000 jobs), make it slower
 			distance := batch_count - GetDoneTaskNum()
-			if distance > 8000 {
-				if distance > 12000 {
+			if distance > 3000 {
+				if distance > 10000 {
 					fmt.Println("worker lag too much", distance)
 					time.Sleep(1 * time.Minute)
 				}

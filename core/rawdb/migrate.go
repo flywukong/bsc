@@ -1,7 +1,9 @@
 package rawdb
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
 	"github.com/ethereum/go-ethereum/ethdb/remotedb"
@@ -64,6 +66,42 @@ func (job *Job) UploadToKvRocks() error {
 	return nil
 }
 
+type CompareError struct {
+	errorCode string
+	err       error
+}
+
+func (job *Job) CompareKvRocks() error {
+	if job.isAncient {
+		err := KvrocksDB.Put(job.ancientKey, job.ancientValue)
+		remoteValue, err := KvrocksDB.Get(job.ancientKey)
+		if err != nil {
+			fmt.Println("could not find key,", string(job.ancientKey))
+			return err
+		}
+		if bytes.Compare(remoteValue, job.ancientValue) != 0 {
+			fmt.Println("compare key error,", string(job.ancientKey))
+			return errors.New("compare not same")
+		}
+	} else {
+		if len(job.Kvbuffer) > 0 {
+			for key, value := range job.Kvbuffer {
+				remoteValue, err := KvrocksDB.Get([]byte(key))
+				if err != nil {
+					fmt.Println("could not find key,", string(key))
+					return err
+				}
+				if bytes.Compare(remoteValue, value) != 0 {
+					fmt.Println("could not find key,", string(key))
+					return errors.New("compare not same")
+				}
+			}
+
+		}
+	}
+	return nil
+}
+
 // A buffered channel that we can send work requests on.
 var JobQueue chan Job
 
@@ -100,23 +138,7 @@ func (w *Worker) Start() {
 			select {
 			case job := <-w.JobChannel:
 				// send batch to kvrocks
-				if err := job.UploadToKvRocks(); err != nil {
-					/*
-						retrySucc := false
-						// retry for 5 times
-						for i := 0; i < 5; i++ {
-							err = job.UploadToKvRocks()
-							if err == nil {
-								retrySucc = true
-								fmt.Println("retry send kv rocks succ")
-								break
-							}
-						}
-						if !retrySucc {
-							fmt.Println("send kv rocks error", err.Error())
-							MarkTaskFail()
-						}
-					*/
+				if err := job.CompareKvRocks(); err != nil {
 					fmt.Println("send kv rocks error", err.Error())
 					if job.isAncient {
 						MarkAncientTaskFail()
