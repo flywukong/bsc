@@ -73,19 +73,15 @@ type CompareError struct {
 
 func (job *Job) CompareKvRocks() error {
 	if job.isAncient {
-		/*
-			err := KvrocksDB.Put(job.ancientKey, job.ancientValue)
-			remoteValue, err := KvrocksDB.Get(job.ancientKey)
-			if err != nil {
-				fmt.Println("could not find key,", string(job.ancientKey))
-				return err
-			}
-			if bytes.Compare(remoteValue, job.ancientValue) != 0 {
-				fmt.Println("compare key error,", string(job.ancientKey))
-				return errors.New("compare not same")
-			}
-		*/
-		return nil
+		remoteValue, err := KvrocksDB.Get(job.ancientKey)
+		if err != nil {
+			fmt.Println("ancient could not find key,", string(job.ancientKey))
+			return err
+		}
+		if bytes.Compare(remoteValue, job.ancientValue) != 0 {
+			fmt.Println("ancient compare key error,", string(job.ancientKey))
+			return errors.New("ancient compare not same")
+		}
 	} else {
 		if len(job.Kvbuffer) > 0 {
 			for key, value := range job.Kvbuffer {
