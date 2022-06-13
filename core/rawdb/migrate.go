@@ -74,6 +74,7 @@ type CompareError struct {
 func (job *Job) CompareKvRocks() error {
 	if job.isAncient {
 		remoteValue, err := KvrocksDB.Get(job.ancientKey)
+
 		if err != nil {
 			fmt.Println("ancient could not find key,", string(job.ancientKey))
 			return err
@@ -84,18 +85,34 @@ func (job *Job) CompareKvRocks() error {
 		}
 	} else {
 		if len(job.Kvbuffer) > 0 {
-			for key, value := range job.Kvbuffer {
-				remoteValue, err := KvrocksDB.Get([]byte(key))
-				if err != nil {
-					fmt.Println("could not find key,", string(key))
-					return err
+			/*
+				for key, value := range job.Kvbuffer {
+					remoteValue, err := KvrocksDB.Get([]byte(key))
+					if err != nil {
+						fmt.Println("could not find key,", string(key))
+						return err
+					}
+					if bytes.Compare(remoteValue, value) != 0 {
+						fmt.Println("compare key error,", string(key))
+						return errors.New("compare not same")
+					}
 				}
-				if bytes.Compare(remoteValue, value) != 0 {
-					fmt.Println("compare key error,", string(key))
+			*/
+			var keyList []string
+			for key, _ := range job.Kvbuffer {
+				keyList = append(keyList, key)
+			}
+			valueList, err := KvrocksDB.MGet(keyList)
+			if err != nil {
+				fmt.Println("mget compare fail", err.Error())
+				return err
+			}
+			for i := 0; i < len(valueList); i++ {
+				if bytes.Compare(job.Kvbuffer[keyList[i]], valueList[i]) != 0 {
+					fmt.Println("compare key error")
 					return errors.New("compare not same")
 				}
 			}
-
 		}
 	}
 	return nil

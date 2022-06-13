@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -140,6 +141,24 @@ func (db *RocksDB) Get(key []byte) ([]byte, error) {
 		db.persistCache.Put(key, []byte(data))
 	}
 	return []byte(data), nil
+}
+
+func (db *RocksDB) MGet(keys []string) ([][]byte, error) {
+	result, err := db.client.MGet(context.Background(), keys...).Result()
+	if err != nil {
+		fmt.Println("mget call fail,", err.Error())
+		return nil, err
+	}
+	if len(result) != len(keys) {
+		return nil, errors.New("mget get keys error")
+	}
+
+	var values [][]byte
+	for i := 0; i < len(keys); i++ {
+		values = append(values, result[i].([]byte))
+	}
+
+	return values, nil
 }
 
 // Put inserts the given value into the key-value store.
