@@ -11,6 +11,9 @@ Before the command exits, wait for the number of completed tasks in the work poo
 Use the command:
  ./ geth db migrate  <ancient block start number> <only migrate ancient data> <kvocksdb addr>
  
+
+
+
 Example:
   nohup  ./geth  db migrate 0 false --datadir ./node --remotedb.addrs 127.0.0.1:6668,127.0.0.1:6669 &
 
