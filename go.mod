@@ -84,3 +84,5 @@ require (
 	gopkg.in/urfave/cli.v1 v1.20.0
 	gotest.tools v2.2.0+incompatible // indirect
 )
+
+replace github.com/go-redis/redis/v8 => github.com/flywukong/redis-1/v8 v8.11.5
