@@ -923,6 +923,7 @@ func (bc *BlockChain) Reset() error {
 // specified genesis state.
 func (bc *BlockChain) ResetWithGenesisBlock(genesis *types.Block) error {
 	if bc.readonly {
+		fmt.Println("called reset")
 		log.Error("BlockChain is readonly, not support ResetWithGenesisBlock")
 		return errors.New("BlockChain is readonly, not support ResetWithGenesisBlock")
 	}

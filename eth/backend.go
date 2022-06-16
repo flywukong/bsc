@@ -132,7 +132,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	var chainDb ethdb.Database
 	var err error
 	if config.EnableRemoteDB {
-		chainDb, err = stack.OpenRemoteDB(&config.RemoteDB, config.EnablePersistCache, "chaindata", 
+		chainDb, err = stack.OpenRemoteDB(&config.RemoteDB, config.EnablePersistCache, "chaindata",
 			config.DatabaseCache, config.DatabaseHandles, "eth/db/chaindata/", false, config.PersistDiff)
 		if err != nil {
 			return nil, err
@@ -142,10 +142,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			log.Info("other node wirte remotedb", "node", string(marker))
 			return nil, errors.New("other node opened remotedb with wirte permission")
 		}
-		if err := rawdb.WriteRemoteDBWriteMarker(chainDb, []byte(time.Now().Format("2022-04-20 15:04:05"))); err != nil{
+		if err := rawdb.WriteRemoteDBWriteMarker(chainDb, []byte(time.Now().Format("2022-04-20 15:04:05"))); err != nil {
 			return nil, err
 		}
-		
+
 		log.Info("Open remotedb", "addrs", config.RemoteDB.Addrs, "persistcache", config.EnablePersistCache)
 	} else {
 		chainDb, err = stack.OpenAndMergeDatabase("chaindata", config.DatabaseCache, config.DatabaseHandles,
@@ -314,7 +314,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 }
 
 // New creates a new Ethereum object for archive service
-// (including the initialisation of the common Ethereum object) 
+// (including the initialisation of the common Ethereum object)
 func NewArchiveServiceNode(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	// Ensure configuration values are compatible and sane
 	if config.SyncMode == downloader.LightSync {
@@ -343,13 +343,12 @@ func NewArchiveServiceNode(stack *node.Node, config *ethconfig.Config) (*Ethereu
 	ethashConfig.NotifyFull = config.Miner.NotifyFull
 
 	// Assemble the Ethereum object
-	chainDb, err := stack.OpenRemoteDB(&config.RemoteDB, config.EnablePersistCache, "chaindata", 
+	chainDb, err := stack.OpenRemoteDB(&config.RemoteDB, config.EnablePersistCache, "chaindata",
 		config.DatabaseCache, config.DatabaseHandles, "eth/db/chaindata/", true, config.PersistDiff)
 	if err != nil {
 		return nil, err
 	}
 	log.Info("Open remotedb", "addrs", config.RemoteDB.Addrs, "persistcache", config.EnablePersistCache)
-	
 
 	genesisHash := rawdb.ReadCanonicalHash(chainDb, 0)
 	if (genesisHash == common.Hash{}) {
@@ -407,6 +406,7 @@ func NewArchiveServiceNode(stack *node.Node, config *ethconfig.Config) (*Ethereu
 			Preimages:          config.Preimages,
 		}
 	)
+
 	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, &config.TxLookupLimit, true)
 	if err != nil {
 		return nil, err
@@ -542,6 +542,7 @@ func (s *Ethereum) APIs() []rpc.API {
 }
 
 func (s *Ethereum) ResetWithGenesisBlock(gb *types.Block) {
+	fmt.Println("call ResetWithGenesisBlock")
 	s.blockchain.ResetWithGenesisBlock(gb)
 }
 
