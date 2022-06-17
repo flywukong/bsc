@@ -85,4 +85,4 @@ require (
 	gotest.tools v2.2.0+incompatible // indirect
 )
 
-replace github.com/go-redis/redis/v8 => github.com/flywukong/redis-1/v8 v8.11.6-0.20220617024229-db8bf24b4548
+replace github.com/go-redis/redis/v8 => github.com/flywukong/redis-1/v8 v8.11.6-0.20220617074318-4d1a3d604637
