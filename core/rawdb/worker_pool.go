@@ -90,6 +90,15 @@ func (job *Job) CompareKvRocks() error {
 						continue
 					}
 
+					if keyList[i] == string(databaseVersionKey) || keyList[i] == string(fastTrieProgressKey) ||
+						keyList[i] == string(snapshotDisabledKey) || keyList[i] == string(snapshotRootKey) ||
+						keyList[i] == string(snapshotJournalKey) || keyList[i] == string(snapshotGeneratorKey) ||
+						keyList[i] == string(snapshotRecoveryKey) || keyList[i] == string(txIndexTailKey) ||
+						keyList[i] == string(fastTxLookupLimitKey) || keyList[i] == string(uncleanShutdownKey) ||
+						keyList[i] == string(badBlockKey) {
+						continue
+					}
+					
 					return errors.New("compare not same")
 				}
 			}
