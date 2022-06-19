@@ -22,12 +22,13 @@ var (
 	KvrocksDB *remotedb.RocksDB
 	// kvrocksDB, _ = remotedb.NewRocksDB(remotedb.DefaultConfig2(addr), persistCache, false)
 
-	searchHash      []byte
-	DoneTaskNum     uint64
-	SuccTaskNum     uint64
-	FailTaskNum     uint64
-	TaskFail        int64
-	AncientTaskFail int64
+	searchHash       []byte
+	DoneTaskNum      uint64
+	SuccTaskNum      uint64
+	FailTaskNum      uint64
+	TaskFail         int64
+	AncientTaskFail  int64
+	errComPareKeyNum uint64
 )
 
 var ctx = context.Background()
@@ -38,7 +39,6 @@ func InitDb(addr string) *remotedb.RocksDB {
 	config := remotedb.DefaultConfig()
 	config.Addrs = strings.Split(addr, ",")
 	KvrocksDB, _ = remotedb.NewRocksDB(config, persistCache, false)
-
 	return KvrocksDB
 }
 
@@ -79,11 +79,6 @@ func (job *Job) CompareKvRocks() error {
 			// compare value one by one
 			for i := 0; i < len(valueList); i++ {
 				if bytes.Compare(job.Kvbuffer[keyList[i]], valueList[i]) != 0 {
-					fmt.Println("compare key error, key:", keyList[i], "leveldb value:",
-						job.Kvbuffer[keyList[i]], "  vs:", valueList[i])
-
-					fmt.Println("compare key error, key:", keyList[i], "leveldb value:",
-						string(job.Kvbuffer[keyList[i]]), "  vs:", string(valueList[i]))
 
 					if keyList[i] == string(headHeaderKey) || keyList[i] == string(headBlockKey) ||
 						keyList[i] == string(headFastBlockKey) || keyList[i] == string(lastPivotKey) {
@@ -98,8 +93,15 @@ func (job *Job) CompareKvRocks() error {
 						keyList[i] == string(badBlockKey) {
 						continue
 					}
-					
-					return errors.New("compare not same")
+
+					fmt.Println("compare key error, key:", keyList[i], "leveldb value:",
+						string(job.Kvbuffer[keyList[i]]), "  vs:", string(valueList[i]))
+
+					fmt.Println("compare err, show bytes key:", keyList[i], "leveldb value:",
+						job.Kvbuffer[keyList[i]], "  vs:", valueList[i])
+					incErrorNum()
+
+					//	return errors.New("compare not same")
 				}
 			}
 		}
@@ -202,6 +204,10 @@ type Dispatcher struct {
 
 func incDoneTaskNum() { // runningWorkers + 1
 	atomic.AddUint64(&DoneTaskNum, 1)
+}
+
+func incErrorNum() {
+	atomic.AddUint64(&errComPareKeyNum, 1)
 }
 
 func GetDoneTaskNum() uint64 {
@@ -327,5 +333,6 @@ func (d *Dispatcher) Close(checkErr bool) bool {
 	if doneAllTask && GetAncientFailFlag() == 0 && GetFailFlag() == 0 {
 		finish = true
 	}
+	fmt.Println("get total compare error key num:", atomic.LoadUint64(&errComPareKeyNum))
 	return finish
 }
