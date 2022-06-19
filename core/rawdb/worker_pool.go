@@ -71,10 +71,19 @@ func (job *Job) CompareKvRocks() error {
 				fmt.Println("compare fail", err.Error())
 				return err
 			}
+
+			if len(valueList) != len(keyList) {
+				return errors.New("PipeRead key num error")
+			}
+
 			// compare value one by one
 			for i := 0; i < len(valueList); i++ {
 				if bytes.Compare(job.Kvbuffer[keyList[i]], valueList[i]) != 0 {
-					fmt.Println("compare key error", job.Kvbuffer[keyList[i]], "  vs:", valueList[i])
+					fmt.Println("compare key error, key:", keyList[i], "leveldb value:",
+						job.Kvbuffer[keyList[i]], "  vs:", valueList[i])
+
+					fmt.Println("compare key error, key:", keyList[i], "leveldb value:",
+						string(job.Kvbuffer[keyList[i]]), "  vs:", string(valueList[i]))
 					return errors.New("compare not same")
 				}
 			}
