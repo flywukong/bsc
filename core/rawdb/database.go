@@ -730,11 +730,11 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	path, _ := os.Getwd()
 	startDB, _ := leveldb.New(path+"/startdb", 5000, 200, "chaindata", false)
 	startKey, err := startDB.Get([]byte("startKey"))
-	hasStartKey := false
+	//	hasStartKey := false
 	if err == nil {
 		fmt.Println("get start key:", startKey)
 		fmt.Println("get start key:", string(startKey))
-		hasStartKey = true
+		//		hasStartKey = true
 	} else {
 		fmt.Println("get first key error", err.Error())
 	}
@@ -796,13 +796,13 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 			key = it.Key()
 			v   = it.Value()
 		)
+
 		value := make([]byte, len(v))
 		copy(value, v)
 
-		if hasStartKey == true {
-			fmt.Println("get start key value:", string(value), "   byte:", value)
-			hasStartKey = false
-		}
+		//if string(key) == "LastHeader" {
+		//	fmt.Println("get LastHeader key value:", string(value), "   byte:", value)
+		//}
 		// ignore snapshot data
 		if (bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)) || (bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)) {
 			snapcount++
