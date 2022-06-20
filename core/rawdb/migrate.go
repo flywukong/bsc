@@ -37,6 +37,7 @@ func (job *Job) UploadToKvRocks() error {
 		err := KvrocksDB.Put(job.ancientKey, job.ancientValue)
 		if err != nil {
 			fmt.Println("send kv error,", err.Error())
+			panic("task fail")
 			return err
 		}
 	} else {
