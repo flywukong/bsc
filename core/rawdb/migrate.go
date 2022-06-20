@@ -36,7 +36,8 @@ func (job *Job) UploadToKvRocks() error {
 	if job.isAncient {
 		err := KvrocksDB.Put(job.ancientKey, job.ancientValue)
 		if err != nil {
-			fmt.Println("send kv error,", err.Error())
+			fmt.Println("send ancient kv error,", err.Error(), "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+			panic("ancient task fail")
 			return err
 		}
 	} else {
