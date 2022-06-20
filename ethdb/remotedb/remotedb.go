@@ -317,14 +317,16 @@ func (b *batch) Write() error {
 	*/
 
 	_, err := b.pipe.Exec(b.ctx)
-	if err != nil && b.db.persistCache != nil {
-		for idx, _ := range b.op {
-			err := b.db.persistCache.Put(reWriteKey(b.args[idx][0]), b.args[idx][1])
-			if err != nil {
-				break
+	/*
+		if err != nil && b.db.persistCache != nil {
+			for idx, _ := range b.op {
+				err := b.db.persistCache.Put(reWriteKey(b.args[idx][0]), b.args[idx][1])
+				if err != nil {
+					break
+				}
 			}
 		}
-	}
+	*/
 	return err
 }
 
