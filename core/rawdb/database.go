@@ -655,6 +655,7 @@ func splitArray(arr []uint64, num int64) [][]uint64 {
 
 func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber uint64) (tasknum uint64) {
 	frozenOffest, _ := db.Ancients()
+	fmt.Println("migrate ancient compare from", startBlockNumber, "end:", frozenOffest)
 	var i uint64
 	// inpect ancient, from f.offset to fo f.frozen
 	blockNumList := []uint64{}
