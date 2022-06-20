@@ -833,7 +833,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 			taskCache.PushBack(string(key))
 
 			isbatchFirstKey = false
-			if taskCache.Len() > 15000 {
+			if taskCache.Len() > 25000 {
 				taskCache.Remove(taskCache.Front())
 			}
 		}
@@ -848,12 +848,15 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 			dispatcher.SendKv(tempBatch, batch_count)
 			// if producer much faster than workers(more than 8000 jobs), make it slower
 			distance := batch_count - GetDoneTaskNum()
-			if distance > 8000 {
-				if distance > 12000 {
-					fmt.Println("worker lag too much", distance)
-					time.Sleep(1 * time.Minute)
-				}
-				time.Sleep(5 * time.Second)
+			fmt.Println("distance is :", distance)
+			if distance > 23000 {
+				/*
+					if distance > 12000 {
+						fmt.Println("worker lag too much", distance)
+						time.Sleep(1 * time.Minute)
+					}
+				*/
+				time.Sleep(1 * time.Second)
 			}
 			// print cost time every 50000000 keys
 			if batch_count%500000 == 0 {
