@@ -844,6 +844,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		if count >= 1 && count%100 == 0 {
 			// make a batch as a job, send it to worker pool
 			batch_count++
+			fmt.Println("batch count is :", batch_count)
 			dispatcher.SendKv(tempBatch, batch_count)
 			// if producer much faster than workers(more than 8000 jobs), make it slower
 			distance := batch_count - GetDoneTaskNum()

@@ -33,6 +33,10 @@ func InitDb(addr string) *remotedb.RocksDB {
 }
 
 func (job *Job) UploadToKvRocks() error {
+	start := time.Now()
+	defer func() {
+		fmt.Println("upload cost time:", time.Since(start).Nanoseconds()/100000)
+	}()
 	if job.isAncient {
 		err := KvrocksDB.Put(job.ancientKey, job.ancientValue)
 		if err != nil {
@@ -150,6 +154,7 @@ type Dispatcher struct {
 }
 
 func incDoneTaskNum() { // runningWorkers + 1
+	fmt.Println("get done tasknum:", GetDoneTaskNum())
 	atomic.AddUint64(&DoneTaskNum, 1)
 }
 
