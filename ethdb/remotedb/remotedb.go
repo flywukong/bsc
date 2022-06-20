@@ -124,21 +124,9 @@ func excludeKeys(key []byte) bool {
 
 // Get retrieves the given key if it's present in the key-value store.
 func (db *RocksDB) Get(key []byte) ([]byte, error) {
-	if db.persistCache != nil && !excludeKeys(key) {
-		if data, _ := db.persistCache.Get(key); len(data) != 0 {
-			return data, nil
-		}
-		if data, _ := db.persistCache.Get(reWriteKey(key)); len(data) != 0 {
-			return data, nil
-		}
-	}
-
 	data, err := db.client.Get(context.Background(), string(key)).Result()
 	if err != nil {
 		return nil, err
-	}
-	if db.persistCache != nil {
-		db.persistCache.Put(key, []byte(data))
 	}
 	return []byte(data), nil
 }
