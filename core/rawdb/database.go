@@ -458,6 +458,7 @@ func AncientInspect(db ethdb.Database) error {
 // InspectDatabase traverses the entire database and checks the size
 // of all different categories of data.
 func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
+
 	it := db.NewIterator(keyPrefix, keyStart)
 	fmt.Println("prefix:", keyPrefix, "start:", keyStart)
 	defer it.Release()
@@ -844,6 +845,15 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		value_total += uint64(len(value))
 		tempBatch[string(key[:])] = value
 		count++
+
+		if len(key) == common.HashLength {
+			fmt.Println("trie key name is:", string(key))
+
+			fmt.Println("trie first key name is:", key[0])
+			fmt.Println("trie first key name2 is:", common.Bytes2Hex(key))
+			fmt.Println("trie first key name3 is:", common.Bytes2Hex(key)[0])
+		}
+
 		// make a batch contain 100 keys , and send job work pool
 		if count >= 1 && count%100 == 0 {
 			// make a batch as a job, send it to worker pool
@@ -857,6 +867,10 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 				keynum := batch_count * 100
 				fmt.Println("value size:", value_total/keynum)
 				fmt.Println("key name is:", string(key))
+			}
+
+			if batch_count%100 == 0 {
+				fmt.Println("key name is ", key[0])
 			}
 			isbatchFirstKey = true
 			tempBatch = make(map[string][]byte)
