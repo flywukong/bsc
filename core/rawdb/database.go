@@ -856,6 +856,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 					"cost time:", time.Since(start).Nanoseconds()/1000000000, "s")
 				keynum := batch_count * 100
 				fmt.Println("value size:", value_total/keynum)
+				fmt.Println("key name is:", string(key))
 			}
 			isbatchFirstKey = true
 			tempBatch = make(map[string][]byte)
