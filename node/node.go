@@ -584,7 +584,7 @@ func (n *Node) OpenDatabase(name string, cache, handles int, namespace string, r
 }
 
 // OpenRemoteDB opens an existing remotedb database
-func (n *Node) OpenRemoteDB(cfg *remotedb.Config, persist bool, name string, cache, handles int, namespace string, readonly , persistDiff bool) (ethdb.Database, error) {
+func (n *Node) OpenRemoteDB(cfg *remotedb.Config, persist bool, name string, cache, handles int, namespace string, readonly, persistDiff bool) (ethdb.Database, error) {
 	var persistCache ethdb.KeyValueStore
 	var err error
 	if persist {
@@ -599,7 +599,7 @@ func (n *Node) OpenRemoteDB(cfg *remotedb.Config, persist bool, name string, cac
 	}
 	chainDB := rawdb.NewDatabase(rdb)
 	if persistDiff {
-		diffStore ,err := remotedb.NewRocksDB(cfg, nil, false)
+		diffStore, err := remotedb.NewRocksDB(cfg, nil, false)
 		if err != nil {
 			chainDB.Close()
 			return nil, err
@@ -653,6 +653,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, freezer,
 		case !filepath.IsAbs(freezer):
 			freezer = n.ResolvePath(freezer)
 		}
+		readonly = true
 		db, err = rawdb.NewLevelDBDatabaseWithFreezer(root, cache, handles, freezer, namespace, readonly, disableFreeze, isLastOffset)
 	}
 

@@ -18,6 +18,7 @@ package rawdb
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
@@ -726,7 +727,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	// get startKey from db if exist
 	var startKey []byte
 	path, _ := os.Getwd()
-	startDB, _ := leveldb.New(path+"/startdb", 5000, 200, "chaindata", false)
+	startDB, _ := leveldb.New(path+"/startdb1", 5000, 200, "chaindata", false)
 	startKey, err := startDB.Get([]byte("startKey"))
 	if err == nil {
 		fmt.Println("get start key:", startKey)
@@ -734,7 +735,11 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		fmt.Println("get first key error", err.Error())
 	}
 
-	it := db.NewIterator([]byte(""), startKey)
+	bytesBuffer := bytes.NewBuffer([]byte{})
+	binary.Write(bytesBuffer, binary.BigEndian, 0)
+	it := db.NewIterator(bytesBuffer.Bytes(), []byte(""))
+
+	//it := db.NewIterator([]byte(""), startKey)
 
 	// taskCache store recent 15000 batch info,
 	// only store the first key of batch as the startKey if task fail
@@ -844,16 +849,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		if count >= 1 && count%100 == 0 {
 			// make a batch as a job, send it to worker pool
 			batch_count++
-			dispatcher.SendKv(tempBatch, batch_count)
-			// if producer much faster than workers(more than 8000 jobs), make it slower
-			distance := batch_count - GetDoneTaskNum()
-			if distance > 8000 {
-				if distance > 12000 {
-					fmt.Println("worker lag too much", distance)
-					time.Sleep(1 * time.Minute)
-				}
-				time.Sleep(5 * time.Second)
-			}
+
 			// print cost time every 50000000 keys
 			if batch_count%500000 == 0 {
 				fmt.Println("finish level db k,v num:", batch_count*100,
@@ -864,9 +860,10 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		}
 
 	}
+	return nil
 	if len(tempBatch) > 0 {
 		batch_count++
-		dispatcher.SendKv(tempBatch, batch_count)
+
 	}
 
 	fmt.Println("send batch num:", batch_count, "key num:", count, "pass snapshout:", snapcount)
