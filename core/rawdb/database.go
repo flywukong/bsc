@@ -802,6 +802,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		count       uint64
 		batch_count uint64
 		snapcount   uint64
+		value_total uint64
 	)
 	// init remote db for data sending
 	InitDb(addr)
@@ -812,7 +813,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	tempBatch := make(map[string][]byte)
 
 	isbatchFirstKey := false
-
+	value_total = 0
 	for it.Next() {
 		var (
 			key = it.Key()
@@ -838,6 +839,9 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 			}
 		}
 
+		//	fmt.Println("key num:", count, "value size:", len(value))
+		//	value_total += len(value)
+		value_total += uint64(len(value))
 		tempBatch[string(key[:])] = value
 		count++
 		// make a batch contain 100 keys , and send job work pool
@@ -845,29 +849,22 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 			// make a batch as a job, send it to worker pool
 			batch_count++
 			fmt.Println("batch count is :", batch_count)
-			dispatcher.SendKv(tempBatch, batch_count)
-			// if producer much faster than workers(more than 8000 jobs), make it slower
-			distance := batch_count - GetDoneTaskNum()
-			fmt.Println("distance is :", distance)
-			if distance > 23000 {
-				/*
-					if distance > 12000 {
-						fmt.Println("worker lag too much", distance)
-						time.Sleep(1 * time.Minute)
-					}
-				*/
-				time.Sleep(1 * time.Second)
-			}
+
 			// print cost time every 50000000 keys
-			if batch_count%500000 == 0 {
+			if batch_count%50000 == 0 {
 				fmt.Println("finish level db k,v num:", batch_count*100,
 					"cost time:", time.Since(start).Nanoseconds()/1000000000, "s")
+				keynum := batch_count * 100
+				fmt.Println("value size:", value_total/keynum)
 			}
 			isbatchFirstKey = true
 			tempBatch = make(map[string][]byte)
 		}
 
 	}
+
+	return nil
+
 	if len(tempBatch) > 0 {
 		batch_count++
 		dispatcher.SendKv(tempBatch, batch_count)
