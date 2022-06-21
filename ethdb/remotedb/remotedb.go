@@ -148,17 +148,7 @@ func (db *RocksDB) Put(key []byte, value []byte) error {
 		return errors.New("remotdb is readonly, not support Put")
 	}
 	err := db.client.Set(context.Background(), string(key), string(value), 0).Err()
-	if db.persistCache != nil {
-		db.persistCache.Put(key, value)
-		if err != nil {
-			if suberr := db.persistCache.Put(reWriteKey(key), value); suberr != nil {
-				log.Error("remotedb backup rewrite key failed", "error", suberr, "key", key)
-				return suberr
-			} else {
-				return nil
-			}
-		}
-	}
+
 	return err
 }
 
