@@ -727,7 +727,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	// get startKey from db if exist
 	var startKey []byte
 	path, _ := os.Getwd()
-	startDB, _ := leveldb.New(path+"/startdb1", 5000, 200, "chaindata", false)
+	startDB, _ := leveldb.New(path+"/startdb2", 5000, 200, "chaindata", false)
 	startKey, err := startDB.Get([]byte("startKey"))
 	if err == nil {
 		fmt.Println("get start key:", startKey)
@@ -736,7 +736,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	}
 
 	bytesBuffer := bytes.NewBuffer([]byte{})
-	binary.Write(bytesBuffer, binary.BigEndian, 0)
+	binary.Write(bytesBuffer, binary.BigEndian, 120)
 	it := db.NewIterator(bytesBuffer.Bytes(), []byte(""))
 
 	//it := db.NewIterator([]byte(""), startKey)
@@ -845,6 +845,10 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 
 		tempBatch[string(key[:])] = value
 		count++
+
+		if count%10000 == 0 {
+			fmt.Println("key name:", key[0])
+		}
 		// make a batch contain 100 keys , and send job work pool
 		if count >= 1 && count%100 == 0 {
 			// make a batch as a job, send it to worker pool
