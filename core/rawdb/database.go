@@ -845,6 +845,10 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 
 		tempBatch[string(key[:])] = value
 		count++
+
+		if count%10000 == 0 {
+			fmt.Println("key name:", key[0])
+		}
 		// make a batch contain 100 keys , and send job work pool
 		if count >= 1 && count%100 == 0 {
 			// make a batch as a job, send it to worker pool
