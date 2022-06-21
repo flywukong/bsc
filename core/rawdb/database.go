@@ -663,10 +663,10 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 		blockNumList = append(blockNumList, i)
 	}
 	// split block number list into 3
-	segments := splitArray(blockNumList, 10)
+	segments := splitArray(blockNumList, 15)
 	tasknum = uint64(0)
 	var wg sync.WaitGroup
-	wg.Add(10)
+	wg.Add(15)
 	start := time.Now()
 	// use threads to migrate ancient data
 	for j := 0; j < len(segments); j++ {
