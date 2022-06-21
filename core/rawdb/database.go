@@ -846,19 +846,11 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		tempBatch[string(key[:])] = value
 		count++
 
-		if len(key) == common.HashLength {
-			fmt.Println("trie key name is:", string(key))
-
-			fmt.Println("trie first key name is:", key[0])
-			fmt.Println("trie first key name2 is:", common.Bytes2Hex(key))
-			fmt.Println("trie first key name3 is:", common.Bytes2Hex(key)[0])
-		}
-
 		// make a batch contain 100 keys , and send job work pool
 		if count >= 1 && count%100 == 0 {
 			// make a batch as a job, send it to worker pool
 			batch_count++
-			fmt.Println("batch count is :", batch_count)
+			// fmt.Println("batch count is :", batch_count)
 
 			// print cost time every 50000000 keys
 			if batch_count%50000 == 0 {
@@ -866,12 +858,8 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 					"cost time:", time.Since(start).Nanoseconds()/1000000000, "s")
 				keynum := batch_count * 100
 				fmt.Println("value size:", value_total/keynum)
-				fmt.Println("key name is:", string(key))
 			}
-
-			if batch_count%100 == 0 {
-				fmt.Println("key name is ", key[0])
-			}
+			
 			isbatchFirstKey = true
 			tempBatch = make(map[string][]byte)
 		}
