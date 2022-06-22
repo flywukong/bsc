@@ -107,10 +107,8 @@ func newFreezer(datadir string, namespace string, readonly bool) (*freezer, erro
 	}
 	// Leveldb uses LOCK as the filelock filename. To prevent the
 	// name collision, we use FLOCK as the lock name.
-	lock, _, err := fileutil.Flock(filepath.Join(datadir, "FLOCK"))
-	if err != nil {
-		return nil, err
-	}
+	lock, _, _ := fileutil.Flock(filepath.Join(datadir, "FLOCK"))
+	
 	// Open all the supported data tables
 	freezer := &freezer{
 		readonly:     readonly,
