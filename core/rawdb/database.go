@@ -813,8 +813,6 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		}
 	}()
 
-	tempBatch := make(map[string][]byte)
-
 	isbatchFirstKey := false
 
 	totalNum := uint64(0)
@@ -840,8 +838,6 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 					continue
 				}
 				atomic.AddUint64(&totalNum, 1)
-
-				tempBatch[string(key[:])] = value
 				count++
 
 				if count%10000 == 0 {
@@ -859,7 +855,6 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 							"key prefix:", key[0])
 					}
 					isbatchFirstKey = true
-					tempBatch = make(map[string][]byte)
 				}
 
 			}
