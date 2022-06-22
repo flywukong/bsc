@@ -28,8 +28,6 @@ import (
 
 	"github.com/olekukonko/tablewriter"
 
-	"container/list"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
@@ -737,73 +735,13 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 
 	it := db.NewIterator([]byte(""), startKey)
 
-	// taskCache store recent 15000 batch info,
-	// only store the first key of batch as the startKey if task fail
-	taskCache := list.New()
-
-	// this routine mark the startKey in the queue half an hour once
-	ticker := time.NewTicker(1 * time.Second)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if GetFailFlag() == 1 && taskCache.Len() > 0 {
-					fmt.Println("find some task fail, need mark and panic")
-					if startDB == nil {
-						startPath, _ := os.Getwd()
-						startDB, _ = leveldb.New(startPath+"/startdb", 5000, 200, "chaindata", false)
-					}
-					key := taskCache.Front().Value
-
-					// mark the fail key, and panic
-					if startDB != nil {
-						err = startDB.Put([]byte("startKey"), []byte(key.(string)))
-						if err != nil {
-							fmt.Println("write first key error:", err.Error())
-						}
-					}
-					fmt.Println("leveldb migrate fail , finish key:", GetDoneTaskNum()*100)
-					panic("task fail")
-				}
-			}
-		}
-	}()
-	// this routine mark the startKey in the queue half an hour once
-	marker := time.NewTicker(20 * time.Minute)
-	go func() {
-		defer marker.Stop()
-		for {
-			select {
-			case <-marker.C:
-				if taskCache.Len() > 0 {
-					fmt.Println("mark start key half an hour once")
-					if startDB == nil {
-						startPath, _ := os.Getwd()
-						startDB, _ = leveldb.New(startPath+"/startdb", 5000, 200, "chaindata", false)
-					}
-					key := taskCache.Front().Value
-					// mark the done key
-					if startDB != nil {
-						err = startDB.Put([]byte("startKey"), []byte(key.(string)))
-						if err != nil {
-							fmt.Println("write first key error:", err.Error())
-						}
-					}
-				}
-			}
-		}
-	}()
-
 	start := time.Now()
 	// start a task dispatcher with 1000 threads
-	dispatcher := MigrateStart(1000)
 
 	var (
 		count       uint64
 		batch_count uint64
 		snapcount   uint64
-		value_total uint64
 	)
 	// init remote db for data sending
 	InitDb(addr)
@@ -812,9 +750,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	snapcount = 0
 	defer it.Release()
 	tempBatch := make(map[string][]byte)
-
-	isbatchFirstKey := false
-	value_total = 0
+	
 	for it.Next() {
 		var (
 			key = it.Key()
@@ -829,20 +765,6 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 			continue
 		}
 
-		// push the first key of batch into queue,
-		// if migrate error happen, key of queue head will store into kvstore before panic
-		if isbatchFirstKey {
-			taskCache.PushBack(string(key))
-
-			isbatchFirstKey = false
-			if taskCache.Len() > 25000 {
-				taskCache.Remove(taskCache.Front())
-			}
-		}
-
-		//	fmt.Println("key num:", count, "value size:", len(value))
-		//	value_total += len(value)
-		value_total += uint64(len(value))
 		tempBatch[string(key[:])] = value
 		count++
 
@@ -853,14 +775,11 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 			// fmt.Println("batch count is :", batch_count)
 
 			// print cost time every 50000000 keys
-			if batch_count%50000 == 0 {
+			if batch_count%5000 == 0 {
 				fmt.Println("finish level db k,v num:", batch_count*100,
 					"cost time:", time.Since(start).Nanoseconds()/1000000000, "s")
-				keynum := batch_count * 100
-				fmt.Println("value size:", value_total/keynum)
 			}
-			
-			isbatchFirstKey = true
+
 			tempBatch = make(map[string][]byte)
 		}
 
@@ -868,39 +787,6 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 
 	return nil
 
-	if len(tempBatch) > 0 {
-		batch_count++
-		dispatcher.SendKv(tempBatch, batch_count)
-	}
-
-	fmt.Println("send batch num:", batch_count, "key num:", count, "pass snapshout:", snapcount)
-	dispatcher.setTaskNum(batch_count)
-
-	finish := dispatcher.WaitDbFinish()
-	if finish == false {
-		fmt.Println("leveldb key migrate fail")
-		panic("task fail")
-	}
-
-	// all leveldb keys migrating has been done, reset cache and jobs num
-	taskCache.Init()
-	leveldbCost := time.Since(start).Nanoseconds() / 1000000
-
-	start = time.Now()
-	ResetDoneTaskNum()
-
-	ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
-	dispatcher.setTaskNum(ancientTaskNum)
-	//if set flag true, we will try to retry error keys
-	migrateSucc := dispatcher.Close(false)
-
-	if migrateSucc == true {
-		fmt.Println("migrate succ , migrate leveldb cost time:", leveldbCost,
-			"migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
-	} else {
-		fmt.Println("migrate fail , need restart ancient jobs")
-	}
-	return nil
 }
 
 func MigrateAncientInDb(db ethdb.Database, addr string, blockNumber uint64) error {
