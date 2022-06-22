@@ -734,7 +734,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	for i := 0; i < 256; i++ {
 		pre := i
 		path, _ := os.Getwd()
-		startDB, _ := leveldb.New(path+"/startdb"+strconv.Itoa(pre), 5000, 200, "chaindata", false)
+		startDB, _ := leveldb.New(path+"/startdb"+strconv.Itoa(pre), 10, 50, "chaindata", false)
 
 		errNum, err := startDB.Get([]byte("errorkey"))
 		if err == nil {
@@ -787,7 +787,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	batchNum := uint64(0)
 	start := time.Now()
 	// start a task dispatcher with 1000 threads
-	dispatcher := MigrateStart(1000)
+	dispatcher := MigrateStart(1200)
 
 	// init remote db for data sending
 	InitDb(addr)
