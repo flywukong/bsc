@@ -2,11 +2,14 @@ package rawdb
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
 	"github.com/ethereum/go-ethereum/ethdb/remotedb"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -18,7 +21,58 @@ var (
 	FailTaskNum     uint64
 	TaskFail        int64
 	AncientTaskFail int64
+
+	ErrorMap *RWMap
 )
+
+type RWMap struct {
+	sync.RWMutex
+	m map[int]uint64
+}
+
+// 新建一个RWMap
+func NewRWMap(n int) *RWMap {
+	return &RWMap{
+		m: make(map[int]uint64, n),
+	}
+}
+
+func (m *RWMap) addErrorNum(prefix int) {
+	m.Lock() // 锁保护
+	defer m.Unlock()
+	m.m[prefix]++
+}
+
+func (m *RWMap) getErrorNum(prefix int) (uint64, bool) {
+	m.RLock()
+	defer m.RUnlock()
+	v, existed := m.m[prefix] // 在锁的保护下从map中读取
+	return v, existed
+}
+
+func (m *RWMap) MarkFail() (bool, uint64) { // 记录错误信息
+	m.RLock() //遍历期间一直持有读锁
+	defer m.RUnlock()
+	finish := true
+	errNum := uint64(0)
+	for i := 0; i < 256; i++ {
+		path, _ := os.Getwd()
+		startDB, _ := leveldb.New(path+"/startdb"+strconv.Itoa(i), 5000, 200, "chaindata", false)
+		if m.m[i] > 0 {
+			finish = false
+			errNum += m.m[i]
+			startDB.Put([]byte("finish"), []byte("notdone"))
+			// write err num
+			var buf = make([]byte, 8)
+			binary.BigEndian.PutUint64(buf, uint64(m.m[i]))
+			startDB.Put([]byte("errorkey"), buf)
+		} else {
+			startDB.Put([]byte("finish"), []byte("done"))
+		}
+
+	}
+	return finish, errNum
+}
 
 var ctx = context.Background()
 
@@ -29,6 +83,7 @@ func InitDb(addr string) *remotedb.RocksDB {
 	config.Addrs = strings.Split(addr, ",")
 	KvrocksDB, _ = remotedb.NewRocksDB(config, persistCache, false)
 
+	ErrorMap = NewRWMap(256)
 	return KvrocksDB
 }
 
@@ -49,7 +104,8 @@ func (job *Job) UploadToKvRocks() error {
 			}
 
 			if err := kvBatch.Write(); err != nil {
-				fmt.Println("send kv rocks error", err.Error(), "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+				fmt.Println("send kv rocks error", err.Error(), "prefix:", job.prefix,
+					"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
 				return err
 			}
 		}
@@ -62,7 +118,15 @@ var JobQueue chan Job
 
 type Job struct {
 	Kvbuffer     map[string][]byte
-	JobId        uint64
+	prefix       int
+	isAncient    bool
+	ancientKey   []byte
+	ancientValue []byte
+}
+
+type Job2 struct {
+	Kvbuffer     map[string][]byte
+	jobId        uint64
 	isAncient    bool
 	ancientKey   []byte
 	ancientValue []byte
@@ -99,6 +163,7 @@ func (w *Worker) Start() {
 						MarkAncientTaskFail()
 					} else {
 						MarkTaskFail()
+						ErrorMap.addErrorNum(job.prefix)
 					}
 				}
 				incDoneTaskNum()
@@ -205,18 +270,19 @@ func (d *Dispatcher) dispatch() {
 	}
 }
 
-func (d *Dispatcher) SendKv(list map[string][]byte, jobid uint64) {
+func (d *Dispatcher) SendKv(list map[string][]byte, prefix int) {
 	// let's create a job
-	work := Job{list, jobid, false, nil, nil}
+	work := Job{list, prefix, false, nil, nil}
 	// Push the work onto the queue.
 	d.taskQueue <- work
 }
 
 func (d *Dispatcher) SendAncient(key []byte, val []byte, jobid uint64) {
 	// let's create a job
-	work := Job{nil, jobid, true, key, val}
+	// work := Job2{nil, jobid, true, key, val}
 	// Push the work onto the queue.
-	d.taskQueue <- work
+	//d.taskQueue <- work
+	return
 }
 
 func MigrateStart(workersize uint64) *Dispatcher {
@@ -226,7 +292,9 @@ func MigrateStart(workersize uint64) *Dispatcher {
 	return dispatcher
 }
 
-func (p *Dispatcher) WaitDbFinish() bool {
+func (p *Dispatcher) WaitDbFinish() (bool, uint64) {
+	defer close(p.taskQueue)
+	defer close(p.StopCh)
 	time.Sleep(3 * time.Second)
 	for {
 		if GetDoneTaskNum() >= p.taskNum {
@@ -236,11 +304,14 @@ func (p *Dispatcher) WaitDbFinish() bool {
 			time.Sleep(3 * time.Second)
 		}
 	}
-	if atomic.LoadInt64(&TaskFail) == 1 {
-		return false
-	}
-	fmt.Println("level db migrate finish")
-	return true
+
+	allfinish, errNum := ErrorMap.MarkFail()
+
+	//if atomic.LoadInt64(&TaskFail) == 1 {
+	//		return false
+	//	}
+	// fmt.Println("level db migrate finish")
+	return allfinish, errNum
 }
 
 func (d *Dispatcher) Close(checkErr bool) bool {

@@ -18,17 +18,17 @@ package rawdb
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/olekukonko/tablewriter"
-
-	"container/list"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -726,183 +726,136 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	fmt.Println("begin migrate")
 
 	// get startKey from db if exist
-	var startKey []byte
-	path, _ := os.Getwd()
-	startDB, _ := leveldb.New(path+"/startdb", 5000, 200, "chaindata", false)
-	startKey, err := startDB.Get([]byte("startKey"))
-	if err == nil {
-		fmt.Println("get start key:", startKey)
-	} else {
-		fmt.Println("get first key error", err.Error())
+	// var startKey []byte
+	finishMap := make(map[int]bool)
+
+	for i := 0; i < 256; i++ {
+		path, _ := os.Getwd()
+		startDB, _ := leveldb.New(path+"/startdb"+strconv.Itoa(i), 5000, 200, "chaindata", false)
+
+		errNum, err := startDB.Get([]byte("errorkey"))
+		if err == nil {
+			fmt.Println("prefix:", i, "errorKey:num", errNum)
+			num := int64(binary.BigEndian.Uint64(errNum))
+			if num > 0 {
+				fmt.Println("error num:", num, "need start this prefix")
+			}
+		} else {
+			fmt.Println("get error key num error:", err.Error())
+		}
+
+		done, err := startDB.Get([]byte("finish"))
+		if err == nil {
+			if string(done) == "done" {
+				finishMap[i] = true
+			}
+		} else {
+			fmt.Println("get finish status error:", err.Error())
+		}
 	}
 
-	it := db.NewIterator([]byte(""), startKey)
-
-	// taskCache store recent 15000 batch info,
-	// only store the first key of batch as the startKey if task fail
-	taskCache := list.New()
-
-	// this routine mark the startKey in the queue half an hour once
-	ticker := time.NewTicker(1 * time.Second)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if GetFailFlag() == 1 && taskCache.Len() > 0 {
-					fmt.Println("find some task fail, need mark and panic")
-					if startDB == nil {
-						startPath, _ := os.Getwd()
-						startDB, _ = leveldb.New(startPath+"/startdb", 5000, 200, "chaindata", false)
-					}
-					key := taskCache.Front().Value
-
-					// mark the fail key, and panic
-					if startDB != nil {
-						err = startDB.Put([]byte("startKey"), []byte(key.(string)))
-						if err != nil {
-							fmt.Println("write first key error:", err.Error())
-						}
-					}
-					fmt.Println("leveldb migrate fail , finish key:", GetDoneTaskNum()*100)
-					panic("task fail")
-				}
-			}
-		}
-	}()
-	// this routine mark the startKey in the queue half an hour once
-	marker := time.NewTicker(20 * time.Minute)
-	go func() {
-		defer marker.Stop()
-		for {
-			select {
-			case <-marker.C:
-				if taskCache.Len() > 0 {
-					fmt.Println("mark start key half an hour once")
-					if startDB == nil {
-						startPath, _ := os.Getwd()
-						startDB, _ = leveldb.New(startPath+"/startdb", 5000, 200, "chaindata", false)
-					}
-					key := taskCache.Front().Value
-					// mark the done key
-					if startDB != nil {
-						err = startDB.Put([]byte("startKey"), []byte(key.(string)))
-						if err != nil {
-							fmt.Println("write first key error:", err.Error())
-						}
-					}
-				}
-			}
-		}
-	}()
-
-	start := time.Now()
-	// start a task dispatcher with 1000 threads
-	dispatcher := MigrateStart(1000)
-
-	var (
-		count       uint64
-		batch_count uint64
-		snapcount   uint64
-	)
-	// init remote db for data sending
-	InitDb(addr)
-
-	count = 0
-	snapcount = 0
-	defer it.Release()
-	tempBatch := make(map[string][]byte)
-
-	isbatchFirstKey := false
-
-	for it.Next() {
-		var (
-			key = it.Key()
-			v   = it.Value()
-		)
-		value := make([]byte, len(v))
-		copy(value, v)
-
-		// ignore snapshot data
-		if (bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)) || (bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)) {
-			snapcount++
+	iteratorMap := make(map[int]*ethdb.Iterator)
+	threadnum := 0
+	for i := 0; i < 256; i++ {
+		if finishMap[i] == true {
 			continue
 		}
-
-		// push the first key of batch into queue,
-		// if migrate error happen, key of queue head will store into kvstore before panic
-		if isbatchFirstKey {
-			taskCache.PushBack(string(key))
-
-			isbatchFirstKey = false
-			if taskCache.Len() > 15000 {
-				taskCache.Remove(taskCache.Front())
-			}
+		threadnum++
+		bytesBuffer := bytes.NewBuffer([]byte{})
+		err := binary.Write(bytesBuffer, binary.BigEndian, uint8(i))
+		if err != nil {
+			fmt.Println("to bytes error:", err.Error())
 		}
+		iter := db.NewIterator(bytesBuffer.Bytes(), []byte(""))
+		iteratorMap[i] = &iter
+	}
 
-		tempBatch[string(key[:])] = value
-		count++
-		// make a batch contain 100 keys , and send job work pool
-		if count >= 1 && count%100 == 0 {
-			// make a batch as a job, send it to worker pool
-			batch_count++
-			dispatcher.SendKv(tempBatch, batch_count)
-			// if producer much faster than workers(more than 8000 jobs), make it slower
-			distance := batch_count - GetDoneTaskNum()
-			if distance > 8000 {
-				if distance > 12000 {
-					fmt.Println("worker lag too much", distance)
-					time.Sleep(1 * time.Minute)
+	defer func() {
+		for _, v := range iteratorMap {
+			iter := *v
+			iter.Release()
+		}
+	}()
+
+	// mark total key num
+	totalNum := uint64(0)
+	batchNum := uint64(0)
+	start := time.Now()
+	// start a task dispatcher with 1000 threads
+	dispatcher := MigrateStart(1200)
+
+	// init remote db for data sending
+	InitDb(addr)
+	var wg sync.WaitGroup
+	wg.Add(threadnum)
+	// use threads to migrate ancient data
+	for j := 0; j < len(iteratorMap); j++ {
+		go func(it ethdb.Iterator) {
+			defer wg.Done()
+			count := 0
+			tempBatch := make(map[string][]byte)
+			for it.Next() {
+				var (
+					key = it.Key()
+					v   = it.Value()
+				)
+				value := make([]byte, len(v))
+				copy(value, v)
+
+				// ignore snapshot data
+				if (bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)) || (bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)) {
+					//	snapcount++
+					continue
 				}
-				time.Sleep(5 * time.Second)
+				atomic.AddUint64(&totalNum, 1)
+				count++
+				tempBatch[string(key[:])] = value
+
+				// make a batch contain 100 keys , and send job work pool
+				if count >= 1 && count%100 == 0 {
+					// make a batch as a job, send it to worker pool
+					atomic.AddUint64(&batchNum, 1)
+					dispatcher.SendKv(tempBatch, j)
+					batchCount := atomic.LoadUint64(&batchNum)
+					distance := batchCount - GetDoneTaskNum()
+					if distance > 12000 {
+						if distance > 20000 {
+							fmt.Println("worker lag too much", distance)
+							time.Sleep(5 * time.Second)
+						}
+						time.Sleep(3 * time.Second)
+					}
+
+					// print cost time every 50000000 keys
+					if batchCount%50000 == 0 {
+						fmt.Println("finish level db k,v num:", atomic.LoadUint64(&totalNum),
+							"cost time:", time.Since(start).Nanoseconds()/1000000000, "s",
+							"key prefix:", key[0])
+					}
+					tempBatch = make(map[string][]byte)
+				}
 			}
-			// print cost time every 50000000 keys
-			if batch_count%500000 == 0 {
-				fmt.Println("finish level db k,v num:", batch_count*100,
-					"cost time:", time.Since(start).Nanoseconds()/1000000000, "s")
+			if len(tempBatch) > 0 {
+				atomic.AddUint64(&batchNum, 1)
+				dispatcher.SendKv(tempBatch, j)
 			}
-			isbatchFirstKey = true
-			tempBatch = make(map[string][]byte)
-		}
-
-	}
-	if len(tempBatch) > 0 {
-		batch_count++
-		dispatcher.SendKv(tempBatch, batch_count)
+		}(*iteratorMap[j])
 	}
 
-	fmt.Println("send batch num:", batch_count, "key num:", count, "pass snapshout:", snapcount)
-	dispatcher.setTaskNum(batch_count)
+	wg.Wait()
 
-	finish := dispatcher.WaitDbFinish()
+	fmt.Println("send batch num:", atomic.LoadUint64(&batchNum), "key num:", atomic.LoadUint64(&totalNum))
+	dispatcher.setTaskNum(atomic.LoadUint64(&batchNum))
+
+	finish, errNum := dispatcher.WaitDbFinish()
 	if finish == false {
-		fmt.Println("leveldb key migrate fail")
-		panic("task fail")
+		fmt.Println("leveldb key migrate fail, need restart, err key:", errNum)
+		//	panic("task fail")
 	}
 	leveldbCost := time.Since(start).Nanoseconds() / 1000000
 	fmt.Println("migrate succ , migrate leveldb cost time:", leveldbCost,
 		"migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
-	/*
-		// all leveldb keys migrating has been done, reset cache and jobs num
-		taskCache.Init()
-		leveldbCost := time.Since(start).Nanoseconds() / 1000000
 
-		start = time.Now()
-		ResetDoneTaskNum()
-
-		ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
-		dispatcher.setTaskNum(ancientTaskNum)
-		//if set flag true, we will try to retry error keys
-		migrateSucc := dispatcher.Close(false)
-
-		if migrateSucc == true {
-			fmt.Println("migrate succ , migrate leveldb cost time:", leveldbCost,
-				"migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
-		} else {
-			fmt.Println("migrate fail , need restart ancient jobs")
-		}
-
-	*/
 	return nil
 }
 
