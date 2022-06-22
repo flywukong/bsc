@@ -879,25 +879,30 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		fmt.Println("leveldb key migrate fail")
 		panic("task fail")
 	}
-
-	// all leveldb keys migrating has been done, reset cache and jobs num
-	taskCache.Init()
 	leveldbCost := time.Since(start).Nanoseconds() / 1000000
+	fmt.Println("migrate succ , migrate leveldb cost time:", leveldbCost,
+		"migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
+	/*
+		// all leveldb keys migrating has been done, reset cache and jobs num
+		taskCache.Init()
+		leveldbCost := time.Since(start).Nanoseconds() / 1000000
 
-	start = time.Now()
-	ResetDoneTaskNum()
+		start = time.Now()
+		ResetDoneTaskNum()
 
-	ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
-	dispatcher.setTaskNum(ancientTaskNum)
-	//if set flag true, we will try to retry error keys
-	migrateSucc := dispatcher.Close(false)
+		ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
+		dispatcher.setTaskNum(ancientTaskNum)
+		//if set flag true, we will try to retry error keys
+		migrateSucc := dispatcher.Close(false)
 
-	if migrateSucc == true {
-		fmt.Println("migrate succ , migrate leveldb cost time:", leveldbCost,
-			"migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
-	} else {
-		fmt.Println("migrate fail , need restart ancient jobs")
-	}
+		if migrateSucc == true {
+			fmt.Println("migrate succ , migrate leveldb cost time:", leveldbCost,
+				"migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
+		} else {
+			fmt.Println("migrate fail , need restart ancient jobs")
+		}
+
+	*/
 	return nil
 }
 
