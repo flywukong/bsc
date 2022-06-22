@@ -57,7 +57,7 @@ func (m *RWMap) MarkFail() (bool, uint64) { // 记录错误信息
 	errNum := uint64(0)
 	for i := 0; i < 256; i++ {
 		path, _ := os.Getwd()
-		startDB, _ := leveldb.New(path+"/startdb"+strconv.Itoa(i), 5000, 200, "chaindata", false)
+		startDB, _ := leveldb.New(path+"/startdb"+strconv.Itoa(i), 10, 50, "chaindata", false)
 		if m.m[i] > 0 {
 			finish = false
 			errNum += m.m[i]
