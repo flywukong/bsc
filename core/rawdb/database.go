@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"strconv"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -727,35 +727,36 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 
 	// get startKey from db if exist
 	// var startKey []byte
+
 	finishMap := make(map[int]bool)
+	/*
+		for i := 0; i < 256; i++ {
+			pre := i
+			path, _ := os.Getwd()
+			startDB, _ := leveldb.New(path+"/startdb"+strconv.Itoa(pre), 5000, 200, "chaindata", false)
 
-	for i := 0; i < 256; i++ {
-		pre := i
-		path, _ := os.Getwd()
-		startDB, _ := leveldb.New(path+"/startdb"+strconv.Itoa(pre), 5000, 200, "chaindata", false)
-
-		errNum, err := startDB.Get([]byte("errorkey"))
-		if err == nil {
-			fmt.Println("prefix:", pre, "errorKey:num", errNum)
-			num := int64(binary.BigEndian.Uint64(errNum))
-			if num > 0 {
-				fmt.Println("error num:", num, "need start this prefix")
+			errNum, err := startDB.Get([]byte("errorkey"))
+			if err == nil {
+				fmt.Println("prefix:", pre, "errorKey:num", errNum)
+				num := int64(binary.BigEndian.Uint64(errNum))
+				if num > 0 {
+					fmt.Println("error num:", num, "need start this prefix")
+				}
+			} else {
+				fmt.Println("get error key num error:", err.Error())
 			}
-		} else {
-			fmt.Println("get error key num error:", err.Error())
-		}
 
-		done, err := startDB.Get([]byte("finish"))
-		if err == nil {
-			if string(done) == "done" {
-				finishMap[pre] = true
+			done, err := startDB.Get([]byte("finish"))
+			if err == nil {
+				if string(done) == "done" {
+					finishMap[pre] = true
+				}
+			} else {
+				fmt.Println("get finish status error:", err.Error())
 			}
-		} else {
-			fmt.Println("get finish status error:", err.Error())
+			fmt.Println("read startdb", strconv.Itoa(pre))
 		}
-		fmt.Println("read startdb", strconv.Itoa(pre))
-	}
-
+	*/
 	fmt.Println("read startdb finish")
 	iteratorMap := make(map[int]*ethdb.Iterator)
 	threadnum := 0
@@ -791,12 +792,15 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	InitDb(addr)
 	var wg sync.WaitGroup
 	wg.Add(threadnum)
+
+	fmt.Println("start thread num:", threadnum)
 	// use threads to migrate ancient data
 	for j := 0; j < len(iteratorMap); j++ {
 		go func(it ethdb.Iterator) {
 			defer wg.Done()
 			count := 0
 			tempBatch := make(map[string][]byte)
+
 			for it.Next() {
 				var (
 					key = it.Key()
@@ -815,19 +819,23 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 				tempBatch[string(key[:])] = value
 
 				// make a batch contain 100 keys , and send job work pool
-				if count >= 1 && count%100 == 0 {
+				if count >= 1 && count%50 == 0 {
 					// make a batch as a job, send it to worker pool
 					atomic.AddUint64(&batchNum, 1)
-					dispatcher.SendKv(tempBatch, j)
+
+					//dispatcher.SendKv(tempBatch, j)
+
 					batchCount := atomic.LoadUint64(&batchNum)
-					distance := batchCount - GetDoneTaskNum()
-					if distance > 12000 {
-						if distance > 20000 {
-							fmt.Println("worker lag too much", distance)
-							time.Sleep(5 * time.Second)
+					/*
+						distance := batchCount - GetDoneTaskNum()
+						if distance > 12000 {
+							if distance > 20000 {
+								fmt.Println("worker lag too much", distance)
+								time.Sleep(5 * time.Second)
+							}
+							time.Sleep(3 * time.Second)
 						}
-						time.Sleep(3 * time.Second)
-					}
+					*/
 
 					// print cost time every 50000000 keys
 					if batchCount%50000 == 0 {
@@ -836,6 +844,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 							"key prefix:", key[0])
 					}
 					tempBatch = make(map[string][]byte)
+					runtime.GC()
 				}
 			}
 			if len(tempBatch) > 0 {
