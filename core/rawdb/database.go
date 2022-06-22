@@ -845,7 +845,6 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 						runtime.GC()
 					}
 					tempBatch = make(map[string][]byte)
-					runtime.GC()
 				}
 			}
 			if len(tempBatch) > 0 {
