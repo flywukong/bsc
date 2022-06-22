@@ -730,12 +730,13 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	finishMap := make(map[int]bool)
 
 	for i := 0; i < 256; i++ {
+		pre := i
 		path, _ := os.Getwd()
-		startDB, _ := leveldb.New(path+"/startdb"+strconv.Itoa(i), 5000, 200, "chaindata", false)
+		startDB, _ := leveldb.New(path+"/startdb"+strconv.Itoa(pre), 5000, 200, "chaindata", false)
 
 		errNum, err := startDB.Get([]byte("errorkey"))
 		if err == nil {
-			fmt.Println("prefix:", i, "errorKey:num", errNum)
+			fmt.Println("prefix:", pre, "errorKey:num", errNum)
 			num := int64(binary.BigEndian.Uint64(errNum))
 			if num > 0 {
 				fmt.Println("error num:", num, "need start this prefix")
@@ -747,13 +748,15 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		done, err := startDB.Get([]byte("finish"))
 		if err == nil {
 			if string(done) == "done" {
-				finishMap[i] = true
+				finishMap[pre] = true
 			}
 		} else {
 			fmt.Println("get finish status error:", err.Error())
 		}
+		fmt.Println("read startdb", strconv.Itoa(pre))
 	}
 
+	fmt.Println("read startdb finish")
 	iteratorMap := make(map[int]*ethdb.Iterator)
 	threadnum := 0
 	for i := 0; i < 256; i++ {
