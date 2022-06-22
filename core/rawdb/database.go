@@ -29,8 +29,6 @@ import (
 
 	"github.com/olekukonko/tablewriter"
 
-	"container/list"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
@@ -759,37 +757,8 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	//it := db.NewIterator([]byte(""), startKey)
 
 	// taskCache store recent 15000 batch info,
-	// only store the first key of batch as the startKey if task fail
-	taskCache := list.New()
 
 	// this routine mark the startKey in the queue half an hour once
-	ticker := time.NewTicker(1 * time.Second)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if GetFailFlag() == 1 && taskCache.Len() > 0 {
-					fmt.Println("find some task fail, need mark and panic")
-					if startDB == nil {
-						startPath, _ := os.Getwd()
-						startDB, _ = leveldb.New(startPath+"/startdb", 5000, 200, "chaindata", false)
-					}
-					key := taskCache.Front().Value
-
-					// mark the fail key, and panic
-					if startDB != nil {
-						err = startDB.Put([]byte("startKey"), []byte(key.(string)))
-						if err != nil {
-							fmt.Println("write first key error:", err.Error())
-						}
-					}
-					fmt.Println("leveldb migrate fail , finish key:", GetDoneTaskNum()*100)
-					panic("task fail")
-				}
-			}
-		}
-	}()
 
 	start := time.Now()
 	// start a task dispatcher with 1000 threads
@@ -807,7 +776,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	snapcount = 0
 
 	defer func() {
-		for i := 0; i < 255; i++ {
+		for i := 0; i < 256; i++ {
 			iter := *iteratorMap[i]
 			iter.Release()
 		}
@@ -818,12 +787,12 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	totalNum := uint64(0)
 
 	var wg sync.WaitGroup
-	wg.Add(255)
+	wg.Add(256)
 	start = time.Now()
 	// use threads to migrate ancient data
 	for j := 0; j < len(iteratorMap); j++ {
 		go func(it ethdb.Iterator) {
-			defer wg.Wait()
+			defer wg.Done()
 			for it.Next() {
 				var (
 					key = it.Key()
