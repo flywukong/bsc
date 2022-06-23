@@ -2,7 +2,6 @@ package rawdb
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
 	"github.com/ethereum/go-ethereum/ethdb/remotedb"
@@ -21,8 +20,8 @@ var (
 	FailTaskNum     uint64
 	TaskFail        int64
 	AncientTaskFail int64
-
-	ErrorMap *RWMap
+	ErrorDB         *leveldb.Database
+	ErrorMap        *RWMap
 )
 
 type RWMap struct {
@@ -54,36 +53,37 @@ func (m *RWMap) MarkFail() (bool, uint64) { // 记录错误信息
 	m.RLock() //遍历期间一直持有读锁
 	defer m.RUnlock()
 	finish := true
-	errNum := uint64(0)
+	totalErrnum := uint64(0)
 	for i := 0; i < 256; i++ {
 		path, _ := os.Getwd()
-		startDB, _ := leveldb.New(path+"/startdb"+strconv.Itoa(i), 10, 50, "chaindata", false)
+		startDB, _ := leveldb.New(path+"/startdb"+strconv.Itoa(i), 10, 50,
+			"chaindata", false)
 		if m.m[i] > 0 {
-			finish = false
-			errNum += m.m[i]
+			totalErrnum += m.m[i]
+			fmt.Println("total fail task on prefix:", i, ":", m.m[i])
 			startDB.Put([]byte("finish"), []byte("notdone"))
-			// write err num
-			var buf = make([]byte, 8)
-			binary.BigEndian.PutUint64(buf, uint64(m.m[i]))
-			startDB.Put([]byte("errorkey"), buf)
 		} else {
 			startDB.Put([]byte("finish"), []byte("done"))
 		}
-
 	}
-	return finish, errNum
+	fmt.Println("total fail task is:", totalErrnum)
+
+	return finish, totalErrnum
 }
 
 var ctx = context.Background()
 
 func InitDb(addr string) *remotedb.RocksDB {
 	path, _ := os.Getwd()
-	persistCache, _ := leveldb.New(path+"/persistcache", 5000, 200, "chaindata", false)
+	persistCache, _ := leveldb.New(path+"/persistcache", 50, 200, "chaindata", false)
 	config := remotedb.DefaultConfig()
 	config.Addrs = strings.Split(addr, ",")
 	KvrocksDB, _ = remotedb.NewRocksDB(config, persistCache, false)
 
 	ErrorMap = NewRWMap(256)
+	ErrorDB, _ = leveldb.New(path+"/error-startdb", 100, 50,
+		"chaindata", false)
+
 	return KvrocksDB
 }
 
@@ -106,6 +106,10 @@ func (job *Job) UploadToKvRocks() error {
 			if err := kvBatch.Write(); err != nil {
 				fmt.Println("send kv rocks error", err.Error(), "prefix:", job.prefix,
 					"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+
+				for key, value := range job.Kvbuffer {
+					ErrorDB.Put([]byte(key), value)
+				}
 				return err
 			}
 		}
@@ -158,7 +162,7 @@ func (w *Worker) Start() {
 			case job := <-w.JobChannel:
 				// send batch to kvrocks
 				if err := job.UploadToKvRocks(); err != nil {
-					fmt.Println("send kv rocks error", err.Error())
+					//	fmt.Println("send kv rocks error", err.Error())
 					if job.isAncient {
 						MarkAncientTaskFail()
 					} else {
@@ -307,10 +311,6 @@ func (p *Dispatcher) WaitDbFinish() (bool, uint64) {
 
 	allfinish, errNum := ErrorMap.MarkFail()
 
-	//if atomic.LoadInt64(&TaskFail) == 1 {
-	//		return false
-	//	}
-	// fmt.Println("level db migrate finish")
 	return allfinish, errNum
 }
 

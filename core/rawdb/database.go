@@ -736,17 +736,6 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		path, _ := os.Getwd()
 		startDB, _ := leveldb.New(path+"/startdb"+strconv.Itoa(pre), 10, 50, "chaindata", false)
 
-		errNum, err := startDB.Get([]byte("errorkey"))
-		if err == nil {
-			fmt.Println("prefix:", pre, "errorKey:num", errNum)
-			num := int64(binary.BigEndian.Uint64(errNum))
-			if num > 0 {
-				fmt.Println("error num:", num, "need start this prefix")
-			}
-		} else {
-			fmt.Println("get error key num error:", err.Error())
-		}
-
 		done, err := startDB.Get([]byte("finish"))
 		if err == nil {
 			if string(done) == "done" {
@@ -842,7 +831,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 					if batchCount%100000 == 0 {
 						fmt.Println("finish level db k,v num:", atomic.LoadUint64(&totalNum),
 							"cost time:", time.Since(start).Nanoseconds()/1000000000, "s",
-							"key prefix:", key[0])
+							"key prefix:", key[0], "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
 						runtime.GC()
 					}
 					tempBatch = make(map[string][]byte)
