@@ -29,6 +29,7 @@ var (
 	TaskFail         int64
 	AncientTaskFail  int64
 	errComPareKeyNum uint64
+	rewriteCount     uint64
 )
 
 var ctx = context.Background()
@@ -110,7 +111,7 @@ func (job *Job) CompareKvRocks() error {
 			}
 			// if compare batch not same rewrite the batch
 			if isSame == false {
-				fmt.Println("compare batch not same, need restart")
+				fmt.Println("compare batch not same, need rewrite")
 				incErrorNum()
 				kvBatch := KvrocksDB.NewBatch()
 
@@ -309,7 +310,8 @@ func (d *Dispatcher) SendAncientJob(key []byte, val []byte, jobid uint64, isAnci
 func CompareStart(workersize uint64) *Dispatcher {
 	dispatcher := NewDispatcher(workersize)
 	dispatcher.Run()
-
+	atomic.StoreUint64(&rewriteCount, 0)
+	atomic.StoreUint64(&errComPareKeyNum, 0)
 	return dispatcher
 }
 
