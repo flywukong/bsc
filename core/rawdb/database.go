@@ -794,10 +794,11 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	var wg sync.WaitGroup
 	wg.Add(threadnum)
 
-	fmt.Println("start thread num:", threadnum)
+	fmt.Println("start thread num:", threadnum, "map size:", len(iteratorMap))
 	// use threads to migrate ancient data
 	for j := 0; j < len(iteratorMap); j++ {
 		go func(it ethdb.Iterator, index int) {
+			fmt.Println("start with prefix:", index)
 			defer wg.Done()
 			count := 0
 			tempBatch := make(map[string][]byte)
