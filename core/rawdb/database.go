@@ -787,7 +787,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	batchNum := uint64(0)
 	start := time.Now()
 	// start a task dispatcher with 1000 threads
-	dispatcher := MigrateStart(1200)
+	dispatcher := MigrateStart(1000)
 
 	// init remote db for data sending
 	InitDb(addr)
@@ -797,7 +797,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	fmt.Println("start thread num:", threadnum)
 	// use threads to migrate ancient data
 	for j := 0; j < len(iteratorMap); j++ {
-		go func(it ethdb.Iterator) {
+		go func(it ethdb.Iterator, index int) {
 			defer wg.Done()
 			count := 0
 			tempBatch := make(map[string][]byte)
@@ -824,7 +824,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 					// make a batch as a job, send it to worker pool
 					atomic.AddUint64(&batchNum, 1)
 
-					dispatcher.SendKv(tempBatch, j)
+					dispatcher.SendKv(tempBatch, index)
 
 					batchCount := atomic.LoadUint64(&batchNum)
 
@@ -849,9 +849,9 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 			}
 			if len(tempBatch) > 0 {
 				atomic.AddUint64(&batchNum, 1)
-				dispatcher.SendKv(tempBatch, j)
+				dispatcher.SendKv(tempBatch, index)
 			}
-		}(*iteratorMap[j])
+		}(*iteratorMap[j], j)
 	}
 
 	wg.Wait()
