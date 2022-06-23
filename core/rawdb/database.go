@@ -804,7 +804,7 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 
 					// print cost time every 50000000 keys
 					if batchCount%100000 == 0 {
-						fmt.Println("finish level db k,v num:", atomic.LoadUint64(&totalNum),
+						fmt.Println("finish compare level db k,v num:", atomic.LoadUint64(&totalNum),
 							"cost time:", time.Since(start).Nanoseconds()/1000000000, "s",
 							"key prefix:", key[0], "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
 						runtime.GC()

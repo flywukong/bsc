@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
 	"github.com/ethereum/go-ethereum/ethdb/remotedb"
 	"os"
@@ -66,19 +67,17 @@ func (job *Job) CompareKvRocks() error {
 			for key, _ := range job.Kvbuffer {
 				keyList = append(keyList, key)
 			}
-			isSame := true
 
 			// read values from kvrocks using pipeline
 			valueList, err := KvrocksDB.PipeRead(keyList)
 			if err != nil {
-				fmt.Println("compare fail", err.Error())
-				//return err
-				isSame = false
+				fmt.Println("compare fail", err.Error(), "on prefix:", job.prefix, "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+				return err
 			}
 
 			if len(valueList) != len(keyList) {
-				//	return errors.New("PipeRead key num error")
-				isSame = false
+				fmt.Println("compare fail, PipeRead key num error", job.prefix, "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+				return errors.New("PipeRead key num error")
 			}
 
 			// compare value one by one
@@ -99,32 +98,23 @@ func (job *Job) CompareKvRocks() error {
 						continue
 					}
 
-					isSame = false
+					if bytes.HasPrefix([]byte(keyList[i]), []byte("parlia-")) && len(keyList[i]) == 7+common.HashLength {
+						continue
+					}
+
+					if keyList[i] == "_globalCostFactorV6" {
+						continue
+					}
+
 					fmt.Println("compare key error, key:", keyList[i], "leveldb value:",
-						string(job.Kvbuffer[keyList[i]]), "  vs:", string(valueList[i]))
+						string(job.Kvbuffer[keyList[i]]), "  vs:", string(valueList[i]),
+						"key prefix:", job.prefix, "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
 
 					//fmt.Println("compare err, show bytes key:", keyList[i], "leveldb value:",
 					//	job.Kvbuffer[keyList[i]], "  vs:", valueList[i])
 
-					//	return errors.New("compare not same")
+					return errors.New("compare not same")
 				}
-			}
-			// if compare batch not same rewrite the batch
-			if isSame == false {
-				fmt.Println("compare batch not same, need rewrite")
-				incErrorNum()
-				kvBatch := KvrocksDB.NewBatch()
-
-				for key, value := range job.Kvbuffer {
-					kvBatch.Put([]byte(key), value)
-				}
-
-				if batcherr := kvBatch.Write(); batcherr != nil {
-					fmt.Println("rewrite kv rocks error", batcherr.Error(), "prefix:", job.prefix,
-						"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
-				}
-				fmt.Println("rewrite kv rocks finish", "prefix:", job.prefix,
-					"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
 			}
 		}
 	}
@@ -181,6 +171,7 @@ func (w *Worker) Start() {
 						MarkAncientTaskFail()
 					} else {
 						//fmt.Println("compare kvrocks kv error", err.Error())
+						atomic.AddUint64(&errComPareKeyNum, 1)
 						MarkTaskFail()
 					}
 				}
