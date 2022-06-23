@@ -741,13 +741,10 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 			if string(done) == "done" {
 				finishMap[pre] = true
 			}
-		} else {
-			fmt.Println("get finish status error:", err.Error())
 		}
 		fmt.Println("read startdb", strconv.Itoa(pre))
 	}
 
-	fmt.Println("read startdb finish")
 	iteratorMap := make(map[int]*ethdb.Iterator)
 	threadnum := 0
 	for i := 0; i < 256; i++ {
@@ -776,7 +773,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	batchNum := uint64(0)
 	start := time.Now()
 	// start a task dispatcher with 1000 threads
-	dispatcher := MigrateStart(1000)
+	dispatcher := MigrateStart(1200)
 
 	// init remote db for data sending
 	InitDb(addr)
