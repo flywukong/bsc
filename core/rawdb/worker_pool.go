@@ -65,15 +65,19 @@ func (job *Job) CompareKvRocks() error {
 			for key, _ := range job.Kvbuffer {
 				keyList = append(keyList, key)
 			}
+			isSame := true
+
 			// read values from kvrocks using pipeline
 			valueList, err := KvrocksDB.PipeRead(keyList)
 			if err != nil {
 				fmt.Println("compare fail", err.Error())
-				return err
+				//return err
+				isSame = false
 			}
 
 			if len(valueList) != len(keyList) {
-				return errors.New("PipeRead key num error")
+				//	return errors.New("PipeRead key num error")
+				isSame = false
 			}
 
 			// compare value one by one
@@ -94,15 +98,32 @@ func (job *Job) CompareKvRocks() error {
 						continue
 					}
 
+					isSame = false
 					fmt.Println("compare key error, key:", keyList[i], "leveldb value:",
 						string(job.Kvbuffer[keyList[i]]), "  vs:", string(valueList[i]))
 
-					fmt.Println("compare err, show bytes key:", keyList[i], "leveldb value:",
-						job.Kvbuffer[keyList[i]], "  vs:", valueList[i])
-					incErrorNum()
+					//fmt.Println("compare err, show bytes key:", keyList[i], "leveldb value:",
+					//	job.Kvbuffer[keyList[i]], "  vs:", valueList[i])
 
 					//	return errors.New("compare not same")
 				}
+			}
+			// if compare batch not same rewrite the batch
+			if isSame == false {
+				fmt.Println("compare batch not same, need restart")
+				incErrorNum()
+				kvBatch := KvrocksDB.NewBatch()
+
+				for key, value := range job.Kvbuffer {
+					kvBatch.Put([]byte(key), value)
+				}
+
+				if batcherr := kvBatch.Write(); batcherr != nil {
+					fmt.Println("rewrite kv rocks error", batcherr.Error(), "prefix:", job.prefix,
+						"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+				}
+				fmt.Println("rewrite kv rocks finish", "prefix:", job.prefix,
+					"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
 			}
 		}
 	}
@@ -113,6 +134,14 @@ func (job *Job) CompareKvRocks() error {
 var JobQueue chan Job
 
 type Job struct {
+	Kvbuffer     map[string][]byte
+	prefix       int
+	isAncient    bool
+	ancientKey   []byte
+	ancientValue []byte
+}
+
+type Job2 struct {
 	Kvbuffer     map[string][]byte
 	JobId        uint64
 	isAncient    bool
@@ -150,7 +179,7 @@ func (w *Worker) Start() {
 						fmt.Println("compare ancient error", err.Error())
 						MarkAncientTaskFail()
 					} else {
-						fmt.Println("compare kvrocks kv error", err.Error())
+						//fmt.Println("compare kvrocks kv error", err.Error())
 						MarkTaskFail()
 					}
 				}
@@ -262,18 +291,19 @@ func (d *Dispatcher) dispatch() {
 	}
 }
 
-func (d *Dispatcher) SendKvJob(list map[string][]byte, jobid uint64, isAncient bool) {
+func (d *Dispatcher) SendKvJob(list map[string][]byte, prefix int, isAncient bool) {
 	// let's create a job
-	work := Job{list, jobid, isAncient, nil, nil}
+	work := Job{list, prefix, isAncient, nil, nil}
 	// Push the work onto the queue.
 	d.taskQueue <- work
 }
 
 func (d *Dispatcher) SendAncientJob(key []byte, val []byte, jobid uint64, isAncient bool) {
 	// let's create a job
-	work := Job{nil, jobid, isAncient, key, val}
+	//	work := Job{nil, jobid, isAncient, key, val}
 	// Push the work onto the queue.
-	d.taskQueue <- work
+	//  d.taskQueue <- work
+	return
 }
 
 func CompareStart(workersize uint64) *Dispatcher {
@@ -283,7 +313,9 @@ func CompareStart(workersize uint64) *Dispatcher {
 	return dispatcher
 }
 
-func (p *Dispatcher) WaitDbFinish() bool {
+func (p *Dispatcher) WaitDbFinish() uint64 {
+	defer close(p.taskQueue)
+	defer close(p.StopCh)
 	time.Sleep(3 * time.Second)
 	for {
 		if GetDoneTaskNum() >= p.taskNum {
@@ -293,11 +325,10 @@ func (p *Dispatcher) WaitDbFinish() bool {
 			time.Sleep(3 * time.Second)
 		}
 	}
-	if atomic.LoadInt64(&TaskFail) == 1 {
-		return false
-	}
-	fmt.Println("level db migrate finish")
-	return true
+
+	fmt.Println("get total compare error key num:", atomic.LoadUint64(&errComPareKeyNum))
+
+	return atomic.LoadUint64(&errComPareKeyNum)
 }
 
 func (d *Dispatcher) Close(checkErr bool) bool {
