@@ -18,12 +18,10 @@ package rawdb
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
 	"os"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -725,112 +723,143 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 
 func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	fmt.Println("begin compare data")
+	path, _ := os.Getwd()
+	errorDB, err2 := leveldb.New(path+"/error-startdb", 100, 50,
+		"chaindata", false)
 
-	iteratorMap := make(map[int]*ethdb.Iterator)
-	threadnum := 0
-	for i := 0; i < 256; i++ {
-		threadnum++
-		bytesBuffer := bytes.NewBuffer([]byte{})
-		err := binary.Write(bytesBuffer, binary.BigEndian, uint8(i))
-		if err != nil {
-			fmt.Println("to bytes error:", err.Error())
+	/*
+		iteratorMap := make(map[int]*ethdb.Iterator)
+		threadnum := 0
+		for i := 0; i < 256; i++ {
+			threadnum++
+			bytesBuffer := bytes.NewBuffer([]byte{})
+			err := binary.Write(bytesBuffer, binary.BigEndian, uint8(i))
+			if err != nil {
+				fmt.Println("to bytes error:", err.Error())
+			}
+			iter := db.NewIterator(bytesBuffer.Bytes(), []byte(""))
+			iteratorMap[i] = &iter
 		}
-		iter := db.NewIterator(bytesBuffer.Bytes(), []byte(""))
-		iteratorMap[i] = &iter
-	}
 
-	defer func() {
-		for _, v := range iteratorMap {
-			iter := *v
-			iter.Release()
-		}
-	}()
-
-	// mark total key num
-	totalNum := uint64(0)
-	batchNum := uint64(0)
-	start := time.Now()
-	// start a task dispatcher with 1000 threads
-	dispatcher := CompareStart(1200)
-
+		defer func() {
+			for _, v := range iteratorMap {
+				iter := *v
+				iter.Release()
+			}
+		}()
+	*/
+	/*
+		// mark total key num
+		totalNum := uint64(0)
+		batchNum := uint64(0)
+		start := time.Now()
+		// start a task dispatcher with 1000 threads
+		dispatcher := CompareStart(1200)
+	*/
 	// init remote db for data sending
-	InitDb(addr)
-	var wg sync.WaitGroup
-	wg.Add(threadnum)
-
-	fmt.Println("start thread num:", threadnum, "map size:", len(iteratorMap))
-	// use threads to migrate ancient data
-	for j := 0; j < len(iteratorMap); j++ {
-		go func(it ethdb.Iterator, index int) {
-			fmt.Println("start with prefix:", index)
-			defer wg.Done()
-			count := 0
-			tempBatch := make(map[string][]byte)
-
-			for it.Next() {
-				var (
-					key = it.Key()
-					v   = it.Value()
-				)
-				value := make([]byte, len(v))
-				copy(value, v)
-
-				// ignore snapshot data
-				if (bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)) || (bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)) {
-					//	snapcount++
-					continue
-				}
-				atomic.AddUint64(&totalNum, 1)
-				count++
-				tempBatch[string(key[:])] = value
-
-				// make a batch contain 100 keys , and send job work pool
-				if count >= 1 && count%150 == 0 {
-					// make a batch as a job, send it to worker pool
-					atomic.AddUint64(&batchNum, 1)
-
-					dispatcher.SendKvJob(tempBatch, index, false)
-
-					batchCount := atomic.LoadUint64(&batchNum)
-
-					distance := batchCount - GetDoneTaskNum()
-					if distance > 2000 {
-						if distance > 3300 {
-							fmt.Println("worker lag too much", distance)
-							time.Sleep(5 * time.Second)
-						}
-						time.Sleep(3 * time.Second)
-					}
-
-					// print cost time every 50000000 keys
-					if batchCount%100000 == 0 {
-						fmt.Println("finish compare level db k,v num:", atomic.LoadUint64(&totalNum),
-							"cost time:", time.Since(start).Nanoseconds()/1000000000, "s",
-							"key prefix:", key[0], "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
-						runtime.GC()
-					}
-					tempBatch = make(map[string][]byte)
-				}
+	rocksdb := InitDb(addr)
+	if err2 == nil {
+		errIter := errorDB.NewIterator([]byte(""), []byte(""))
+		fixnum := 0
+		for errIter.Next() {
+			var (
+				key = errIter.Key()
+				v   = errIter.Value()
+			)
+			value := make([]byte, len(v))
+			copy(value, v)
+			err := rocksdb.Put(key, value)
+			if err != nil {
+				fmt.Println("fix kv error,", err.Error(),
+					"time:", time.Now().UTC().Format("2006-01-02 15:04:05"),
+					"prefix:", key[0])
+			} else {
+				fmt.Println("fix kv succ", "time:", time.Now().UTC().Format("2006-01-02 15:04:05"),
+					"prefix:", key[0])
+				fixnum++
 			}
-			if len(tempBatch) > 0 {
-				atomic.AddUint64(&batchNum, 1)
-				dispatcher.SendKvJob(tempBatch, index, false)
-			}
-		}(*iteratorMap[j], j)
+		}
+		fmt.Println("finish fix num:", fixnum)
+	} else {
+		fmt.Println("open errordb error:", err2.Error())
 	}
+	/*
+		var wg sync.WaitGroup
+		wg.Add(threadnum)
 
-	wg.Wait()
+		fmt.Println("start thread num:", threadnum, "map size:", len(iteratorMap))
+		// use threads to migrate ancient data
+		for j := 0; j < len(iteratorMap); j++ {
+			go func(it ethdb.Iterator, index int) {
+				fmt.Println("start with prefix:", index)
+				defer wg.Done()
+				count := 0
+				tempBatch := make(map[string][]byte)
 
-	fmt.Println("send batch num:", atomic.LoadUint64(&batchNum), "key num:", atomic.LoadUint64(&totalNum))
-	dispatcher.setTaskNum(atomic.LoadUint64(&batchNum))
+				for it.Next() {
+					var (
+						key = it.Key()
+						v   = it.Value()
+					)
+					value := make([]byte, len(v))
+					copy(value, v)
 
-	errNum := dispatcher.WaitDbFinish()
-	fmt.Println("leveldb key migrate restart, err key:", errNum)
+					// ignore snapshot data
+					if (bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)) || (bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)) {
+						//	snapcount++
+						continue
+					}
+					atomic.AddUint64(&totalNum, 1)
+					count++
+					tempBatch[string(key[:])] = value
 
-	leveldbCost := time.Since(start).Nanoseconds() / 1000000
-	fmt.Println("migrate succ , migrate leveldb cost time:", leveldbCost,
-		"migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
+					// make a batch contain 100 keys , and send job work pool
+					if count >= 1 && count%150 == 0 {
+						// make a batch as a job, send it to worker pool
+						atomic.AddUint64(&batchNum, 1)
 
+						dispatcher.SendKvJob(tempBatch, index, false)
+
+						batchCount := atomic.LoadUint64(&batchNum)
+
+						distance := batchCount - GetDoneTaskNum()
+						if distance > 2000 {
+							if distance > 3300 {
+								fmt.Println("worker lag too much", distance)
+								time.Sleep(5 * time.Second)
+							}
+							time.Sleep(3 * time.Second)
+						}
+
+						// print cost time every 50000000 keys
+						if batchCount%100000 == 0 {
+							fmt.Println("finish compare level db k,v num:", atomic.LoadUint64(&totalNum),
+								"cost time:", time.Since(start).Nanoseconds()/1000000000, "s",
+								"key prefix:", key[0], "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+							runtime.GC()
+						}
+						tempBatch = make(map[string][]byte)
+					}
+				}
+				if len(tempBatch) > 0 {
+					atomic.AddUint64(&batchNum, 1)
+					dispatcher.SendKvJob(tempBatch, index, false)
+				}
+			}(*iteratorMap[j], j)
+		}
+
+		wg.Wait()
+
+		fmt.Println("send batch num:", atomic.LoadUint64(&batchNum), "key num:", atomic.LoadUint64(&totalNum))
+		dispatcher.setTaskNum(atomic.LoadUint64(&batchNum))
+
+		errNum := dispatcher.WaitDbFinish()
+		fmt.Println("leveldb key migrate restart, err key:", errNum)
+
+		leveldbCost := time.Since(start).Nanoseconds() / 1000000
+		fmt.Println("migrate succ , migrate leveldb cost time:", leveldbCost,
+			"migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
+	*/
 	return nil
 }
 
