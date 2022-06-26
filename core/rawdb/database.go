@@ -728,7 +728,8 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 
 	// get startKey from db if exist
 	// var startKey []byte
-
+	frozenOffest, _ := db.Ancients()
+	fmt.Println(" ancient from", blockNumber, "end:", frozenOffest)
 	finishMap := make(map[int]bool)
 
 	for i := 0; i < 256; i++ {
