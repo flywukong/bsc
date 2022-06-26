@@ -723,6 +723,9 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 
 func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	fmt.Println("begin compare data")
+
+	frozenOffest, _ := db.Ancients()
+	fmt.Println(" ancient from", blockNumber, "end:", frozenOffest)
 	path, _ := os.Getwd()
 	errorDB, err2 := leveldb.New(path+"/error-startdb", 100, 50,
 		"chaindata", false)
