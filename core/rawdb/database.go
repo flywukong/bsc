@@ -751,7 +751,7 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	batchNum := uint64(0)
 	start := time.Now()
 	// start a task dispatcher with 1000 threads
-	dispatcher := CompareStart(1200)
+	dispatcher := CompareStart(1000)
 
 	// init remote db for data sending
 	InitDb(addr)
@@ -785,7 +785,7 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 				tempBatch[string(key[:])] = value
 
 				// make a batch contain 100 keys , and send job work pool
-				if count >= 1 && count%150 == 0 {
+				if count >= 1 && count%80 == 0 {
 					// make a batch as a job, send it to worker pool
 					atomic.AddUint64(&batchNum, 1)
 

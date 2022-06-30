@@ -47,7 +47,7 @@ func InitDb(addr string) *remotedb.RocksDB {
 	ErrorDB, _ = leveldb.New(path+"/error-comparedb", 100, 50,
 		"chaindata", false)
 
-	ErrorDB, _ = leveldb.New(path+"/error-comparedb2", 100, 50,
+	ErrorDB2, _ = leveldb.New(path+"/error-comparedb2", 100, 50,
 		"chaindata", false)
 
 	return KvrocksDB
