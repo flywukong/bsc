@@ -94,14 +94,14 @@ const (
 	maxBeyondBlocks        = 2048
 	prefetchTxNumber       = 100
 
-	diffLayerFreezerRecheckInterval = 3 * time.Second
-	diffLayerPruneRecheckInterval   = 1 * time.Second // The interval to prune unverified diff layers
-	loadStatesFromRemoteDBInterval  = 2 * time.Second // The interval to load states from remotedb
-	reportStatesFromRemoteDBInterval= 10   	          // The interval to report states from remotedb
-	maxDiffQueueDist                = 2048            // Maximum allowed distance from the chain head to queue diffLayers
-	maxDiffLimit                    = 2048            // Maximum number of unique diff layers a peer may have responded
-	maxDiffForkDist                 = 11              // Maximum allowed backward distance from the chain head
-	maxDiffLimitForBroadcast        = 128             // Maximum number of unique diff layers a peer may have broadcasted
+	diffLayerFreezerRecheckInterval  = 3 * time.Second
+	diffLayerPruneRecheckInterval    = 1 * time.Second // The interval to prune unverified diff layers
+	loadStatesFromRemoteDBInterval   = 2 * time.Second // The interval to load states from remotedb
+	reportStatesFromRemoteDBInterval = 10              // The interval to report states from remotedb
+	maxDiffQueueDist                 = 2048            // Maximum allowed distance from the chain head to queue diffLayers
+	maxDiffLimit                     = 2048            // Maximum number of unique diff layers a peer may have responded
+	maxDiffForkDist                  = 11              // Maximum allowed backward distance from the chain head
+	maxDiffLimitForBroadcast         = 128             // Maximum number of unique diff layers a peer may have broadcasted
 
 	rewindBadBlockInterval = 1 * time.Second
 
@@ -130,6 +130,8 @@ const (
 	//    * New scheme for contract code in order to separate the codes and trie nodes
 	BlockChainVersion uint64 = 8
 )
+
+var DetectHeight uint64
 
 // CacheConfig contains the configuration values for the trie caching/pruning
 // that's resident in a blockchain.
@@ -336,7 +338,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		if err := bc.loadLastState(); err != nil {
 			return nil, err
 		}
-		go func () {
+		go func() {
 			var reportCount int
 			for {
 				select {
@@ -370,7 +372,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 					}
 					bc.currentFastBlock.Store(currentFastBlock)
 					reportCount++
-				
+					DetectHeight = currentBlock.Number().Uint64()
 					if reportCount == reportStatesFromRemoteDBInterval {
 						reportCount = 0
 						log.Info("Loaded most recent local header", "number", currentHeader.Number, "hash", currentHeader.Hash(), "age", common.PrettyAge(time.Unix(int64(currentHeader.Time), 0)))
@@ -993,7 +995,7 @@ func (bc *BlockChain) ExportN(w io.Writer, first uint64, last uint64) error {
 func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 	if bc.readonly {
 		log.Error("BlockChain is readonly, not support writeHeadBlock")
-		return 
+		return
 	}
 	// If the block is on a side chain or an unknown one, force other heads onto it too
 	updateHeads := rawdb.ReadCanonicalHash(bc.db, block.NumberU64()) != block.Hash()
@@ -2342,7 +2344,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, er
 func (bc *BlockChain) updateHighestVerifiedHeader(header *types.Header) {
 	if bc.readonly {
 		log.Error("BlockChain is readonly, not support updateHighestVerifiedHeader")
-		return 
+		return
 	}
 	if header == nil || header.Number == nil {
 		return
