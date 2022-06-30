@@ -32,6 +32,7 @@ var (
 	errComPareKeyNum uint64
 	rewriteCount     uint64
 	ErrorDB          *leveldb.Database
+	ErrorDB2         *leveldb.Database
 )
 
 var ctx = context.Background()
@@ -44,6 +45,9 @@ func InitDb(addr string) *remotedb.RocksDB {
 	KvrocksDB, _ = remotedb.NewRocksDB(config, persistCache, false)
 
 	ErrorDB, _ = leveldb.New(path+"/error-comparedb", 100, 50,
+		"chaindata", false)
+
+	ErrorDB, _ = leveldb.New(path+"/error-comparedb2", 100, 50,
 		"chaindata", false)
 
 	return KvrocksDB
@@ -77,9 +81,16 @@ func (job *Job) CompareKvRocks() error {
 			// read values from kvrocks using pipeline
 			valueList, err := KvrocksDB.PipeRead(keyList)
 			if err != nil {
-				fmt.Println("compare fail", err.Error())
-				//return err
-				isSame = false
+				fmt.Println("read fail before compare", err.Error())
+
+				for key, value := range job.Kvbuffer {
+					err2 := ErrorDB2.Put([]byte(key), value)
+					if err2 != nil {
+						fmt.Println("write to errordb2 fail")
+					}
+				}
+				return err
+				//isSame = false
 			}
 
 			if len(valueList) != len(keyList) {
