@@ -18,9 +18,17 @@
 package eth
 
 import (
+	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/consensus/parlia"
+	"github.com/ethereum/go-ethereum/eth/tracers"
+	"github.com/ethereum/go-ethereum/ethdb/leveldb"
+	"github.com/ethereum/go-ethereum/ethdb/remotedb"
+	"github.com/ethereum/go-ethereum/metrics"
 	"math/big"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -31,7 +39,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/clique"
-	"github.com/ethereum/go-ethereum/consensus/parlia"
+
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/bloombits"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -62,6 +70,111 @@ import (
 // Config contains the configuration options of the ETH protocol.
 // Deprecated: use ethconfig.Config instead.
 type Config = ethconfig.Config
+
+var MonitorAPI *tracers.API
+
+var (
+	alertGauge = metrics.NewRegisteredGauge("chain/archive/alert", nil)
+)
+
+func monitor(api *EthAPIBackend, cfg *remotedb.Config) {
+	//RemoteDBConfig = eth.RemoteDBConfig
+	MonitorAPI = tracers.NewAPI(api)
+
+	path, _ := os.Getwd()
+	persistCache, _ := leveldb.New(path+"/persistcache", 50, 200, "chaindata", false)
+	config := remotedb.DefaultConfig()
+	config.Addrs = cfg.Addrs
+	//	config.Addrs= strings.Split(config, ",")
+	KvrocksDB, _ := remotedb.NewRocksDB(config, persistCache, false)
+
+	ticker := time.NewTicker(1 * time.Minute)
+	go func() {
+		defer ticker.Stop()
+		alertGauge.Update(1)
+		var debugCount int
+		var errHeight, LastCheckOffset uint64
+		var status string
+		var errDetectNum int
+		var noNeedMonitor, needWrite bool
+		const (
+			kvrocksSlaveKeepAlive      = "kvrocksSlaveKeepAlive"
+			kvrockSlaveLastCheckOffset = "kvrockSlaveLastCheckOffset"
+			monitorStatus              = "kvrockMonitoring"
+			fixStatus                  = "kvrockFixing"
+		)
+
+		for {
+			select {
+			case <-ticker.C:
+				// make a debug every 5 minutes
+				if debugCount == 150 {
+					debugCount = 0
+					var height uint64
+					if status == fixStatus {
+						// if already detect error, try to detect the error height again
+						height = errHeight
+						// if detect errors more than 3, no need monitor, mark metrics to make alert
+						if errDetectNum > 3 {
+							noNeedMonitor = true
+							// add metric, make alert
+							alertGauge.Update(0)
+						}
+						errDetectNum++
+					} else {
+						status = monitorStatus
+						height = core.DetectHeight
+					}
+
+					if noNeedMonitor == false {
+						fmt.Println("make debug trace on height:", height)
+
+						result, err := MonitorAPI.TraceBlockByNumber(context.Background(), rpc.BlockNumber(height), nil)
+						if err != nil {
+							log.Info("call debug trace fail:", err)
+							// mark the height which has error response
+							errHeight = height
+							fmt.Println("error occures on blocknumber:", errHeight)
+							// write meta to kvrocks
+							if needWrite {
+								var errflag = make([]byte, 8)
+								binary.BigEndian.PutUint64(errflag, uint64(0))
+								writeErr := KvrocksDB.Put([]byte(kvrocksSlaveKeepAlive), errflag)
+								if writeErr != nil {
+									log.Error("write kvrocksSlaveKeepAlive fail", writeErr)
+								}
+								needWrite = false
+							}
+						} else {
+							LastCheckOffset = height
+							if status == fixStatus {
+								var fixedflag = make([]byte, 8)
+								binary.BigEndian.PutUint64(fixedflag, uint64(1))
+								writeErr := KvrocksDB.Put([]byte(kvrocksSlaveKeepAlive), fixedflag)
+								if writeErr != nil {
+									log.Error("write kvrocksSlaveKeepAlive fail", writeErr)
+								}
+								needWrite = true
+							}
+							status = monitorStatus
+							errDetectNum = 0
+							var buf = make([]byte, 8)
+							binary.BigEndian.PutUint64(buf, uint64(LastCheckOffset))
+							writeErr := KvrocksDB.Put([]byte(kvrockSlaveLastCheckOffset), buf)
+							if writeErr != nil {
+								log.Error("write kvrockSlaveLastCheckOffset fail", writeErr)
+							}
+							log.Error("write kvrocksSlaveKeepAlive fail", writeErr)
+							fmt.Println("call debug trace result:", result)
+						}
+					}
+				}
+			}
+		}
+	}()
+}
+
+// var remoteDBConfig remotedb.Config
 
 // Ethereum implements the Ethereum full node service.
 type Ethereum struct {
@@ -132,7 +245,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	var chainDb ethdb.Database
 	var err error
 	if config.EnableRemoteDB {
-		chainDb, err = stack.OpenRemoteDB(&config.RemoteDB, config.EnablePersistCache, "chaindata", 
+		chainDb, err = stack.OpenRemoteDB(&config.RemoteDB, config.EnablePersistCache, "chaindata",
 			config.DatabaseCache, config.DatabaseHandles, "eth/db/chaindata/", false, config.PersistDiff)
 		if err != nil {
 			return nil, err
@@ -142,10 +255,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			log.Info("other node wirte remotedb", "node", string(marker))
 			return nil, errors.New("other node opened remotedb with wirte permission")
 		}
-		if err := rawdb.WriteRemoteDBWriteMarker(chainDb, []byte(time.Now().Format("2022-04-20 15:04:05"))); err != nil{
+		if err := rawdb.WriteRemoteDBWriteMarker(chainDb, []byte(time.Now().Format("2022-04-20 15:04:05"))); err != nil {
 			return nil, err
 		}
-		
+
 		log.Info("Open remotedb", "addrs", config.RemoteDB.Addrs, "persistcache", config.EnablePersistCache)
 	} else {
 		chainDb, err = stack.OpenAndMergeDatabase("chaindata", config.DatabaseCache, config.DatabaseHandles,
@@ -181,6 +294,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if eth.APIBackend.allowUnprotectedTxs {
 		log.Info("Unprotected transactions allowed")
 	}
+
 	ethAPI := ethapi.NewPublicBlockChainAPI(eth.APIBackend)
 	eth.engine = ethconfig.CreateConsensusEngine(stack, chainConfig, &ethashConfig, config.Miner.Notify, config.Miner.Noverify, chainDb, ethAPI, genesisHash)
 
@@ -229,10 +343,18 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if config.PersistDiff {
 		bcOps = append(bcOps, core.EnablePersistDiff(config.DiffBlock))
 	}
-	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, &config.TxLookupLimit, false, bcOps...)
+
+	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine,
+		vmConfig, eth.shouldPreserve, &config.TxLookupLimit, false, bcOps...)
 	if err != nil {
 		return nil, err
 	}
+
+	flag := true
+	if flag == true {
+		monitor(eth.APIBackend, &config.RemoteDB)
+	}
+
 	// Rewind the chain in case of an incompatible config upgrade.
 	if compat, ok := genesisErr.(*params.ConfigCompatError); ok {
 		log.Warn("Rewinding chain to upgrade configuration", "err", compat)
@@ -314,7 +436,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 }
 
 // New creates a new Ethereum object for archive service
-// (including the initialisation of the common Ethereum object) 
+// (including the initialisation of the common Ethereum object)
 func NewArchiveServiceNode(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	// Ensure configuration values are compatible and sane
 	if config.SyncMode == downloader.LightSync {
@@ -343,13 +465,12 @@ func NewArchiveServiceNode(stack *node.Node, config *ethconfig.Config) (*Ethereu
 	ethashConfig.NotifyFull = config.Miner.NotifyFull
 
 	// Assemble the Ethereum object
-	chainDb, err := stack.OpenRemoteDB(&config.RemoteDB, config.EnablePersistCache, "chaindata", 
+	chainDb, err := stack.OpenRemoteDB(&config.RemoteDB, config.EnablePersistCache, "chaindata",
 		config.DatabaseCache, config.DatabaseHandles, "eth/db/chaindata/", true, config.PersistDiff)
 	if err != nil {
 		return nil, err
 	}
 	log.Info("Open remotedb", "addrs", config.RemoteDB.Addrs, "persistcache", config.EnablePersistCache)
-	
 
 	genesisHash := rawdb.ReadCanonicalHash(chainDb, 0)
 	if (genesisHash == common.Hash{}) {
