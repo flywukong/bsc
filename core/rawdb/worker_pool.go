@@ -30,6 +30,7 @@ var (
 	AncientTaskFail  int64
 	errComPareKeyNum uint64
 	rewriteCount     uint64
+	ErrorDB          *leveldb.Database
 )
 
 var ctx = context.Background()
@@ -40,6 +41,10 @@ func InitDb(addr string) *remotedb.RocksDB {
 	config := remotedb.DefaultConfig()
 	config.Addrs = strings.Split(addr, ",")
 	KvrocksDB, _ = remotedb.NewRocksDB(config, persistCache, false)
+
+	ErrorDB, _ = leveldb.New(path+"/error-comparedb", 100, 50,
+		"chaindata", false)
+
 	return KvrocksDB
 }
 
@@ -122,6 +127,13 @@ func (job *Job) CompareKvRocks() error {
 				if batcherr := kvBatch.Write(); batcherr != nil {
 					fmt.Println("rewrite kv rocks error", batcherr.Error(), "prefix:", job.prefix,
 						"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+					for key, value := range job.Kvbuffer {
+						err2 := ErrorDB.Put([]byte(key), value)
+						if err2 != nil {
+							fmt.Println("write to errordb fail")
+						}
+					}
+
 				}
 				fmt.Println("rewrite kv rocks finish", "prefix:", job.prefix,
 					"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
