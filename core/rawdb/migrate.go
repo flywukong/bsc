@@ -17,6 +17,7 @@ var (
 	SuccTaskNum     uint64
 	FailTaskNum     uint64
 	TaskFail        int64
+	ErrorDB         *leveldb.Database
 	AncientTaskFail int64
 )
 
@@ -29,6 +30,9 @@ func InitDb(addr string) *remotedb.RocksDB {
 	config.Addrs = strings.Split(addr, ",")
 	KvrocksDB, _ = remotedb.NewRocksDB(config, persistCache, false)
 
+	ErrorDB, _ = leveldb.New(path+"/error-startdb", 100, 50,
+		"chaindata", false)
+
 	return KvrocksDB
 }
 
@@ -37,7 +41,14 @@ func (job *Job) UploadToKvRocks() error {
 		err := KvrocksDB.Put(job.ancientKey, job.ancientValue)
 		if err != nil {
 			fmt.Println("send ancient kv error,", err.Error(), "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
-			panic("ancient task fail")
+			//panic("ancient task fail")
+			err2 := ErrorDB.Put(job.ancientKey, job.ancientValue)
+			if err2 != nil {
+				fmt.Println("local level db write fail")
+			} else {
+				fmt.Println("local level db write succ")
+			}
+
 			return err
 		}
 	} else {
