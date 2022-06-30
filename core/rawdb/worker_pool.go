@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
 	"github.com/ethereum/go-ethereum/ethdb/remotedb"
 	"os"
@@ -101,6 +102,14 @@ func (job *Job) CompareKvRocks() error {
 						keyList[i] == string(snapshotRecoveryKey) || keyList[i] == string(txIndexTailKey) ||
 						keyList[i] == string(fastTxLookupLimitKey) || keyList[i] == string(uncleanShutdownKey) ||
 						keyList[i] == string(badBlockKey) {
+						continue
+					}
+
+					if bytes.HasPrefix([]byte(keyList[i]), []byte("parlia-")) && len(keyList[i]) == 7+common.HashLength {
+						continue
+					}
+
+					if keyList[i] == "_globalCostFactorV6" {
 						continue
 					}
 
