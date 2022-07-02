@@ -848,6 +848,11 @@ var (
 		Usage: "Enable remotedb store cluster replace local disk ",
 	}
 
+	EnableArchiveDebug = cli.BoolFlag{
+		Name:  "slavedebug",
+		Usage: "Enable make debug request to slave ",
+	}
+
 	RemoteDBReadOnly = cli.BoolFlag{
 		Name:  "remotedb.readonly",
 		Usage: "Set remotedb readonly ",
@@ -892,7 +897,6 @@ var (
 		Name:  "remotedb.persistcache",
 		Usage: "Remotedb enable local persist cache ",
 	}
-
 )
 
 // MakeDataDir retrieves the currently requested data directory, terminating
@@ -1775,6 +1779,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 				log.Crit("remotedb not support lightServ")
 			}
 		}
+	}
+	if ctx.GlobalIsSet(EnableArchiveDebug.Name) {
+		cfg.EnableArchiveDebug = ctx.GlobalBool(EnableArchiveDebug.Name)
 	}
 	if ctx.GlobalIsSet(RemoteDBReadOnly.Name) {
 		cfg.RemoteDBReadOnly = ctx.GlobalBool(RemoteDBReadOnly.Name)

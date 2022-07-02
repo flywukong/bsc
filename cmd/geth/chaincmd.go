@@ -32,9 +32,9 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/ethdb/remotedb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethdb/remotedb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/node"
@@ -52,6 +52,7 @@ var (
 			utils.DataDirFlag,
 			utils.EnableRemoteDB,
 			utils.RemoteDBAddr,
+			utils.EnableArchiveDebug,
 		},
 		Category: "BLOCKCHAIN COMMANDS",
 		Description: `

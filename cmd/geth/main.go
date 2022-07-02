@@ -178,6 +178,7 @@ var (
 		utils.RemoteDBRetryMinTimeout,
 		utils.RemoteDBRetryMaxTimeout,
 		utils.RemoteDBIdleConns,
+		utils.EnableArchiveDebug,
 	}
 
 	rpcFlags = []cli.Flag{

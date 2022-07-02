@@ -173,6 +173,7 @@ type Config struct {
 	RemoteDBReadOnly   bool
 	RemoteDBWriteForce bool
 	EnablePersistCache bool
+	EnableArchiveDebug bool
 
 	TrieCleanCache          int
 	TrieCleanCacheJournal   string        `toml:",omitempty"` // Disk journal directory for trie cache to survive node restarts

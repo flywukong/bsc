@@ -71,27 +71,23 @@ import (
 // Deprecated: use ethconfig.Config instead.
 type Config = ethconfig.Config
 
-var MonitorAPI *tracers.API
-
 var (
 	alertGauge = metrics.NewRegisteredGauge("chain/archive/alert", nil)
 )
 
 func startMonitor(api *EthAPIBackend, cfg *remotedb.Config) {
-	//RemoteDBConfig = eth.RemoteDBConfig
-	MonitorAPI = tracers.NewAPI(api)
-
+	monitorAPI := tracers.NewAPI(api)
 	path, _ := os.Getwd()
-	persistCache, _ := leveldb.New(path+"/persistcache", 50, 200, "chaindata", false)
+	persistCache, _ := leveldb.New(path+"/persist", 30, 10, "chaindata", false)
 	config := remotedb.DefaultConfig()
 	config.Addrs = cfg.Addrs
 	//	config.Addrs= strings.Split(config, ",")
 	KvrocksDB, _ := remotedb.NewRocksDB(config, persistCache, false)
 
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(15 * time.Minute)
 	go func() {
 		defer ticker.Stop()
-		alertGauge.Update(1)
+		alertGauge.Update(0)
 		var errHeight, LastCheckOffset uint64
 		var status string
 		var errDetectNum int
@@ -106,6 +102,7 @@ func startMonitor(api *EthAPIBackend, cfg *remotedb.Config) {
 		)
 
 		status = monitorStatus
+
 		for {
 			select {
 			case <-ticker.C:
@@ -117,14 +114,16 @@ func startMonitor(api *EthAPIBackend, cfg *remotedb.Config) {
 					if errDetectNum > 3 {
 						noNeedMonitor = true
 						// uodate metric, make alert
-						alertGauge.Update(0)
+						alertGauge.Update(1)
 					}
 					errDetectNum++
 				} else {
 					if status == monitorStatus {
 						checkHeight = core.DetectHeight
+						fmt.Println("monitor height:", checkHeight)
 					} else if status == middleStatus {
 						latestHeight := core.DetectHeight
+						// get height use binary search in middleStatus
 						height := errHeight + (latestHeight-errHeight)/2
 						if latestHeight-height > 3 {
 							checkHeight = height
@@ -134,27 +133,42 @@ func startMonitor(api *EthAPIBackend, cfg *remotedb.Config) {
 						}
 					}
 				}
-
+				exitErr := false
 				if noNeedMonitor == false {
 					fmt.Println("make debug trace on height:", checkHeight)
 
-					result, err := MonitorAPI.TraceBlockByNumber(context.Background(), rpc.BlockNumber(checkHeight), nil)
+					result, err := monitorAPI.TraceBlockByNumber(context.Background(), rpc.BlockNumber(checkHeight), nil)
 					if err != nil {
-						log.Error("call debug trace fail:", err)
-						// mark the height which has error response
-						errHeight = checkHeight
-						fmt.Println("error occures on blocknumber:", errHeight)
-						// write meta to kvrocks
-						if needWrite {
-							var errflag = make([]byte, 8)
-							binary.BigEndian.PutUint64(errflag, uint64(0))
-							writeErr := KvrocksDB.Put([]byte(kvrocksSlaveKeepAlive), errflag)
-							if writeErr != nil {
-								log.Error("write kvrocksSlaveKeepAlive fail", writeErr)
+						log.Error("call debug trace fail:", "url", config.Addrs, "err", err)
+						fmt.Println("call debug trace fail:", err.Error())
+						exitErr = true
+						// try again
+						result, err = monitorAPI.TraceBlockByNumber(context.Background(), rpc.BlockNumber(checkHeight), nil)
+						if err == nil {
+							exitErr = false
+						} else {
+							// mark the height which has error response
+							errHeight = checkHeight
+							fmt.Println("error occures on blocknumber:", errHeight)
+
+							// write meta to kvrocks
+							if needWrite {
+								var errflag = make([]byte, 8)
+								binary.BigEndian.PutUint64(errflag, uint64(0))
+								writeErr := KvrocksDB.Put([]byte(kvrocksSlaveKeepAlive), errflag)
+								if writeErr != nil {
+									log.Error("write kvrocksSlaveKeepAlive fail", writeErr)
+								}
+								needWrite = false
 							}
-							needWrite = false
 						}
-					} else {
+					}
+					if exitErr == false {
+						for _, value := range result {
+							if value.Error != "" {
+								fmt.Println("debug result errror:", value.Error)
+							}
+						}
 						LastCheckOffset = checkHeight
 
 						// fixing data finished, update the meta data
@@ -174,10 +188,11 @@ func startMonitor(api *EthAPIBackend, cfg *remotedb.Config) {
 						binary.BigEndian.PutUint64(buf, uint64(LastCheckOffset))
 						writeErr := KvrocksDB.Put([]byte(kvrockSlaveLastCheckOffset), buf)
 						if writeErr != nil {
-							log.Error("write kvrockSlaveLastCheckOffset fail", writeErr)
+							log.Error("write kvrockSlaveLastCheckOffset fail", writeErr, " rewrite again")
+							KvrocksDB.Put([]byte(kvrockSlaveLastCheckOffset), buf)
+						} else {
+							log.Info("write meta finish:", "kvrockSlaveLastCheckOffset ", LastCheckOffset)
 						}
-						log.Error("write kvrocksSlaveKeepAlive fail", writeErr)
-						fmt.Println("call debug trace result:", result)
 					}
 				}
 			}
@@ -362,11 +377,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, err
 	}
 
-	flag := true
-	if flag == true {
-		startMonitor(eth.APIBackend, &config.RemoteDB)
-	}
-
 	// Rewind the chain in case of an incompatible config upgrade.
 	if compat, ok := genesisErr.(*params.ConfigCompatError); ok {
 		log.Warn("Rewinding chain to upgrade configuration", "err", compat)
@@ -544,6 +554,12 @@ func NewArchiveServiceNode(stack *node.Node, config *ethconfig.Config) (*Ethereu
 	if err != nil {
 		return nil, err
 	}
+
+	if config.EnableArchiveDebug {
+		log.Info("start monitor to make debug trace")
+		startMonitor(eth.APIBackend, &config.RemoteDB)
+	}
+
 	eth.txPool = core.NewTxPool(config.TxPool, chainConfig, eth.blockchain)
 
 	// Permit the downloader to use the trie cache allowance during fast sync
