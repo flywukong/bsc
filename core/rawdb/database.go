@@ -664,10 +664,10 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 		blockNumList = append(blockNumList, i)
 	}
 	// split block number list into 3
-	segments := splitArray(blockNumList, 15)
+	segments := splitArray(blockNumList, 10)
 	tasknum = uint64(0)
 	var wg sync.WaitGroup
-	wg.Add(15)
+	wg.Add(10)
 	start := time.Now()
 	// use threads to migrate ancient data
 	for j := 0; j < len(segments); j++ {
@@ -717,6 +717,13 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 	}
 
 	wg.Wait()
+
+	genesisHash := ReadCanonicalHash(db, 0)
+	if (genesisHash == common.Hash{}) {
+		fmt.Println("genesis is empty")
+		//return nil, errors.New("genesis is empty")
+	}
+
 	fmt.Println("ancient send task num:", atomic.LoadUint64(&tasknum))
 	return atomic.LoadUint64(&tasknum)
 }
