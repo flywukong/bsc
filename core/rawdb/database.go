@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -726,6 +726,20 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	fmt.Println("begin compare data")
 
+	finishMap := make(map[int][]byte)
+
+	for i := 0; i < 256; i++ {
+		pre := i
+		path, _ := os.Getwd()
+		startDB, _ := leveldb.New(path+"/startdb"+strconv.Itoa(pre), 10, 50, "chaindata", false)
+
+		startKey, err := startDB.Get([]byte("startkey"))
+		if err == nil {
+			finishMap[pre] = startKey
+		}
+		//fmt.Println("read startdb", strconv.Itoa(pre))
+	}
+
 	iteratorMap := make(map[int]*ethdb.Iterator)
 	threadnum := 0
 	for i := 0; i < 256; i++ {
@@ -735,7 +749,12 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		if err != nil {
 			fmt.Println("to bytes error:", err.Error())
 		}
-		iter := db.NewIterator(bytesBuffer.Bytes(), []byte(""))
+		start := []byte("")
+		if finishMap[i] != nil {
+			fmt.Println("restart start key:", finishMap[i])
+			start = finishMap[i]
+		}
+		iter := db.NewIterator(bytesBuffer.Bytes(), start)
 		iteratorMap[i] = &iter
 	}
 
@@ -749,6 +768,8 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	// mark total key num
 	totalNum := uint64(0)
 	batchNum := uint64(0)
+	totalNum2 := uint64(0)
+
 	start := time.Now()
 	// start a task dispatcher with 1000 threads
 	dispatcher := CompareStart(1000)
@@ -766,7 +787,8 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 			defer wg.Done()
 			count := 0
 			tempBatch := make(map[string][]byte)
-
+			markStart := false
+			var lastMark uint64
 			for it.Next() {
 				var (
 					key = it.Key()
@@ -790,7 +812,7 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 				tempBatch[string(key[:])] = value
 
 				// make a batch contain 100 keys , and send job work pool
-				if count >= 1 && count%80 == 0 {
+				if count >= 1 && count%100 == 0 {
 					// make a batch as a job, send it to worker pool
 					atomic.AddUint64(&batchNum, 1)
 
@@ -809,11 +831,37 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 
 					// print cost time every 50000000 keys
 					if batchCount%100000 == 0 {
-						fmt.Println("finish level db k,v num:", atomic.LoadUint64(&totalNum),
+						total := atomic.LoadUint64(&totalNum)
+						fmt.Println("finish level db k,v num:", total,
 							"cost time:", time.Since(start).Nanoseconds()/1000000000, "s",
 							"key prefix:", key[0], "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
-						runtime.GC()
+
+						//runtime.GC()
 					}
+
+					if batchCount%3000000 == 0 {
+						atomic.StoreUint64(&totalNum2, atomic.LoadUint64(&totalNum))
+					}
+
+					lastMarkHeight := atomic.LoadUint64(&totalNum2)
+					if lastMark < lastMarkHeight {
+						markStart = true
+					}
+
+					if batchCount*100 > lastMarkHeight && markStart == true {
+						lastMark = batchCount * 100
+						markStart = false
+						fmt.Println("mark start key on prefix:", index, "key:", lastMark)
+						path, _ := os.Getwd()
+						startDB, _ := leveldb.New(path+"/startdb"+strconv.Itoa(index), 10, 50, "chaindata", false)
+
+						errExist := startDB.Put([]byte("startkey"), key)
+						if errExist != nil {
+							fmt.Println("mark start key fail")
+						}
+						//runtime.GC()
+					}
+
 					tempBatch = make(map[string][]byte)
 				}
 			}
