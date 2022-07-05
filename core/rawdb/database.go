@@ -853,8 +853,10 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 						markStart = false
 						fmt.Println("mark start key on prefix:", index, "key:", lastMark)
 						path, _ := os.Getwd()
-						startDB, _ := leveldb.New(path+"/startdb"+strconv.Itoa(index), 10, 50, "chaindata", false)
-
+						startDB, err := leveldb.New(path+"/startdb"+strconv.Itoa(index), 10, 50, "chaindata", false)
+						if err != nil {
+							fmt.Println("new start db fail on index:", index)
+						}
 						errExist := startDB.Put([]byte("startkey"), key)
 						if errExist != nil {
 							fmt.Println("mark start key fail")
