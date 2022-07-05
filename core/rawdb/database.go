@@ -757,38 +757,36 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		dispatcher := CompareStart(1200)
 	*/
 	// init remote db for data sending
-	// rocksdb := InitDb(addr)
+	rocksdb := InitDb(addr)
 
 	value1, err1 := db.Get([]byte("iBcount"))
 	if err1 != nil {
 		fmt.Println("can not get iBcount")
 	} else {
 		fmt.Println("get bltIndex-count:", string(value1))
-		/*
-			err := rocksdb.Put([]byte("iBcount"), value1)
-			if err != nil {
-				fmt.Println("fix kv error,", err.Error(),
-					"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
-			} else {
-				fmt.Println("fix kv succ", "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
-			}
-		*/
+
+		err := rocksdb.Put([]byte("iBcount"), value1)
+		if err != nil {
+			fmt.Println("fix kv error,", err.Error(),
+				"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+		} else {
+			fmt.Println("fix kv succ", "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+		}
 	}
 
 	value2, err2 := db.Get([]byte("bltIndex-count"))
 	if err2 != nil {
 		fmt.Println("can not get bltIndex-count")
 	} else {
-		//err := rocksdb.Put([]byte("bltIndex-count"), value2)
-		fmt.Println("get bltIndex-count:", string(value2))
-		/*
-			if err != nil {
-				fmt.Println("fix kv error,", err.Error(),
-					"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
-			} else {
-				fmt.Println("fix kv succ", "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
-			}
-		*/
+		err := rocksdb.Put([]byte("bltIndex-count"), value2)
+
+		if err != nil {
+			fmt.Println("fix kv error,", err.Error(),
+				"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+		} else {
+			fmt.Println("fix kv succ", "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+		}
+
 	}
 
 	iter := db.NewIterator([]byte("ethereum-config"), []byte(""))
@@ -798,7 +796,16 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 			key = iter.Key()
 			v   = iter.Value()
 		)
-		fmt.Println("key:", key, "value:", string(v))
+		err := rocksdb.Put(key, v)
+
+		if err != nil {
+			fmt.Println("fix kv error,", err.Error(),
+				"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+		} else {
+			fmt.Println("fix kv succ",
+				"key:", string(key), "value:", string(v), "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+		}
+
 		count++
 	}
 
