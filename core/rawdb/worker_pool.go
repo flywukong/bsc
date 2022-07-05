@@ -124,9 +124,25 @@ func (job *Job) CompareKvRocks() error {
 						continue
 					}
 
+					if keyList[i] == "iBcount" {
+						continue
+					}
+
+					if keyList[i] == "bltIndex-count" {
+						continue
+					}
+
+					if bytes.HasPrefix([]byte(keyList[i]), []byte("ethereum-config")) {
+						continue
+					}
 					isSame = false
 					fmt.Println("compare key error, key:", keyList[i], "leveldb value:",
 						string(job.Kvbuffer[keyList[i]]), "  vs:", string(valueList[i]))
+
+					err2 := ErrorDB.Put([]byte(keyList[i]), valueList[i])
+					if err2 != nil {
+						fmt.Println("write to errordb fail")
+					}
 
 					//fmt.Println("compare err, show bytes key:", keyList[i], "leveldb value:",
 					//	job.Kvbuffer[keyList[i]], "  vs:", valueList[i])
@@ -136,27 +152,30 @@ func (job *Job) CompareKvRocks() error {
 			}
 			// if compare batch not same rewrite the batch
 			if isSame == false {
-				fmt.Println("compare batch not same, need rewrite")
+				fmt.Println("compare batch not same")
 				incErrorNum()
-				kvBatch := KvrocksDB.NewBatch()
+				/*
+					kvBatch := KvrocksDB.NewBatch()
 
-				for key, value := range job.Kvbuffer {
-					kvBatch.Put([]byte(key), value)
-				}
-
-				if batcherr := kvBatch.Write(); batcherr != nil {
-					fmt.Println("rewrite kv rocks error", batcherr.Error(), "prefix:", job.prefix,
-						"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
 					for key, value := range job.Kvbuffer {
-						err2 := ErrorDB.Put([]byte(key), value)
-						if err2 != nil {
-							fmt.Println("write to errordb fail")
-						}
+						kvBatch.Put([]byte(key), value)
 					}
 
-				}
-				fmt.Println("rewrite kv rocks finish", "prefix:", job.prefix,
-					"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+					if batcherr := kvBatch.Write(); batcherr != nil {
+						fmt.Println("rewrite kv rocks error", batcherr.Error(), "prefix:", job.prefix,
+							"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+						for key, value := range job.Kvbuffer {
+							err2 := ErrorDB.Put([]byte(key), value)
+							if err2 != nil {
+								fmt.Println("write to errordb fail")
+							}
+						}
+
+					}
+					fmt.Println("rewrite kv rocks finish", "prefix:", job.prefix,
+						"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+
+				*/
 			}
 		}
 	}
