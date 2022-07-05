@@ -787,7 +787,7 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 			defer wg.Done()
 			count := 0
 			tempBatch := make(map[string][]byte)
-			markStart := false
+			markStart := true
 			var lastMark uint64
 			for it.Next() {
 				var (
