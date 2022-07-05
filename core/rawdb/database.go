@@ -727,7 +727,7 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	fmt.Println("begin compare data")
 
 	finishMap := make(map[int][]byte)
-
+	dbMap := make(map[int]*leveldb.Database)
 	for i := 0; i < 256; i++ {
 		pre := i
 		path, _ := os.Getwd()
@@ -737,6 +737,7 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		if err == nil {
 			finishMap[pre] = startKey
 		}
+		dbMap[pre] = startDB
 		//fmt.Println("read startdb", strconv.Itoa(pre))
 	}
 
@@ -782,7 +783,7 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	fmt.Println("start thread num:", threadnum, "map size:", len(iteratorMap))
 	// use threads to migrate ancient data
 	for j := 0; j < len(iteratorMap); j++ {
-		go func(it ethdb.Iterator, index int) {
+		go func(it ethdb.Iterator, index int, database *leveldb.Database) {
 			fmt.Println("start with prefix:", index)
 			defer wg.Done()
 			count := 0
@@ -852,12 +853,15 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 						lastMark = batchCount * 100
 						markStart = false
 						fmt.Println("mark start key on prefix:", index, "key:", lastMark)
-						path, _ := os.Getwd()
-						startDB, err := leveldb.New(path+"/startdb"+strconv.Itoa(index), 10, 50, "chaindata", false)
-						if err != nil {
-							fmt.Println("new start db fail on index:", index)
-						}
-						errExist := startDB.Put([]byte("startkey"), key)
+						/*
+							path, _ := os.Getwd()
+							startDB, err := leveldb.New(path+"/startdb"+strconv.Itoa(index), 10, 50, "chaindata", false)
+							if err != nil {
+								fmt.Println("new start db fail on index:", index)
+							}
+						*/
+
+						errExist := database.Put([]byte("startkey"), key)
 						if errExist != nil {
 							fmt.Println("mark start key fail")
 						}
@@ -871,7 +875,7 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 				atomic.AddUint64(&batchNum, 1)
 				dispatcher.SendKvJob(tempBatch, index, false)
 			}
-		}(*iteratorMap[j], j)
+		}(*iteratorMap[j], j, dbMap[j])
 	}
 
 	wg.Wait()
