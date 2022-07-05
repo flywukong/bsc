@@ -726,9 +726,6 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 
 	frozenOffest, _ := db.Ancients()
 	fmt.Println(" ancient from", blockNumber, "end:", frozenOffest)
-	path, _ := os.Getwd()
-	errorDB, err2 := leveldb.New(path+"/error-startdb", 100, 50,
-		"chaindata", false)
 
 	/*
 		iteratorMap := make(map[int]*ethdb.Iterator)
@@ -760,32 +757,53 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		dispatcher := CompareStart(1200)
 	*/
 	// init remote db for data sending
-	rocksdb := InitDb(addr)
-	if err2 == nil {
-		errIter := errorDB.NewIterator([]byte(""), []byte(""))
-		fixnum := 0
-		for errIter.Next() {
-			var (
-				key = errIter.Key()
-				v   = errIter.Value()
-			)
-			value := make([]byte, len(v))
-			copy(value, v)
-			err := rocksdb.Put(key, value)
+	// rocksdb := InitDb(addr)
+
+	value1, err1 := db.Get([]byte("iBcount"))
+	if err1 != nil {
+		fmt.Println("can not get iBcount")
+	} else {
+		fmt.Println("get iBcount:", value1)
+		/*
+			err := rocksdb.Put([]byte("iBcount"), value1)
 			if err != nil {
 				fmt.Println("fix kv error,", err.Error(),
-					"time:", time.Now().UTC().Format("2006-01-02 15:04:05"),
-					"prefix:", key[0])
+					"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
 			} else {
-				fmt.Println("fix kv succ", "time:", time.Now().UTC().Format("2006-01-02 15:04:05"),
-					"prefix:", key[0])
-				fixnum++
+				fmt.Println("fix kv succ", "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
 			}
-		}
-		fmt.Println("finish fix num:", fixnum)
-	} else {
-		fmt.Println("open errordb error:", err2.Error())
+		*/
 	}
+
+	value2, err2 := db.Get([]byte("bltIndex-count"))
+	if err2 != nil {
+		fmt.Println("can not get bltIndex-count")
+	} else {
+		//err := rocksdb.Put([]byte("bltIndex-count"), value2)
+		fmt.Println("get bltIndex-count:", value2)
+		/*
+			if err != nil {
+				fmt.Println("fix kv error,", err.Error(),
+					"time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+			} else {
+				fmt.Println("fix kv succ", "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+			}
+		*/
+	}
+
+	iter := db.NewIterator([]byte("ethereum-config"), []byte(""))
+	count := 0
+	for iter.Next() {
+		var (
+			key = iter.Key()
+			v   = iter.Value()
+		)
+		fmt.Println("key:", key, "value:", v)
+		count++
+	}
+
+	fmt.Println("ethereum-config num:", count)
+
 	/*
 		var wg sync.WaitGroup
 		wg.Add(threadnum)
