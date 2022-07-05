@@ -763,7 +763,7 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	if err1 != nil {
 		fmt.Println("can not get iBcount")
 	} else {
-		fmt.Println("get iBcount:", value1)
+		fmt.Println("get bltIndex-count:", string(value1))
 		/*
 			err := rocksdb.Put([]byte("iBcount"), value1)
 			if err != nil {
@@ -780,7 +780,7 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		fmt.Println("can not get bltIndex-count")
 	} else {
 		//err := rocksdb.Put([]byte("bltIndex-count"), value2)
-		fmt.Println("get bltIndex-count:", value2)
+		fmt.Println("get bltIndex-count:", string(value2))
 		/*
 			if err != nil {
 				fmt.Println("fix kv error,", err.Error(),
@@ -798,7 +798,7 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 			key = iter.Key()
 			v   = iter.Value()
 		)
-		fmt.Println("key:", key, "value:", v)
+		fmt.Println("key:", key, "value:", string(v))
 		count++
 	}
 
