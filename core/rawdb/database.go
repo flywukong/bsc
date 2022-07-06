@@ -736,6 +736,8 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		startKey, err := startDB.Get([]byte("startkey"))
 		if err == nil {
 			finishMap[pre] = startKey
+		} else {
+			fmt.Println("fail to get start key on prefix:", pre)
 		}
 		dbMap[pre] = startDB
 		//fmt.Println("read startdb", strconv.Itoa(pre))
