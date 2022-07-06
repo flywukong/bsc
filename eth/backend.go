@@ -104,9 +104,9 @@ func startMonitor(api *EthAPIBackend, cfg *remotedb.Config) {
 		status = monitorStatus
 		needWrite = true
 
-		var initflag = make([]byte, 8)
-		binary.BigEndian.PutUint64(initflag, uint64(1))
-		writeErr := KvrocksDB.Put([]byte(kvrocksSlaveKeepAlive), initflag)
+		//var initflag = make([]byte, 8)
+		//binary.BigEndian.PutUint64(initflag, uint64(1))
+		writeErr := KvrocksDB.Put([]byte(kvrocksSlaveKeepAlive), []byte("1"))
 		if writeErr != nil {
 			log.Error("write kvrocksSlaveKeepAlive fail", writeErr)
 		}
@@ -160,9 +160,9 @@ func startMonitor(api *EthAPIBackend, cfg *remotedb.Config) {
 
 							// write meta to kvrocks
 							if needWrite {
-								var errflag = make([]byte, 8)
-								binary.BigEndian.PutUint64(errflag, uint64(0))
-								writeErr := KvrocksDB.Put([]byte(kvrocksSlaveKeepAlive), errflag)
+								//	var errflag = make([]byte, 8)
+								//	binary.BigEndian.PutUint64(errflag, uint64(0))
+								writeErr := KvrocksDB.Put([]byte(kvrocksSlaveKeepAlive), []byte("0"))
 								if writeErr != nil {
 									log.Error("write kvrocksSlaveKeepAlive fail", writeErr)
 								}
@@ -180,9 +180,9 @@ func startMonitor(api *EthAPIBackend, cfg *remotedb.Config) {
 
 						// fixing data finished, update the meta data
 						if status == fixStatus {
-							var fixedflag = make([]byte, 8)
-							binary.BigEndian.PutUint64(fixedflag, uint64(1))
-							writeErr := KvrocksDB.Put([]byte(kvrocksSlaveKeepAlive), fixedflag)
+							//var fixedflag = make([]byte, 8)
+							//binary.BigEndian.PutUint64(fixedflag, uint64(1))
+							writeErr := KvrocksDB.Put([]byte(kvrocksSlaveKeepAlive), []byte("1"))
 							if writeErr != nil {
 								log.Error("write kvrocksSlaveKeepAlive fail", writeErr)
 							}
