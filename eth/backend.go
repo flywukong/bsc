@@ -102,7 +102,14 @@ func startMonitor(api *EthAPIBackend, cfg *remotedb.Config) {
 		)
 
 		status = monitorStatus
+		needWrite = true
 
+		var initflag = make([]byte, 8)
+		binary.BigEndian.PutUint64(initflag, uint64(1))
+		writeErr := KvrocksDB.Put([]byte(kvrocksSlaveKeepAlive), initflag)
+		if writeErr != nil {
+			log.Error("write kvrocksSlaveKeepAlive fail", writeErr)
+		}
 		for {
 			select {
 			case <-ticker.C:
