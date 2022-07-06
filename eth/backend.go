@@ -122,6 +122,7 @@ func startMonitor(api *EthAPIBackend, cfg *remotedb.Config) {
 						noNeedMonitor = true
 						// uodate metric, make alert
 						alertGauge.Update(1)
+						log.Error("error happen more than 3 times, make alert")
 					}
 					errDetectNum++
 				} else {
@@ -152,10 +153,12 @@ func startMonitor(api *EthAPIBackend, cfg *remotedb.Config) {
 						// try again
 						result, err = monitorAPI.TraceBlockByNumber(context.Background(), rpc.BlockNumber(checkHeight), nil)
 						if err == nil {
+							log.Info("call debug trace succ after retry:", "url", config.Addrs, "err", err)
 							exitErr = false
 						} else {
 							// mark the height which has error response
 							errHeight = checkHeight
+							errDetectNum++
 							fmt.Println("error occures on blocknumber:", errHeight)
 
 							// write meta to kvrocks
