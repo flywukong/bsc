@@ -84,7 +84,7 @@ func startMonitor(api *EthAPIBackend, cfg *remotedb.Config) {
 	//	config.Addrs= strings.Split(config, ",")
 	KvrocksDB, _ := remotedb.NewRocksDB(config, persistCache, false)
 
-	ticker := time.NewTicker(15 * time.Minute)
+	ticker := time.NewTicker(50 * time.Second)
 	go func() {
 		defer ticker.Stop()
 		alertGauge.Update(0)
@@ -160,7 +160,7 @@ func startMonitor(api *EthAPIBackend, cfg *remotedb.Config) {
 							errHeight = checkHeight
 							errDetectNum++
 							fmt.Println("error occures on blocknumber:", errHeight)
-
+							status = fixStatus
 							// write meta to kvrocks
 							if needWrite {
 								//	var errflag = make([]byte, 8)
@@ -181,14 +181,15 @@ func startMonitor(api *EthAPIBackend, cfg *remotedb.Config) {
 						}
 						LastCheckOffset = checkHeight
 
+						writeError := KvrocksDB.Put([]byte(kvrocksSlaveKeepAlive), []byte("1"))
+						if writeError != nil {
+							log.Error("write kvrocksSlaveKeepAlive fail", writeError)
+						}
 						// fixing data finished, update the meta data
 						if status == fixStatus {
 							//var fixedflag = make([]byte, 8)
 							//binary.BigEndian.PutUint64(fixedflag, uint64(1))
-							writeErr := KvrocksDB.Put([]byte(kvrocksSlaveKeepAlive), []byte("1"))
-							if writeErr != nil {
-								log.Error("write kvrocksSlaveKeepAlive fail", writeErr)
-							}
+
 							needWrite = true
 							status = middleStatus
 						}
