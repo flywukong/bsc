@@ -124,6 +124,9 @@ func (job *Job) CompareKvRocks() error {
 						continue
 					}
 
+					fmt.Println("compare key error, key:", keyList[i], "leveldb value:",
+						string(job.Kvbuffer[keyList[i]]), "  vs:", string(valueList[i]))
+
 					if keyList[i] == "iBcount" {
 						continue
 					}
@@ -136,8 +139,6 @@ func (job *Job) CompareKvRocks() error {
 						continue
 					}
 					isSame = false
-					fmt.Println("compare key error, key:", keyList[i], "leveldb value:",
-						string(job.Kvbuffer[keyList[i]]), "  vs:", string(valueList[i]))
 
 					err2 := ErrorDB.Put([]byte(keyList[i]), valueList[i])
 					if err2 != nil {
