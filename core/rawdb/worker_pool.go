@@ -33,6 +33,7 @@ var (
 	rewriteCount     uint64
 	ErrorDB          *leveldb.Database
 	ErrorDB2         *leveldb.Database
+	ErrorDB3         *leveldb.Database
 )
 
 var ctx = context.Background()
@@ -50,6 +51,8 @@ func InitDb(addr string) *remotedb.RocksDB {
 	ErrorDB2, _ = leveldb.New(path+"/error-comparedb2", 100, 50,
 		"chaindata", false)
 
+	ErrorDB3, _ = leveldb.New(path+"/error-comparedb3", 100, 50,
+		"chaindata", false)
 	return KvrocksDB
 }
 
@@ -102,49 +105,22 @@ func (job *Job) CompareKvRocks() error {
 			for i := 0; i < len(valueList); i++ {
 				if bytes.Compare(job.Kvbuffer[keyList[i]], valueList[i]) != 0 {
 
-					if bytes.HasPrefix([]byte(keyList[i]), []byte("parlia-")) && len(keyList[i]) == 7+common.HashLength {
-						continue
-					}
-
-					if keyList[i] == string(databaseVersionKey) || keyList[i] == string(fastTrieProgressKey) ||
-						keyList[i] == string(snapshotDisabledKey) || keyList[i] == string(snapshotRootKey) ||
-						keyList[i] == string(snapshotJournalKey) || keyList[i] == string(snapshotGeneratorKey) ||
-						keyList[i] == string(snapshotRecoveryKey) || keyList[i] == string(txIndexTailKey) ||
-						keyList[i] == string(fastTxLookupLimitKey) || keyList[i] == string(uncleanShutdownKey) ||
-						keyList[i] == string(badBlockKey) {
-						continue
-					}
-
 					fmt.Println("compare key error, key:", keyList[i], "leveldb value:",
 						string(job.Kvbuffer[keyList[i]]), "  vs:", string(valueList[i]))
 
-					if keyList[i] == string(headHeaderKey) || keyList[i] == string(headBlockKey) ||
-						keyList[i] == string(headFastBlockKey) || keyList[i] == string(lastPivotKey) {
-						continue
-					}
+					if bytes.HasPrefix([]byte(keyList[i]), []byte("parlia-")) && len(keyList[i]) == 7+common.HashLength {
+						err2 := ErrorDB3.Put([]byte(keyList[i]), valueList[i])
+						if err2 != nil {
+							fmt.Println("write to errordb fail")
+						}
+					} else {
 
-					if keyList[i] == "_globalCostFactorV6" {
-						continue
-					}
-
-					if keyList[i] == "iBcount" {
-						continue
-					}
-
-					if keyList[i] == "bltIndex-count" {
-						continue
-					}
-
-					if bytes.HasPrefix([]byte(keyList[i]), []byte("ethereum-config")) {
-						continue
+						err2 := ErrorDB.Put([]byte(keyList[i]), valueList[i])
+						if err2 != nil {
+							fmt.Println("write to errordb fail")
+						}
 					}
 					isSame = false
-
-					err2 := ErrorDB.Put([]byte(keyList[i]), valueList[i])
-					if err2 != nil {
-						fmt.Println("write to errordb fail")
-					}
-
 					//fmt.Println("compare err, show bytes key:", keyList[i], "leveldb value:",
 					//	job.Kvbuffer[keyList[i]], "  vs:", valueList[i])
 
