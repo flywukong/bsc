@@ -102,8 +102,7 @@ func (job *Job) CompareKvRocks() error {
 			for i := 0; i < len(valueList); i++ {
 				if bytes.Compare(job.Kvbuffer[keyList[i]], valueList[i]) != 0 {
 
-					if keyList[i] == string(headHeaderKey) || keyList[i] == string(headBlockKey) ||
-						keyList[i] == string(headFastBlockKey) || keyList[i] == string(lastPivotKey) {
+					if bytes.HasPrefix([]byte(keyList[i]), []byte("parlia-")) && len(keyList[i]) == 7+common.HashLength {
 						continue
 					}
 
@@ -116,16 +115,17 @@ func (job *Job) CompareKvRocks() error {
 						continue
 					}
 
-					if bytes.HasPrefix([]byte(keyList[i]), []byte("parlia-")) && len(keyList[i]) == 7+common.HashLength {
+					fmt.Println("compare key error, key:", keyList[i], "leveldb value:",
+						string(job.Kvbuffer[keyList[i]]), "  vs:", string(valueList[i]))
+					
+					if keyList[i] == string(headHeaderKey) || keyList[i] == string(headBlockKey) ||
+						keyList[i] == string(headFastBlockKey) || keyList[i] == string(lastPivotKey) {
 						continue
 					}
 
 					if keyList[i] == "_globalCostFactorV6" {
 						continue
 					}
-
-					fmt.Println("compare key error, key:", keyList[i], "leveldb value:",
-						string(job.Kvbuffer[keyList[i]]), "  vs:", string(valueList[i]))
 
 					if keyList[i] == "iBcount" {
 						continue
