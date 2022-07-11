@@ -117,7 +117,7 @@ func (job *Job) CompareKvRocks() error {
 
 					fmt.Println("compare key error, key:", keyList[i], "leveldb value:",
 						string(job.Kvbuffer[keyList[i]]), "  vs:", string(valueList[i]))
-					
+
 					if keyList[i] == string(headHeaderKey) || keyList[i] == string(headBlockKey) ||
 						keyList[i] == string(headFastBlockKey) || keyList[i] == string(lastPivotKey) {
 						continue
