@@ -29,6 +29,7 @@ var (
 	TaskFail         int64
 	AncientTaskFail  int64
 	errComPareKeyNum uint64
+	ErrorDB          *leveldb.Database
 )
 
 var ctx = context.Background()
@@ -39,6 +40,9 @@ func InitDb(addr string) *remotedb.RocksDB {
 	config := remotedb.DefaultConfig()
 	config.Addrs = strings.Split(addr, ",")
 	KvrocksDB, _ = remotedb.NewRocksDB(config, persistCache, false)
+	ErrorDB, _ = leveldb.New(path+"/error-comparedb", 100, 50,
+		"chaindata", false)
+
 	return KvrocksDB
 }
 
@@ -57,10 +61,16 @@ func (job *Job) CompareKvRocks() error {
 		}
 		if bytes.Compare(remoteValue, job.ancientValue) != 0 {
 			fmt.Println("ancient compare key error,", string(job.ancientKey))
+			err2 := ErrorDB.Put(job.ancientKey, job.ancientValue)
+			if err2 != nil {
+				fmt.Println("write to errordb fail")
+			}
+
 			return errors.New("ancient compare not same")
 		}
 	} else {
 		if len(job.Kvbuffer) > 0 {
+			panic("sss")
 			var keyList []string
 			for key, _ := range job.Kvbuffer {
 				keyList = append(keyList, key)

@@ -655,7 +655,7 @@ func splitArray(arr []uint64, num int64) [][]uint64 {
 
 func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber uint64) (tasknum uint64) {
 	frozenOffest, _ := db.Ancients()
-	fmt.Println("migrate ancient compare from", startBlockNumber, "end:", frozenOffest)
+	fmt.Println("compare ancient compare from", startBlockNumber, "end:", frozenOffest)
 	var i uint64
 	// inpect ancient, from f.offset to fo f.frozen
 	blockNumList := []uint64{}
@@ -664,10 +664,10 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 		blockNumList = append(blockNumList, i)
 	}
 	// make 3 thread to read ancient data
-	segments := splitArray(blockNumList, 10)
+	segments := splitArray(blockNumList, 12)
 	tasknum = uint64(0)
 	var wg sync.WaitGroup
-	wg.Add(10)
+	wg.Add(12)
 	start := time.Now()
 	for j := 0; j < len(segments); j++ {
 		go func(arr *[]uint64) {
@@ -707,7 +707,7 @@ func MigrateAncient(db ethdb.Database, dispatcher *Dispatcher, startBlockNumber 
 							time.Sleep(5 * time.Second)
 						}
 						if atomic.LoadUint64(&tasknum)%100000 == 0 {
-							fmt.Println("ancient send num:", atomic.LoadUint64(&tasknum), "cost time:", time.Since(start).Nanoseconds()/1000000000,
+							fmt.Println("ancient compare num:", atomic.LoadUint64(&tasknum), "cost time:", time.Since(start).Nanoseconds()/1000000000,
 								"s")
 						}
 						dispatcher.SendAncientJob(ancientKey, value, countTask, true)
