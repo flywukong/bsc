@@ -98,6 +98,13 @@ func (job *Job) CompareKvRocks() error {
 
 			if len(valueList) != len(keyList) {
 				//	return errors.New("PipeRead key num error")
+				fmt.Println("read fail before compare2, not same")
+				for key, value := range job.Kvbuffer {
+					err2 := ErrorDB3.Put([]byte(key), value)
+					if err2 != nil {
+						fmt.Println("write to errordb fail")
+					}
+				}
 				isSame = false
 			}
 
@@ -105,21 +112,30 @@ func (job *Job) CompareKvRocks() error {
 			for i := 0; i < len(valueList); i++ {
 				if bytes.Compare(job.Kvbuffer[keyList[i]], valueList[i]) != 0 {
 
+					if keyList[i] == string(headHeaderKey) || keyList[i] == string(headBlockKey) ||
+						keyList[i] == string(headFastBlockKey) || keyList[i] == string(lastPivotKey) {
+						continue
+					}
+
+					if keyList[i] == string(databaseVersionKey) || keyList[i] == string(fastTrieProgressKey) ||
+						keyList[i] == string(snapshotDisabledKey) || keyList[i] == string(snapshotRootKey) ||
+						keyList[i] == string(snapshotJournalKey) || keyList[i] == string(snapshotGeneratorKey) ||
+						keyList[i] == string(snapshotRecoveryKey) || keyList[i] == string(txIndexTailKey) ||
+						keyList[i] == string(fastTxLookupLimitKey) || keyList[i] == string(uncleanShutdownKey) ||
+						keyList[i] == string(badBlockKey) {
+						continue
+					}
+					if bytes.HasPrefix([]byte(keyList[i]), []byte("parlia-")) && len(keyList[i]) == 7+common.HashLength {
+						continue
+					}
 					fmt.Println("compare key error, key:", keyList[i], "leveldb value:",
 						string(job.Kvbuffer[keyList[i]]), "  vs:", string(valueList[i]))
 
-					if bytes.HasPrefix([]byte(keyList[i]), []byte("parlia-")) && len(keyList[i]) == 7+common.HashLength {
-						err2 := ErrorDB3.Put([]byte(keyList[i]), valueList[i])
-						if err2 != nil {
-							fmt.Println("write to errordb fail")
-						}
-					} else {
-
-						err2 := ErrorDB.Put([]byte(keyList[i]), valueList[i])
-						if err2 != nil {
-							fmt.Println("write to errordb fail")
-						}
+					err2 := ErrorDB.Put([]byte(keyList[i]), valueList[i])
+					if err2 != nil {
+						fmt.Println("write to errordb fail")
 					}
+
 					isSame = false
 					//fmt.Println("compare err, show bytes key:", keyList[i], "leveldb value:",
 					//	job.Kvbuffer[keyList[i]], "  vs:", valueList[i])
