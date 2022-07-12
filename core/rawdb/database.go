@@ -796,14 +796,14 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 				)
 				value := make([]byte, len(v))
 				copy(value, v)
-				/*
-					// ignore snapshot data
-					if (bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)) || (bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)) {
-						//	snapcount++
-						continue
-					}
-				*/
-				if len(key) != common.HashLength {
+
+				// ignore snapshot data
+				if (bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)) || (bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)) {
+					//	snapcount++
+					continue
+				}
+
+				if len(key) == common.HashLength {
 					continue
 				}
 
