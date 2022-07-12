@@ -808,39 +808,59 @@ func CompareDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 				}
 
 				atomic.AddUint64(&totalNum, 1)
-				count++
-				tempBatch[string(key[:])] = value
 
-				// make a batch contain 100 keys , and send job work pool
-				if count >= 1 && count%150 == 0 {
-					// make a batch as a job, send it to worker pool
-					atomic.AddUint64(&batchNum, 1)
-
-					dispatcher.SendKvJob(tempBatch, index, false)
-
-					batchCount := atomic.LoadUint64(&batchNum)
-
-					distance := batchCount - GetDoneTaskNum()
-					if distance > 4000 {
-						if distance > 5300 {
-							fmt.Println("worker lag too much", distance)
-							time.Sleep(5 * time.Second)
-						}
-						time.Sleep(3 * time.Second)
-					}
-
-					// print cost time every 50000000 keys
-					if batchCount%100000 == 0 {
-						total := atomic.LoadUint64(&totalNum)
-						fmt.Println("finish level db k,v num:", total,
-							"cost time:", time.Since(start).Nanoseconds()/1000000000, "s",
-							"key prefix:", key[0], "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
-
-						//runtime.GC()
-					}
-
-					tempBatch = make(map[string][]byte)
+				total1 := atomic.LoadUint64(&totalNum)
+				if total1%1000000000 == 0 {
+					fmt.Println("pass key num:", total1)
 				}
+				if total1 >= 10560004024 {
+					count++
+					tempBatch[string(key[:])] = value
+					// make a batch contain 100 keys , and send job work pool
+					if count >= 1 && count%150 == 0 {
+						// make a batch as a job, send it to worker pool
+						atomic.AddUint64(&batchNum, 1)
+
+						dispatcher.SendKvJob(tempBatch, index, false)
+
+						batchCount := atomic.LoadUint64(&batchNum)
+
+						distance := batchCount - GetDoneTaskNum()
+						if distance > 4000 {
+							if distance > 5300 {
+								fmt.Println("worker lag too much", distance)
+								time.Sleep(5 * time.Second)
+							}
+							time.Sleep(3 * time.Second)
+						}
+
+						// print cost time every 50000000 keys
+						if batchCount%100000 == 0 {
+							total := atomic.LoadUint64(&totalNum)
+							fmt.Println("finish level db k,v num:", total,
+								"cost time:", time.Since(start).Nanoseconds()/1000000000, "s",
+								"key prefix:", key[0], "time:", time.Now().UTC().Format("2006-01-02 15:04:05"))
+
+							//runtime.GC()
+						}
+						/*
+							if batchCount > 60000000 {
+								pre := index
+								path, _ := os.Getwd()
+								startDB, _ := leveldb.New(path+"/startdb"+strconv.Itoa(pre), 10, 50, "chaindata", false)
+
+								err := startDB.Put([]byte("startkey"), key)
+								if err == nil {
+									fmt.Println("mark  start key on prefix:", pre)
+								} else {
+									fmt.Println("fail to mark start key on prefix:", pre)
+								}
+							}
+						*/
+						tempBatch = make(map[string][]byte)
+					}
+				}
+
 			}
 			if len(tempBatch) > 0 {
 				atomic.AddUint64(&batchNum, 1)
