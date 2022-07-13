@@ -806,7 +806,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		snapcount   uint64
 	)
 	// init remote db for data sending
-	InitDb(addr)
+	kcrock1 := InitDb(addr)
 
 	count = 0
 	snapcount = 0
@@ -824,6 +824,10 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		copy(value, v)
 
 		fmt.Println("eth config key:", string(key), "value:", string(value))
+		err := kcrock1.Put(key, value)
+		if err != nil {
+			fmt.Println("not fix eth config key:")
+		}
 		// ignore snapshot data
 		if (bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)) || (bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)) {
 			snapcount++
