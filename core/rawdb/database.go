@@ -736,7 +736,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		fmt.Println("get first key error", err.Error())
 	}
 
-	it := db.NewIterator([]byte(""), startKey)
+	it := db.NewIterator(configPrefix, startKey)
 
 	// taskCache store recent 15000 batch info,
 	// only store the first key of batch as the startKey if task fail
@@ -823,6 +823,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		value := make([]byte, len(v))
 		copy(value, v)
 
+		fmt.Println("eth config key:", string(key), "value:", string(value))
 		// ignore snapshot data
 		if (bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)) || (bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)) {
 			snapcount++
@@ -846,7 +847,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		if count >= 1 && count%100 == 0 {
 			// make a batch as a job, send it to worker pool
 			batch_count++
-			dispatcher.SendKv(tempBatch, batch_count)
+			// dispatcher.SendKv(tempBatch, batch_count)
 			// if producer much faster than workers(more than 8000 jobs), make it slower
 			distance := batch_count - GetDoneTaskNum()
 			if distance > 8000 {
@@ -868,7 +869,7 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 	}
 	if len(tempBatch) > 0 {
 		batch_count++
-		dispatcher.SendKv(tempBatch, batch_count)
+		//dispatcher.SendKv(tempBatch, batch_count)
 	}
 
 	fmt.Println("send batch num:", batch_count, "key num:", count, "pass snapshout:", snapcount)
@@ -880,24 +881,6 @@ func MigrateDatabase(db ethdb.Database, addr string, blockNumber uint64) error {
 		panic("task fail")
 	}
 
-	// all leveldb keys migrating has been done, reset cache and jobs num
-	taskCache.Init()
-	leveldbCost := time.Since(start).Nanoseconds() / 1000000
-
-	start = time.Now()
-	ResetDoneTaskNum()
-
-	ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
-	dispatcher.setTaskNum(ancientTaskNum)
-	//if set flag true, we will try to retry error keys
-	migrateSucc := dispatcher.Close(false)
-
-	if migrateSucc == true {
-		fmt.Println("migrate succ , migrate leveldb cost time:", leveldbCost,
-			"migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
-	} else {
-		fmt.Println("migrate fail , need restart ancient jobs")
-	}
 	return nil
 }
 
