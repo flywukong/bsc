@@ -892,7 +892,6 @@ func MigrateAncientInDb(db ethdb.Database, addr string, blockNumber uint64) erro
 	dispatcher := MigrateStart(1000)
 
 	// init kvrocks client of worker pool
-	InitDb(addr)
 
 	ancientTaskNum := MigrateAncient(db, dispatcher, blockNumber)
 	dispatcher.setTaskNum(ancientTaskNum)
