@@ -142,19 +142,18 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 		memTableSize = maxMemTableSize
 	}
 
-	logger.Info("MemTable size:", memTableSize)
+	logger.Info("Allocated MemTable size: ", "MemTable size", common.StorageSize(memTableSize), "cache", cache)
 	db := &Database{
 		fn:       file,
 		log:      logger,
 		quitChan: make(chan chan error),
 	}
-	cacheSize := pebble.NewCache(int64(cache * 1024 * 1024))
-	logger.Info("cache size", cacheSize)
+
 	opt := &pebble.Options{
 		// Pebble has a single combined cache area and the write
 		// buffers are taken from this too. Assign all available
 		// memory allowance for cache.
-		Cache:        cacheSize,
+		Cache:        pebble.NewCache(int64(cache * 1024 * 1024)),
 		MaxOpenFiles: handles,
 
 		// The size of memory table(as well as the write buffer).
