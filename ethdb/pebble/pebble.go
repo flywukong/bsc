@@ -137,7 +137,7 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 	// Two memory tables is configured which is identical to leveldb,
 	// including a frozen memory table and another live one.
 	memTableLimit := 2
-	memTableSize := cache * 1024 * 1024 * 4 / 2 / memTableLimit
+	memTableSize := cache * 1024 * 1024 / 2 / memTableLimit
 	if memTableSize > maxMemTableSize {
 		memTableSize = maxMemTableSize
 	}
@@ -153,7 +153,7 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 		// Pebble has a single combined cache area and the write
 		// buffers are taken from this too. Assign all available
 		// memory allowance for cache.
-		Cache:        pebble.NewCache(int64(cache * 1024 * 1024 * 2)),
+		Cache:        pebble.NewCache(int64(cache * 1024 * 1024)),
 		MaxOpenFiles: handles,
 
 		// The size of memory table(as well as the write buffer).
