@@ -119,6 +119,7 @@ func (d *Database) onWriteStallEnd() {
 // New returns a wrapped pebble DB object. The namespace is the prefix that the
 // metrics reporting should use for surfacing internal stats.
 func New(file string, cache int, handles int, namespace string, readonly bool) (*Database, error) {
+
 	// Ensure we have some minimal caching and file guarantees
 	if cache < minCache {
 		cache = minCache
@@ -127,7 +128,13 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 		handles = minHandles
 	}
 	logger := log.New("database", file)
+	logger.Info("new pebble db with", "file", file, "cache", cache, "handles", handles, "namespace", namespace, "readonly", readonly)
 	logger.Info("Allocated cache and file handles", "cache", common.StorageSize(cache*1024*1024), "handles", handles)
+	/*=
+		"new pebble db with"                   database=/data2/leo/bsc-test/node/geth/chaindata
+	file=/data2/leo/bsc-test/node/geth/chaindata cache=4000
+		handles=4096 namespace=eth/db/chaindata/ readonly=false
+	*/
 
 	// The max memtable size is limited by the uint32 offsets stored in
 	// internal/arenaskl.node, DeferredBatchOp, and flushableBatchEntry.

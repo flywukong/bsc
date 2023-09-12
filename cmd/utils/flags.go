@@ -118,6 +118,13 @@ var (
 		Usage: "Data directory for the databases and keystore",
 		Value: DirectoryString(node.DefaultDataDir()),
 	}
+
+	DataDirFlag2 = DirectoryFlag{
+		Name:  "datadir2",
+		Usage: "Data directory for destination the databases and keystore",
+		Value: DirectoryString(node.DefaultDataDir()),
+	}
+
 	DirectBroadcastFlag = cli.BoolFlag{
 		Name:  "directbroadcast",
 		Usage: "Enable directly broadcast mined block to all peers",

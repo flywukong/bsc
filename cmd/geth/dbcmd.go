@@ -73,6 +73,7 @@ Remove blockchain and state databases`,
 			dbExportCmd,
 			dbMetadataCmd,
 			ancientInspectCmd,
+			dbMigrateCmd,
 		},
 	}
 	dbInspectCmd = cli.Command{
@@ -86,7 +87,7 @@ Remove blockchain and state databases`,
 			utils.MainnetFlag,
 		},
 		Usage:       "Inspect the storage size for each type of data in the database",
-		Description: `This commands iterates the entire database. If the optional 'prefix' and 'start' arguments are provided, then the iteration is limited to the given subset of data.`,
+		Description: `This commands iterates the entire database.If the optional 'prefix' and 'start' arguments are provided, then the iteration is limited to the given subset of data.`,
 	}
 	dbStatCmd = cli.Command{
 		Action: utils.MigrateFlags(dbStats),
@@ -187,6 +188,20 @@ WARNING: This is a low-level operation which may cause database corruption!`,
 		},
 		Description: "The import command imports the specific chain data from an RLP encoded stream.",
 	}
+	dbMigrateCmd = cli.Command{
+		Action:    utils.MigrateFlags(migrate),
+		Name:      "migrate",
+		ArgsUsage: "",
+		Flags: []cli.Flag{
+			utils.DataDirFlag,
+			utils.SyncModeFlag,
+			utils.DataDirFlag2,
+		},
+		Usage: "Migrate data in the database," +
+			"./geth  db migrate --datadir ./node --datadir ./node2",
+		Description: `This commands iterates the entire database. If the optional 'prefix' and 'start' arguments are provided, then the iteration is limited to the given subset of data.`,
+	}
+
 	dbExportCmd = cli.Command{
 		Action:    utils.MigrateFlags(exportChaindata),
 		Name:      "export",
@@ -280,6 +295,34 @@ func confirmAndRemoveDB(database string, kind string) {
 		})
 		log.Info("Database successfully deleted", "path", database, "elapsed", common.PrettyDuration(time.Since(start)))
 	}
+}
+
+func migrate(ctx *cli.Context) error {
+	stack, _ := makeConfigNode(ctx)
+	defer stack.Close()
+
+	db := utils.MakeChainDatabase(ctx, stack, true, false)
+	defer db.Close()
+
+	// fmt.Println("ctx,", ctx.String(""))
+
+	var destDir string
+	if !ctx.GlobalIsSet(utils.DataDirFlag.Name) {
+		return errors.New("datadir must be set")
+	}
+
+	destDir = ctx.GlobalString(utils.DataDirFlag2.Name)
+
+	if !filepath.IsAbs(destDir) {
+		// force absolute paths, which often fail due to the splicing of relative paths
+		fmt.Println("datadir not abs path" + destDir)
+	}
+
+	var result error
+	fmt.Println("dest dir", destDir)
+	result = rawdb.MigrateDatabase(db, destDir)
+
+	return result
 }
 
 func inspect(ctx *cli.Context) error {
