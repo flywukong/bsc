@@ -311,7 +311,7 @@ func migrate(ctx *cli.Context) error {
 		return errors.New("datadir must be set")
 	}
 
-	destDir = ctx.GlobalString(utils.DataDirFlag2.Name)
+	destDir = ctx.Args().Get(0)
 
 	if !filepath.IsAbs(destDir) {
 		// force absolute paths, which often fail due to the splicing of relative paths
