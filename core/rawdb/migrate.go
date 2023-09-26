@@ -34,7 +34,10 @@ func (job *Job) UploadToKvRocks() error {
 	if len(job.Kvbuffer) > 0 {
 		kvBatch := pebbleDB.NewBatch()
 		for key, value := range job.Kvbuffer {
-			kvBatch.Put([]byte(key), value)
+			batchErr := kvBatch.Put([]byte(key), value)
+			if batchErr != nil {
+				return batchErr
+			}
 		}
 
 		if err := kvBatch.Write(); err != nil {
