@@ -27,8 +27,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/pebble"
 	"github.com/cockroachdb/pebble/bloom"
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
@@ -116,6 +118,18 @@ func (d *Database) onWriteStallEnd() {
 	d.writeDelayTime.Add(int64(time.Since(d.writeDelayStartTime)))
 }
 
+// panicLogger is just a noop logger to disable Pebble's internal logger.
+//
+// TODO(karalabe): Remove when Pebble sets this as teh default.
+type panicLogger struct{}
+
+func (l panicLogger) Infof(format string, args ...interface{}) {
+}
+
+func (l panicLogger) Fatalf(format string, args ...interface{}) {
+	panic(errors.Errorf("fatal: "+format, args...))
+}
+
 // New returns a wrapped pebble DB object. The namespace is the prefix that the
 // metrics reporting should use for surfacing internal stats.
 func New(file string, cache int, handles int, namespace string, readonly bool) (*Database, error) {
@@ -127,7 +141,6 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 		handles = minHandles
 	}
 	logger := log.New("database", file)
-	logger.Info("Allocated cache and file handles", "cache", common.StorageSize(cache*1024*1024), "handles", handles)
 
 	// The max memtable size is limited by the uint32 offsets stored in
 	// internal/arenaskl.node, DeferredBatchOp, and flushableBatchEntry.
@@ -141,6 +154,10 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 	if memTableSize > maxMemTableSize {
 		memTableSize = maxMemTableSize
 	}
+
+	logger.Info("Allocated cache and file handles", "cache", common.StorageSize(cache*1024*1024),
+		"handles", handles, "memTable size:", memTableSize)
+
 	db := &Database{
 		fn:       file,
 		log:      logger,
@@ -155,7 +172,7 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 
 		// The size of memory table(as well as the write buffer).
 		// Note, there may have more than two memory tables in the system.
-		MemTableSize: memTableSize,
+		MemTableSize: uint64(memTableSize),
 
 		// MemTableStopWritesThreshold places a hard limit on the size
 		// of the existent MemTables(including the frozen one).
@@ -170,15 +187,6 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 
 		// Per-level options. Options for at least one level must be specified. The
 		// options for the last level are used for all subsequent levels.
-		Levels: []pebble.LevelOptions{
-			{TargetFileSize: 2 * 1024 * 1024, FilterPolicy: bloom.FilterPolicy(10)},
-			{TargetFileSize: 2 * 1024 * 1024, FilterPolicy: bloom.FilterPolicy(10)},
-			{TargetFileSize: 2 * 1024 * 1024, FilterPolicy: bloom.FilterPolicy(10)},
-			{TargetFileSize: 2 * 1024 * 1024, FilterPolicy: bloom.FilterPolicy(10)},
-			{TargetFileSize: 2 * 1024 * 1024, FilterPolicy: bloom.FilterPolicy(10)},
-			{TargetFileSize: 2 * 1024 * 1024, FilterPolicy: bloom.FilterPolicy(10)},
-			{TargetFileSize: 2 * 1024 * 1024, FilterPolicy: bloom.FilterPolicy(10)},
-		},
 		ReadOnly: readonly,
 		EventListener: &pebble.EventListener{
 			CompactionBegin: db.onCompactionBegin,
@@ -186,7 +194,21 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 			WriteStallBegin: db.onWriteStallBegin,
 			WriteStallEnd:   db.onWriteStallEnd,
 		},
+		Logger: panicLogger{}, // TODO(karalabe): Delete when this is upstreamed in Pebble
 	}
+
+	for i := 0; i < len(opt.Levels); i++ {
+		l := &opt.Levels[i]
+		l.BlockSize = 32 << 10       // 32 KB
+		l.IndexBlockSize = 256 << 10 // 256 KB
+		l.FilterPolicy = bloom.FilterPolicy(10)
+		l.FilterType = pebble.TableFilter
+		if i > 0 {
+			l.TargetFileSize = opt.Levels[i-1].TargetFileSize * 2
+		}
+		l.EnsureDefaults()
+	}
+
 	// Disable seek compaction explicitly. Check https://github.com/ethereum/go-ethereum/pull/20130
 	// for more details.
 	opt.Experimental.ReadSamplingMultiplier = -1
@@ -257,6 +279,15 @@ func (d *Database) Has(key []byte) (bool, error) {
 
 // Get retrieves the given key if it's present in the key-value store.
 func (d *Database) Get(key []byte) ([]byte, error) {
+	routeid := cachemetrics.Goid()
+	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+	start := time.Now()
+	defer func() {
+		if isSyncMainProcess {
+			cachemetrics.RecordCacheMetrics("CACHE_L3_STORAGE", start)
+		}
+	}()
+
 	d.quitLock.RLock()
 	defer d.quitLock.RUnlock()
 	if d.closed {
@@ -305,9 +336,9 @@ func (d *Database) NewBatch() ethdb.Batch {
 // It's not supported by pebble, but pebble has better memory allocation strategy
 // which turns out a lot faster than leveldb. It's performant enough to construct
 // batch object without any pre-allocated space.
-func (d *Database) NewBatchWithSize(_ int) ethdb.Batch {
+func (d *Database) NewBatchWithSize(size int) ethdb.Batch {
 	return &batch{
-		b:  d.db.NewBatch(),
+		b:  d.db.NewBatchWithSize(size),
 		db: d,
 	}
 }
@@ -530,6 +561,16 @@ func (b *batch) ValueSize() int {
 
 // Write flushes any accumulated data to disk.
 func (b *batch) Write() error {
+	/*
+		routeid := cachemetrics.Goid()
+		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+		start := time.Now()
+		defer func() {
+			if isSyncMainProcess {
+				cachemetrics.RecordCacheMetrics("CACHE_L2_STORAGE", start)
+			}
+		}()
+	*/
 	b.db.quitLock.RLock()
 	defer b.db.quitLock.RUnlock()
 	if b.db.closed {
@@ -576,7 +617,7 @@ type pebbleIterator struct {
 // of database content with a particular key prefix, starting at a particular
 // initial key (or after, if it does not exist).
 func (d *Database) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
-	iter := d.db.NewIter(&pebble.IterOptions{
+	iter, _ := d.db.NewIter(&pebble.IterOptions{
 		LowerBound: append(prefix, start...),
 		UpperBound: upperBound(prefix),
 	})
