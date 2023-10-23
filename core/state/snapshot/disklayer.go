@@ -18,14 +18,11 @@ package snapshot
 
 import (
 	"bytes"
-	"fmt"
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/cachemetrics"
-	"github.com/ethereum/go-ethereum/log"
-
 	"github.com/VictoriaMetrics/fastcache"
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -110,7 +107,7 @@ func (dl *diskLayer) Account(hash common.Hash) (*types.SlimAccount, error) {
 func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
-	start := time.Now()
+	//start := time.Now()
 	// If the layer was flattened into, consider it invalid (any live reference to
 	// the original should be marked as unusable).
 	if dl.stale {
@@ -134,10 +131,10 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 		if isSyncMainProcess {
 			syncL2AccountMissMeter.Mark(1)
 			if hitInL3 {
-				log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer3, cost: %d ms", time.Since(start).Milliseconds())))
+				//	log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer3, cost: %d ms", time.Since(start).Milliseconds())))
 			}
 			if hitInDisk {
-				log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer4, cost: %d ms", time.Since(startGetInDisk).Milliseconds())))
+				//	log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer4, cost: %d ms", time.Since(startGetInDisk).Milliseconds())))
 				cachemetrics.RecordCacheMetrics("DISK_L4_ACCOUNT", startGetInDisk)
 			}
 		}
@@ -171,7 +168,7 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, error) {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
-	start := time.Now()
+	//start := time.Now()
 
 	routeid := cachemetrics.Goid()
 	hitInL3 := false
@@ -181,10 +178,10 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
 		if isSyncMainProcess {
 			if hitInL3 {
-				log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer3, cost: %d ms", time.Since(start).Milliseconds())))
+				//	log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer3, cost: %d ms", time.Since(start).Milliseconds())))
 			}
 			if hitInDisk {
-				log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer4, cost: %d ms", time.Since(startGetInDisk).Milliseconds())))
+				//	log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer4, cost: %d ms", time.Since(startGetInDisk).Milliseconds())))
 				cachemetrics.RecordCacheMetrics("DISK_L4_STORAGE", startGetInDisk)
 			}
 		}
