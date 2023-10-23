@@ -1,8 +1,9 @@
 package cachemetrics
 
 import (
-	"github.com/ethereum/go-ethereum/metrics"
 	"time"
+
+	"github.com/ethereum/go-ethereum/metrics"
 )
 
 type cacheLayerName string
@@ -25,7 +26,7 @@ var (
 	diskL4AccountTimer  = metrics.NewRegisteredTimer("cache/cost/account/layer4", nil)
 	cacheL1StorageTimer = metrics.NewRegisteredTimer("cache/cost/storage/layer1", nil)
 	cacheL2StorageTimer = metrics.NewRegisteredTimer("cache/cost/storage/layer2", nil)
-	cacheL3StorageTimer = metrics.NewRegisteredTimer("cache/cost/storage/layer3", nil)
+	cacheL3StorageTimer = metrics.NewRegisteredTimer("cache/cost/storage/read", nil)
 	diskL4StorageTimer  = metrics.NewRegisteredTimer("cache/cost/storage/layer4", nil)
 
 	cacheL1AccountCounter = metrics.NewRegisteredCounter("cache/count/account/layer1", nil)

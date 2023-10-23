@@ -18,9 +18,11 @@ package snapshot
 
 import (
 	"bytes"
-	"github.com/ethereum/go-ethereum/cachemetrics"
+	"fmt"
 	"sync"
 	"time"
+
+	"github.com/ethereum/go-ethereum/cachemetrics"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
@@ -121,7 +123,6 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	// If we're in the disk layer, all diff layers missed
 	routeid := cachemetrics.Goid()
 	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-	isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(routeid)
 	snapshotDirtyAccountMissMeter.Mark(1)
 
 	hitInL3 := false
@@ -132,33 +133,11 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 		if isSyncMainProcess {
 			syncL2AccountMissMeter.Mark(1)
 			if hitInL3 {
-				syncL3AccountHitMeter.Mark(1)
-				cachemetrics.RecordCacheDepth("CACHE_L3_ACCOUNT")
-				cachemetrics.RecordCacheMetrics("CACHE_L3_ACCOUNT", start)
-				cachemetrics.RecordTotalCosts("CACHE_L3_ACCOUNT", start)
+				fmt.Println("hit in layer3, cost:", time.Since(start).Milliseconds(), "ms")
 			}
 			if hitInDisk {
-				syncL3AccountMissMeter.Mark(1)
-				cachemetrics.RecordCacheDepth("DISK_L4_ACCOUNT")
+				fmt.Println("hit in layer4, cost:", time.Since(startGetInDisk).Milliseconds(), "ms")
 				cachemetrics.RecordCacheMetrics("DISK_L4_ACCOUNT", startGetInDisk)
-				cachemetrics.RecordTotalCosts("DISK_L4_ACCOUNT", startGetInDisk)
-			}
-		}
-		if isMinerMainProcess {
-			// layer 2 miss
-			minerL2AccountMissMeter.Mark(1)
-			if hitInL3 {
-				minerL3AccountHitMeter.Mark(1)
-				cachemetrics.RecordMinerCacheDepth("MINER_L3_ACCOUNT")
-				cachemetrics.RecordMinerCacheMetrics("MINER_L3_ACCOUNT", start)
-				cachemetrics.RecordMinerTotalCosts("MINER_L3_ACCOUNT", start)
-			}
-			if hitInDisk {
-				// layer 3 miss
-				minerL3AccountMissMeter.Mark(1)
-				cachemetrics.RecordMinerCacheDepth("MINER_L4_ACCOUNT")
-				cachemetrics.RecordMinerCacheMetrics("MINER_L4_ACCOUNT", startGetInDisk)
-				cachemetrics.RecordMinerTotalCosts("MINER_L4_ACCOUNT", startGetInDisk)
 			}
 		}
 	}()
@@ -199,41 +178,16 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	var startGetInDisk time.Time
 	defer func() {
 		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-		isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(routeid)
 		if isSyncMainProcess {
-			// layer 2 miss
-			syncL2StorageMissMeter.Mark(1)
 			if hitInL3 {
-				syncL3StorageHitMeter.Mark(1)
-				cachemetrics.RecordCacheDepth("CACHE_L3_STORAGE")
-				cachemetrics.RecordCacheMetrics("CACHE_L3_STORAGE", start)
-				cachemetrics.RecordTotalCosts("CACHE_L3_STORAGE", start)
+				fmt.Println("hit in layer3, cost:", time.Since(start).Milliseconds(), "ms")
 			}
 			if hitInDisk {
-				// layer 3 miss
-				syncL3StorageMissMeter.Mark(1)
-				cachemetrics.RecordCacheDepth("DISK_L4_STORAGE")
+				fmt.Println("hit in layer4, cost:", time.Since(startGetInDisk).Milliseconds(), "ms")
 				cachemetrics.RecordCacheMetrics("DISK_L4_STORAGE", startGetInDisk)
-				cachemetrics.RecordTotalCosts("DISK_L4_STORAGE", startGetInDisk)
 			}
 		}
-		if isMinerMainProcess {
-			// layer 2 miss
-			minerL2StorageMissMeter.Mark(1)
-			if hitInL3 {
-				minerL3StorageHitMeter.Mark(1)
-				cachemetrics.RecordMinerCacheDepth("MINER_L3_STORAGE")
-				cachemetrics.RecordMinerCacheMetrics("MINER_L3_STORAGE", start)
-				cachemetrics.RecordMinerTotalCosts("MINER_L3_STORAGE", start)
-			}
-			if hitInDisk {
-				// layer 3 miss
-				minerL3StorageMissMeter.Mark(1)
-				cachemetrics.RecordMinerCacheDepth("MINER_L4_STORAGE")
-				cachemetrics.RecordMinerCacheMetrics("MINER_L4_STORAGE", startGetInDisk)
-				cachemetrics.RecordMinerTotalCosts("MINER_L4_STORAGE", startGetInDisk)
-			}
-		}
+
 	}()
 
 	// If the layer was flattened into, consider it invalid (any live reference to
