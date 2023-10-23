@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/cachemetrics"
+	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
@@ -133,10 +134,10 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 		if isSyncMainProcess {
 			syncL2AccountMissMeter.Mark(1)
 			if hitInL3 {
-				fmt.Println("hit in layer3, cost:", time.Since(start).Milliseconds(), "ms")
+				log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer3, cost: %d ms", time.Since(start).Milliseconds())))
 			}
 			if hitInDisk {
-				fmt.Println("hit in layer4, cost:", time.Since(startGetInDisk).Milliseconds(), "ms")
+				log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer4, cost: %d ms", time.Since(startGetInDisk).Milliseconds())))
 				cachemetrics.RecordCacheMetrics("DISK_L4_ACCOUNT", startGetInDisk)
 			}
 		}
@@ -180,10 +181,10 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
 		if isSyncMainProcess {
 			if hitInL3 {
-				fmt.Println("hit in layer3, cost:", time.Since(start).Milliseconds(), "ms")
+				log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer3, cost: %d ms", time.Since(start).Milliseconds())))
 			}
 			if hitInDisk {
-				fmt.Println("hit in layer4, cost:", time.Since(startGetInDisk).Milliseconds(), "ms")
+				log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer4, cost: %d ms", time.Since(startGetInDisk).Milliseconds())))
 				cachemetrics.RecordCacheMetrics("DISK_L4_STORAGE", startGetInDisk)
 			}
 		}
