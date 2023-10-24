@@ -455,6 +455,8 @@ func (dl *diffLayer) accountRLP(hash common.Hash, depth int, hit *bool) ([]byte,
 func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, error) {
 	// Check the bloom filter first whether there's even a point in reaching into
 	// all the maps in all the layers below
+	hitInDifflayer := false
+
 	dl.lock.RLock()
 	// Check staleness before reaching further.
 	if dl.Stale() {
