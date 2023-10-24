@@ -19,12 +19,13 @@ package snapshot
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/ethereum/go-ethereum/cachemetrics"
 	"math"
 	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/ethereum/go-ethereum/cachemetrics"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -454,31 +455,6 @@ func (dl *diffLayer) accountRLP(hash common.Hash, depth int, hit *bool) ([]byte,
 func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, error) {
 	// Check the bloom filter first whether there's even a point in reaching into
 	// all the maps in all the layers below
-	start := time.Now()
-	routeid := cachemetrics.Goid()
-	hitInDifflayer := false
-	defer func() {
-		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-		isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(routeid)
-		if isSyncMainProcess {
-			syncL1MissStorageMeter.Mark(1)
-			if hitInDifflayer {
-				syncL2StorageHitMeter.Mark(1)
-				cachemetrics.RecordCacheDepth("CACHE_L2_STORAGE")
-				cachemetrics.RecordCacheMetrics("CACHE_L2_STORAGE", start)
-				cachemetrics.RecordTotalCosts("CACHE_L2_STORAGE", start)
-			}
-		}
-		if isMinerMainProcess {
-			minerL1MissStorageMeter.Mark(1)
-			if hitInDifflayer {
-				minerL2StorageHitMeter.Mark(1)
-				cachemetrics.RecordMinerCacheDepth("MINER_L2_STORAGE")
-				cachemetrics.RecordMinerCacheMetrics("MINER_L2_STORAGE", start)
-				cachemetrics.RecordMinerTotalCosts("MINER_L2_STORAGE", start)
-			}
-		}
-	}()
 	dl.lock.RLock()
 	// Check staleness before reaching further.
 	if dl.Stale() {

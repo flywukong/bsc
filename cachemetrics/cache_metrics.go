@@ -25,7 +25,7 @@ var (
 	cacheL3AccountTimer = metrics.NewRegisteredTimer("cache/cost/account/layer3", nil)
 	diskL4AccountTimer  = metrics.NewRegisteredTimer("cache/cost/account/layer4", nil)
 	cacheL1StorageTimer = metrics.NewRegisteredTimer("cache/cost/storage/layer1", nil)
-	cacheL2StorageTimer = metrics.NewRegisteredTimer("cache/cost/storage/layer2", nil)
+	cacheL2StorageTimer = metrics.NewRegisteredTimer("cache/cost/storage/write", nil)
 	cacheL3StorageTimer = metrics.NewRegisteredTimer("cache/cost/storage/read", nil)
 	diskL4StorageTimer  = metrics.NewRegisteredTimer("cache/cost/storage/layer4", nil)
 
