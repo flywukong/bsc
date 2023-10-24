@@ -156,7 +156,7 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 	}
 
 	logger.Info("Allocated cache and file handles", "cache", common.StorageSize(cache*1024*1024),
-		"handles", handles, "memTable size:", memTableSize)
+		"handles", handles, "memTable size:", common.StorageSize(memTableSize))
 
 	db := &Database{
 		fn:       file,
