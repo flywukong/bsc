@@ -127,7 +127,7 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 
 	hitInL3 := false
 	hitInDisk := false
-	start := time.Now()
+	//	start := time.Now()
 	var startGetInDisk time.Time
 	defer func() {
 		// if mainProcess
@@ -143,7 +143,7 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 				cachemetrics.RecordCacheMetrics("DISK_L4_ACCOUNT", startGetInDisk)
 			}
 		} else {
-			log.Info(fmt.Sprintf(fmt.Sprintf("reach layer3, cost: %d us", time.Since(start).Microseconds())))
+			//	log.Info(fmt.Sprintf(fmt.Sprintf("reach layer3, cost: %d us", time.Since(start).Microseconds())))
 		}
 	}()
 
@@ -175,7 +175,7 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, error) {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
-	start := time.Now()
+	//start := time.Now()
 
 	routeid := cachemetrics.Goid()
 	hitInL3 := false
@@ -195,7 +195,7 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 				cachemetrics.RecordCacheMetrics("DISK_L4_STORAGE", startGetInDisk)
 			}
 		} else {
-			log.Info(fmt.Sprintf(fmt.Sprintf("reach layer3, cost: %d us", time.Since(start).Microseconds())))
+			//	log.Info(fmt.Sprintf(fmt.Sprintf("reach layer3, cost: %d us", time.Since(start).Microseconds())))
 		}
 
 	}()
