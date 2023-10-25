@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/cachemetrics"
+	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -370,25 +371,15 @@ func (dl *diffLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	defer func() {
 		routeid := cachemetrics.Goid()
 		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-		isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(routeid)
 		if isSyncMainProcess {
 			// l1 miss
 			syncL1MissAccountMeter.Mark(1)
 			if hitInDifflayer {
 				syncL2AccountHitMeter.Mark(1)
+				log.Info(fmt.Sprintf(fmt.Sprintf("account hit in layer2, cost: %d us", time.Since(start).Microseconds())))
 				cachemetrics.RecordCacheDepth("CACHE_L2_ACCOUNT")
 				cachemetrics.RecordCacheMetrics("CACHE_L2_ACCOUNT", start)
 				cachemetrics.RecordTotalCosts("CACHE_L2_ACCOUNT", start)
-			}
-		}
-		if isMinerMainProcess {
-			// l1 miss
-			minerL1MissAccountMeter.Mark(1)
-			if hitInDifflayer {
-				minerL2AccountHitMeter.Mark(1)
-				cachemetrics.RecordMinerCacheDepth("MINER_L2_ACCOUNT")
-				cachemetrics.RecordMinerCacheMetrics("MINER_L2_ACCOUNT", start)
-				cachemetrics.RecordMinerTotalCosts("MINER_L2_ACCOUNT", start)
 			}
 		}
 	}()
@@ -456,7 +447,21 @@ func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	// Check the bloom filter first whether there's even a point in reaching into
 	// all the maps in all the layers below
 	hitInDifflayer := false
-
+	start := time.Now()
+	defer func() {
+		routeid := cachemetrics.Goid()
+		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+		if isSyncMainProcess {
+			syncL1MissStorageMeter.Mark(1)
+			if hitInDifflayer {
+				syncL2StorageHitMeter.Mark(1)
+				log.Info(fmt.Sprintf(fmt.Sprintf("account hit in layer2, cost: %d us", time.Since(start).Microseconds())))
+				cachemetrics.RecordCacheDepth("CACHE_L2_STORAGE")
+				cachemetrics.RecordCacheMetrics("CACHE_L2_STORAGE", start)
+				cachemetrics.RecordTotalCosts("CACHE_L2_STORAGE", start)
+			}
+		}
+	}()
 	dl.lock.RLock()
 	// Check staleness before reaching further.
 	if dl.Stale() {

@@ -18,6 +18,7 @@ package snapshot
 
 import (
 	"bytes"
+	"fmt"
 	"sync"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
 )
@@ -125,18 +127,23 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 
 	hitInL3 := false
 	hitInDisk := false
+	start := time.Now()
 	var startGetInDisk time.Time
 	defer func() {
 		// if mainProcess
 		if isSyncMainProcess {
 			syncL2AccountMissMeter.Mark(1)
 			if hitInL3 {
+				syncL3AccountHitMeter.Mark(1)
 				//	log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer3, cost: %d ms", time.Since(start).Milliseconds())))
 			}
 			if hitInDisk {
-				//	log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer4, cost: %d ms", time.Since(startGetInDisk).Milliseconds())))
+				syncL3AccountMissMeter.Mark(1)
+				log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer4, cost: %d ms", time.Since(startGetInDisk).Milliseconds())))
 				cachemetrics.RecordCacheMetrics("DISK_L4_ACCOUNT", startGetInDisk)
 			}
+		} else {
+			log.Info(fmt.Sprintf(fmt.Sprintf("reach layer3, cost: %d us", time.Since(start).Microseconds())))
 		}
 	}()
 
@@ -168,7 +175,7 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, error) {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
-	//start := time.Now()
+	start := time.Now()
 
 	routeid := cachemetrics.Goid()
 	hitInL3 := false
@@ -176,14 +183,19 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	var startGetInDisk time.Time
 	defer func() {
 		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+		syncL2StorageMissMeter.Mark(1)
 		if isSyncMainProcess {
 			if hitInL3 {
-				//	log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer3, cost: %d ms", time.Since(start).Milliseconds())))
+				syncL3StorageHitMeter.Mark(1)
+				//	log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer3, cost: %d us", time.Since(start).Microseconds())))
 			}
 			if hitInDisk {
-				//	log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer4, cost: %d ms", time.Since(startGetInDisk).Milliseconds())))
+				syncL3StorageMissMeter.Mark(1)
+				log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer4, cost: %d us", time.Since(startGetInDisk).Microseconds())))
 				cachemetrics.RecordCacheMetrics("DISK_L4_STORAGE", startGetInDisk)
 			}
+		} else {
+			log.Info(fmt.Sprintf(fmt.Sprintf("reach layer3, cost: %d us", time.Since(start).Microseconds())))
 		}
 
 	}()

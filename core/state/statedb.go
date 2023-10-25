@@ -541,37 +541,19 @@ func (s *StateDB) markMetrics(start time.Time, reachStorage bool) {
 
 // GetState retrieves a value from the given account's storage trie.
 func (s *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
-	start := time.Now()
 	goid := cachemetrics.Goid()
 	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
-	isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(goid)
 	defer func() {
 		// record metrics of syncing main process
 		if isSyncMainProcess {
-			syncGetDelay := time.Since(start)
-			totalSyncIOCounter.Inc(time.Since(start).Nanoseconds())
-			getStatetSyncIOCost.Update(syncGetDelay)
-			getStatetSyncIOCounter.Inc(syncGetDelay.Nanoseconds())
 			l1AccountMeter.Mark(1)
-		}
-		// record metrics of mining main process
-		if isMinerMainProcess {
-			minerIOCost := time.Since(start)
-			totalMinerIOCounter.Inc(time.Since(start).Nanoseconds())
-			getStatetMinerIOCost.Update(minerIOCost)
-			getStatetMinerIOCounter.Inc(minerIOCost.Nanoseconds())
-			minerL1AccountMeter.Mark(1)
 		}
 	}()
 
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
-
 		if isSyncMainProcess {
 			l1StorageMeter.Mark(1)
-		}
-		if isMinerMainProcess {
-			minerL1StorageMeter.Mark(1)
 		}
 		return stateObject.GetState(hash)
 	}
@@ -863,18 +845,12 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 	defer func() {
 		routeid := cachemetrics.Goid()
 		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-		isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(routeid)
 		if isSyncMainProcess && hit {
 			cachemetrics.RecordCacheDepth("CACHE_L1_ACCOUNT")
 			cachemetrics.RecordCacheMetrics("CACHE_L1_ACCOUNT", start)
 			cachemetrics.RecordTotalCosts("CACHE_L1_ACCOUNT", start)
 		}
 
-		if isMinerMainProcess && hit {
-			cachemetrics.RecordMinerCacheDepth("MINER_L1_ACCOUNT")
-			cachemetrics.RecordMinerCacheMetrics("MINER_L1_ACCOUNT", start)
-			cachemetrics.RecordMinerTotalCosts("MINER_L1_ACCOUNT", start)
-		}
 	}()
 
 	if obj := s.stateObjects[addr]; obj != nil {
