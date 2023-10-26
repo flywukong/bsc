@@ -26,8 +26,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/cachemetrics"
-	"github.com/ethereum/go-ethereum/log"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -376,7 +374,7 @@ func (dl *diffLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 			syncL1MissAccountMeter.Mark(1)
 			if hitInDifflayer {
 				syncL2AccountHitMeter.Mark(1)
-				log.Info(fmt.Sprintf(fmt.Sprintf("account hit in layer2, cost: %d us", time.Since(start).Microseconds())))
+				//	log.Info(fmt.Sprintf(fmt.Sprintf("account hit in layer2, cost: %d us", time.Since(start).Microseconds())))
 				cachemetrics.RecordCacheDepth("CACHE_L2_ACCOUNT")
 				cachemetrics.RecordCacheMetrics("CACHE_L2_ACCOUNT", start)
 				cachemetrics.RecordTotalCosts("CACHE_L2_ACCOUNT", start)
@@ -455,7 +453,7 @@ func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 			syncL1MissStorageMeter.Mark(1)
 			if hitInDifflayer {
 				syncL2StorageHitMeter.Mark(1)
-				log.Info(fmt.Sprintf(fmt.Sprintf("account hit in layer2, cost: %d us", time.Since(start).Microseconds())))
+				//log.Info(fmt.Sprintf(fmt.Sprintf("account hit in layer2, cost: %d us", time.Since(start).Microseconds())))
 				cachemetrics.RecordCacheDepth("CACHE_L2_STORAGE")
 				cachemetrics.RecordCacheMetrics("CACHE_L2_STORAGE", start)
 				cachemetrics.RecordTotalCosts("CACHE_L2_STORAGE", start)

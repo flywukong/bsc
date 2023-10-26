@@ -18,7 +18,6 @@ package snapshot
 
 import (
 	"bytes"
-	"fmt"
 	"sync"
 	"time"
 
@@ -28,7 +27,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
 )
@@ -139,7 +137,7 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 			}
 			if hitInDisk {
 				syncL3AccountMissMeter.Mark(1)
-				log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer4, cost: %d ms", time.Since(startGetInDisk).Milliseconds())))
+				//	log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer4, cost: %d ms", time.Since(startGetInDisk).Milliseconds())))
 				cachemetrics.RecordCacheMetrics("DISK_L4_ACCOUNT", startGetInDisk)
 			}
 		} else {
@@ -191,7 +189,7 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 			}
 			if hitInDisk {
 				syncL3StorageMissMeter.Mark(1)
-				log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer4, cost: %d us", time.Since(startGetInDisk).Microseconds())))
+				//	log.Info(fmt.Sprintf(fmt.Sprintf("hit in layer4, cost: %d us", time.Since(startGetInDisk).Microseconds())))
 				cachemetrics.RecordCacheMetrics("DISK_L4_STORAGE", startGetInDisk)
 			}
 		} else {
