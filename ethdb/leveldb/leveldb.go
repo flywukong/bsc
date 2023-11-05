@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
@@ -190,6 +191,17 @@ func (db *Database) Has(key []byte) (bool, error) {
 
 // Get retrieves the given key if it's present in the key-value store.
 func (db *Database) Get(key []byte) ([]byte, error) {
+	goid := cachemetrics.Goid()
+	cachemetrics.UpdateSyncingRoutineID(goid)
+
+	routeid := cachemetrics.Goid()
+	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+	start := time.Now()
+	defer func() {
+		if isSyncMainProcess {
+			cachemetrics.RecordCacheMetrics("CACHE_L3_STORAGE", start)
+		}
+	}()
 	dat, err := db.db.Get(key, nil)
 	if err != nil {
 		return nil, err
@@ -409,6 +421,14 @@ func (b *batch) ValueSize() int {
 
 // Write flushes any accumulated data to disk.
 func (b *batch) Write() error {
+	routeid := cachemetrics.Goid()
+	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+	start := time.Now()
+	defer func() {
+		if isSyncMainProcess {
+			cachemetrics.RecordCacheMetrics("CACHE_L2_STORAGE", start)
+		}
+	}()
 	return b.db.Write(b.b, nil)
 }
 
