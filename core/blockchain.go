@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	exlru "github.com/hashicorp/golang-lru"
 	"golang.org/x/crypto/sha3"
 
@@ -1180,7 +1181,7 @@ func (bc *BlockChain) Stop() {
 		//  - HEAD-127: So we have a hard limit on the number of blocks reexecuted
 		if !bc.cacheConfig.TrieDirtyDisabled {
 			triedb := bc.triedb
-		var once sync.Once
+			var once sync.Once
 
 			for _, offset := range []uint64{0, 1, TriesInMemory - 1} {
 				if number := bc.CurrentBlock().Number.Uint64(); number > offset {
@@ -1191,9 +1192,9 @@ func (bc *BlockChain) Stop() {
 					} else {
 						rawdb.WriteSafePointBlockNumber(bc.db, recent.NumberU64())
 						once.Do(func() {
-						  rawdb.WriteHeadBlockHash(bc.db, recent.Hash())
+							rawdb.WriteHeadBlockHash(bc.db, recent.Hash())
 						})
-          }
+					}
 				}
 			}
 			if snapBase != (common.Hash{}) {
@@ -1837,6 +1838,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
 	signer := types.MakeSigner(bc.chainConfig, chain[0].Number(), chain[0].Time())
 	go SenderCacher.RecoverFromBlocks(signer, chain)
+
+	goid := cachemetrics.Goid()
+	cachemetrics.UpdateSyncingRoutineID(goid)
 
 	var (
 		stats     = insertStats{startTime: mclock.Now()}
