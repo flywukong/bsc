@@ -279,9 +279,6 @@ func (d *Database) Has(key []byte) (bool, error) {
 
 // Get retrieves the given key if it's present in the key-value store.
 func (d *Database) Get(key []byte) ([]byte, error) {
-	goid := cachemetrics.Goid()
-	cachemetrics.UpdateSyncingRoutineID(goid)
-
 	routeid := cachemetrics.Goid()
 	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
 	start := time.Now()
