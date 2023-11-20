@@ -41,7 +41,7 @@ const (
 	// read and write caching, split half and half.
 	minCache = 16
 
-	// minHandles is the minimum number of files handles to allocate to the open
+	// minHandles is the minimum number of files /andles to allocate to the open
 	// database files.
 	minHandles = 16
 
@@ -174,7 +174,7 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 		// buffers are taken from this too. Assign all available
 		// memory allowance for cache.
 		Cache:        pebble.NewCache(int64(cache * 1024 * 1024)),
-		MaxOpenFiles: handles * 2,
+		MaxOpenFiles: handles,
 
 		// The size of memory table(as well as the write buffer).
 		// Note, there may have more than two memory tables in the system.
