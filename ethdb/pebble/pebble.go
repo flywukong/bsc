@@ -162,6 +162,7 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 		memTableSize = maxMemTableSize
 	}
 
+	memTableSize = memTableSize - 1
 	logger.Info("Allocated MemTable size: ", "MemTable size", common.StorageSize(memTableSize), "cache", cache)
 	db := &Database{
 		fn:       file,
