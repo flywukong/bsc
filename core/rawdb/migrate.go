@@ -22,7 +22,7 @@ var (
 var ctx = context.Background()
 
 func InitDb(addr string) *ethpebble.Database {
-	pebbleDB, createErr = ethpebble.New(addr, 4000, 4096, "eth/db/chaindata/", false)
+	pebbleDB, createErr = ethpebble.New(addr, 40000, 60000, "eth/db/chaindata/", false)
 	if createErr != nil {
 		fmt.Println("create pebble err", createErr.Error())
 		panic("create err")
