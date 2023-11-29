@@ -94,6 +94,13 @@ var (
 		Value:    flags.DirectoryString(node.DefaultDataDir()),
 		Category: flags.EthCategory,
 	}
+
+	TrieDirFlag = &flags.DirectoryFlag{
+		Name:     "triedir",
+		Usage:    "Data directory for the trie data base",
+		Value:    flags.DirectoryString(node.DefaultDataDir() + "trie"),
+		Category: flags.EthCategory,
+	}
 	DirectBroadcastFlag = &cli.BoolFlag{
 		Name:     "directbroadcast",
 		Usage:    "Enable directly broadcast mined block to all peers",
@@ -1107,6 +1114,7 @@ var (
 		RemoteDBFlag,
 		DBEngineFlag,
 		HttpHeaderFlag,
+		TrieDirFlag,
 	}
 )
 
@@ -1607,6 +1615,8 @@ func SetDataDir(ctx *cli.Context, cfg *node.Config) {
 	switch {
 	case ctx.IsSet(DataDirFlag.Name):
 		cfg.DataDir = ctx.String(DataDirFlag.Name)
+	case ctx.IsSet(TrieDirFlag.Name):
+		cfg.TrieDir = ctx.String(TrieDirFlag.Name)
 	case ctx.Bool(DeveloperFlag.Name):
 		cfg.DataDir = "" // unless explicitly requested, use memory databases
 	}
