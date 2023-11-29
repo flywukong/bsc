@@ -156,6 +156,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if config.StateScheme == rawdb.HashScheme {
 		if err := pruner.RecoverPruning(stack.ResolvePath(""), chainDb, config.TriesInMemory); err != nil {
 			log.Error("Failed to recover state", "error", err)
@@ -255,6 +256,16 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 	if stack.Config().EnableDoubleSignMonitor {
 		bcOps = append(bcOps, core.EnableDoubleSignChecker)
+	}
+
+	if stack.Config().TrieDir != "" {
+		fmt.Println("trie data dir has setted to ", stack.Config().TrieDir)
+		newChainDb, err := stack.OpenDatabaseForTrie("chaindata", config.DatabaseCache, config.DatabaseHandles,
+			config.DatabaseFreezer, "eth/db/chaindata/", false, false, false, config.PruneAncientData)
+		if err != nil {
+			return nil, err
+		}
+		bcOps = append(bcOps, core.EnableSeparateDB(newChainDb))
 	}
 
 	peers := newPeerSet()
