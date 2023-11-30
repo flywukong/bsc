@@ -90,6 +90,7 @@ func New(conf *Config) (*Node, error) {
 		}
 		conf.DataDir = absdatadir
 	}
+	
 	if conf.LogConfig != nil {
 		if conf.LogConfig.TermTimeFormat != nil && *conf.LogConfig.TermTimeFormat != "" {
 			log.SetTermTimeFormat(*conf.LogConfig.TermTimeFormat)
