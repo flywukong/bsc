@@ -840,7 +840,7 @@ func (n *Node) OpenDatabaseForTrie(name string, cache, handles int, ancient, nam
 		fmt.Println("trie database dir1:", n.config.TrieDir)
 		db = rawdb.NewMemoryDatabase()
 	} else {
-		direcrory := filepath.Join(n.config.trieDir(), "geth", name)
+		direcrory := filepath.Join(n.config.trieDir(), name)
 		fmt.Println("trie database dir2c:", direcrory)
 		db, err = rawdb.Open(rawdb.OpenOptions{
 			Type:              n.config.DBEngine,

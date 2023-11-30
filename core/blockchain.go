@@ -361,7 +361,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	// Open trie database with provided config
 	var triedb *trie.Database
 	if bc.separateDB != nil {
-		fmt.Printf("the separate db of block chain has been setted")
+		fmt.Println("the separate db of block chain has been set")
 		triedb = trie.NewDatabase(bc.separateDB, cacheConfig.triedbConfig())
 	} else {
 		triedb = trie.NewDatabase(db, cacheConfig.triedbConfig())
