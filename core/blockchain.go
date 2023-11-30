@@ -2970,7 +2970,9 @@ func EnablePipelineCommit(bc *BlockChain) (*BlockChain, error) {
 
 func EnableSeparateDB(separateDB ethdb.Database) BlockChainOption {
 	return func(chain *BlockChain) (*BlockChain, error) {
-		chain.separateDB = separateDB
+		if separateDB != nil {
+			chain.separateDB = separateDB
+		}
 		return chain, nil
 	}
 }
