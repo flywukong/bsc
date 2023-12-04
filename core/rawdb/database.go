@@ -661,8 +661,10 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			receipts.Add(size)
 		case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerTDSuffix):
 			tds.Add(size)
+			log.Info("diffculty", "key", string(key), "value", string(it.Value()))
 		case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerHashSuffix):
 			numHashPairings.Add(size)
+			log.Info("Block num -> hash", "key", string(key), "value", string(it.Value()))
 		case bytes.HasPrefix(key, headerNumberPrefix) && len(key) == (len(headerNumberPrefix)+common.HashLength):
 			hashNumPairings.Add(size)
 		case IsLegacyTrieNode(key, it.Value()):
