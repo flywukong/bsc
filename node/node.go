@@ -831,23 +831,19 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
 func (n *Node) OpenDatabaseForTrie(name string, cache, handles int, ancient, namespace string, readonly, disableFreeze, isLastOffset, pruneAncientData bool) (ethdb.Database, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
-	fmt.Println(":q!"+
-		"：qtrie database dir0:", n.config.TrieDir)
 	if n.state == closedState {
 		return nil, ErrNodeStopped
 	}
 	var db ethdb.Database
 	var err error
 	if n.config.DataDir == "" {
-		fmt.Println("trie database dir1:", n.config.TrieDir)
 		db = rawdb.NewMemoryDatabase()
 	} else {
 		direcrory := filepath.Join(n.config.trieDir(), name)
-		fmt.Println("trie database dir2c:", direcrory)
 		db, err = rawdb.Open(rawdb.OpenOptions{
 			Type:              n.config.DBEngine,
 			Directory:         direcrory,
-			AncientsDirectory: filepath.Join(direcrory, "ancient"),
+			AncientsDirectory: n.ResolveAncient(name, ancient),
 			Namespace:         namespace,
 			Cache:             cache,
 			Handles:           handles,
@@ -861,6 +857,7 @@ func (n *Node) OpenDatabaseForTrie(name string, cache, handles int, ancient, nam
 	if err == nil {
 		db = n.wrapDatabase(db)
 	}
+
 	return db, err
 }
 
