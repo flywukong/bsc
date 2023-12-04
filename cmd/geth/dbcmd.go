@@ -76,6 +76,7 @@ Remove blockchain and state databases`,
 			dbHbss2PbssCmd,
 			dbTrieGetCmd,
 			dbTrieDeleteCmd,
+			dbTrieSplitCmd,
 		},
 	}
 	dbInspectCmd = &cli.Command{
@@ -137,6 +138,19 @@ a data corruption.`,
 		},
 		Description: "This command delete the specify trie node from the database.",
 	}
+	dbTrieSplitCmd = cli.Command{
+		Action:    dbTrieSplit,
+		Name:      "trie-split",
+		ArgsUsage: "",
+		Flags: []cli.Flag{
+			utils.DataDirFlag,
+			utils.TrieDirFlag,
+		},
+		Usage: "Migrate data in the database," +
+			"./geth  db migrate --datadir ./node --triedir ./node2",
+		Description: `This commands iterates the entire database. If the optional 'prefix' and 'start' arguments are provided, then the iteration is limited to the given subset of data.`,
+	}
+
 	dbStatCmd = &cli.Command{
 		Action: dbStats,
 		Name:   "stats",
@@ -601,6 +615,30 @@ func dbTrieDelete(ctx *cli.Context) error {
 		}
 	}
 	return nil
+}
+
+// dbTrieDelete delete the trienode of a given database key
+func dbTrieSplit(ctx *cli.Context) error {
+	if ctx.NArg() < 1 || ctx.NArg() > 2 {
+		return fmt.Errorf("required arguments: %v", ctx.Command.ArgsUsage)
+	}
+
+	stack, _ := makeConfigNode(ctx)
+	defer stack.Close()
+
+	db := utils.MakeChainDatabase(ctx, stack, false, false)
+	defer db.Close()
+
+	if stack.Config().TrieDir == "" {
+		return fmt.Errorf("trie dir must be set")
+	}
+
+	newDB := utils.SplitTrieDatabase(ctx, stack, false, false)
+	defer newDB.Close()
+
+	triedb := utils.MakeTrieDatabase(ctx, newDB, false, true)
+	defer triedb.Close()
+
 }
 
 // dbDelete deletes a key from the database
