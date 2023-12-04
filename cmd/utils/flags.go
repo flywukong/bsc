@@ -101,6 +101,10 @@ var (
 		Name: "multidatabase",
 		Usage: "Enable a separated state and block database, it will be created within two subdirectory called state and block, " +
 			"Users can copy this state or block directory to another directory or disk, and then create a symbolic link to the state directory under the chaindata",
+
+	TrieDirFlag = &flags.DirectoryFlag{
+		Name:     "triedir",
+		Usage:    "Data directory for the trie data base",
 		Category: flags.EthCategory,
 	}
 	DirectBroadcastFlag = &cli.BoolFlag{
@@ -1777,6 +1781,9 @@ func SetDataDir(ctx *cli.Context, cfg *node.Config) {
 	case ctx.Bool(DeveloperFlag.Name):
 		cfg.DataDir = "" // unless explicitly requested, use memory databases
 	}
+	if ctx.IsSet(TrieDirFlag.Name) {
+		cfg.TrieDir = ctx.String(TrieDirFlag.Name)
+	}
 }
 
 func setVoteJournalDir(ctx *cli.Context, cfg *node.Config) {
@@ -2603,6 +2610,20 @@ func PathDBConfigAddJournalFilePath(stack *node.Node, config *pathdb.Config) *pa
 	path := fmt.Sprintf("%s/%s", stack.ResolvePath("chaindata"), eth.JournalFileName)
 	config.JournalFilePath = path
 	return config
+}
+
+func SplitTrieDatabase(ctx *cli.Context, stack *node.Node, readonly, disableFreeze bool) ethdb.Database {
+	var (
+		cache   = ctx.Int(CacheFlag.Name) * ctx.Int(CacheDatabaseFlag.Name) / 100
+		handles = MakeDatabaseHandles(ctx.Int(FDLimitFlag.Name))
+	)
+
+	trieDB, err := stack.OpenDatabaseForTrie("chaindata", cache, handles/2,
+		ctx.String(AncientFlag.Name), "eth/db/chaindata/", false, false, false, false)
+	if err != nil {
+		Fatalf("Could not open trie database: %v", err)
+	}
+	return trieDB
 }
 
 // tryMakeReadOnlyDatabase try to open the chain database in read-only mode,
