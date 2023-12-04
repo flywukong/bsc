@@ -347,7 +347,11 @@ func inspectTrie(ctx *cli.Context) error {
 
 	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
-
+	var separateTrie ethdb.Database
+	if stack.HasSeparateTrieDir() {
+		separateTrie = utils.MakeSeparateTrieDB(ctx, stack, true, false)
+		defer separateTrie.Close()
+	}
 	var headerBlockHash common.Hash
 	if ctx.NArg() >= 1 {
 		if ctx.Args().Get(0) == "latest" {
@@ -397,7 +401,12 @@ func inspectTrie(ctx *cli.Context) error {
 			config = trie.HashDefaults
 		}
 
-		triedb := trie.NewDatabase(db, config)
+		var triedb *trie.Database
+		if separateTrie != nil {
+			triedb = trie.NewDatabase(separateTrie, config)
+		} else {
+			triedb = trie.NewDatabase(db, config)
+		}
 		theTrie, err := trie.New(trie.TrieID(trieRootHash), triedb)
 		if err != nil {
 			fmt.Printf("fail to new trie tree, err: %v, rootHash: %v\n", err, trieRootHash.String())
@@ -441,7 +450,12 @@ func inspect(ctx *cli.Context) error {
 	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
 
-	return rawdb.InspectDatabase(db, prefix, start)
+	var seprateDB ethdb.Database
+	if stack.HasSeparateTrieDir() {
+		seprateDB = utils.MakeSeparateTrieDB(ctx, stack, true, false)
+		defer seprateDB.Close()
+	}
+	return rawdb.InspectDatabase(db, seprateDB, prefix, start)
 }
 
 func ancientInspect(ctx *cli.Context) error {
@@ -528,6 +542,13 @@ func dbStats(ctx *cli.Context) error {
 	defer db.Close()
 
 	showLeveldbStats(db)
+	if stack.HasSeparateTrieDir() {
+		seprateTrieDB := utils.MakeSeparateTrieDB(ctx, stack, true, false)
+		defer seprateTrieDB.Close()
+		fmt.Println("show stats of separated db")
+		showLeveldbStats(seprateTrieDB)
+	}
+
 	return nil
 }
 
@@ -541,13 +562,29 @@ func dbCompact(ctx *cli.Context) error {
 	log.Info("Stats before compaction")
 	showLeveldbStats(db)
 
+	var separateTrieDB ethdb.Database
+	if stack.HasSeparateTrieDir() {
+		separateTrieDB = utils.MakeSeparateTrieDB(ctx, stack, false, false)
+		defer separateTrieDB.Close()
+		showLeveldbStats(separateTrieDB)
+	}
+
 	log.Info("Triggering compaction")
 	if err := db.Compact(nil, nil); err != nil {
-		log.Info("Compact err", "error", err)
+		log.Error("Compact err", "error", err)
 		return err
 	}
+
+	if err := separateTrieDB.Compact(nil, nil); err != nil {
+		log.Error("Compact err", "error", err)
+		return err
+	}
+
 	log.Info("Stats after compaction")
 	showLeveldbStats(db)
+	if separateTrieDB != nil {
+		showLeveldbStats(separateTrieDB)
+	}
 	return nil
 }
 
@@ -570,6 +607,16 @@ func dbGet(ctx *cli.Context) error {
 
 	data, err := db.Get(key)
 	if err != nil {
+		// if separate trie db exist, try to get it from separate db
+		if stack.HasSeparateTrieDir() {
+			trieDB := utils.MakeSeparateTrieDB(ctx, stack, true, false)
+			defer trieDB.Close()
+			triedata, dberr := trieDB.Get(key)
+			if dberr == nil {
+				fmt.Printf("key %#x: %#x\n", key, triedata)
+				return nil
+			}
+		}
 		log.Info("Get operation failed", "key", fmt.Sprintf("%#x", key), "error", err)
 		return err
 	}
@@ -585,7 +632,12 @@ func dbTrieGet(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
-	db := utils.MakeChainDatabase(ctx, stack, false, false)
+	var db ethdb.Database
+	if stack.HasSeparateTrieDir() {
+		db = utils.MakeSeparateTrieDB(ctx, stack, true, false)
+	} else {
+		db = utils.MakeChainDatabase(ctx, stack, true, false)
+	}
 	defer db.Close()
 
 	scheme := ctx.String(utils.StateSchemeFlag.Name)
@@ -651,7 +703,12 @@ func dbTrieDelete(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
-	db := utils.MakeChainDatabase(ctx, stack, false, false)
+	var db ethdb.Database
+	if stack.HasSeparateTrieDir() {
+		db = utils.MakeSeparateTrieDB(ctx, stack, true, false)
+	} else {
+		db = utils.MakeChainDatabase(ctx, stack, true, false)
+	}
 	defer db.Close()
 
 	scheme := ctx.String(utils.StateSchemeFlag.Name)
@@ -773,9 +830,13 @@ func dbDumpTrie(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
-	db := utils.MakeChainDatabase(ctx, stack, true, false)
+	var db ethdb.Database
+	if stack.HasSeparateTrieDir() {
+		db = utils.MakeSeparateTrieDB(ctx, stack, true, false)
+	} else {
+		db = utils.MakeChainDatabase(ctx, stack, true, false)
+	}
 	defer db.Close()
-
 	triedb := utils.MakeTrieDatabase(ctx, db, false, true)
 	defer triedb.Close()
 

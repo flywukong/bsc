@@ -517,7 +517,14 @@ func verifyState(ctx *cli.Context) error {
 		log.Error("Failed to load head block")
 		return errors.New("no head block")
 	}
-	triedb := utils.MakeTrieDatabase(ctx, chaindb, false, true)
+	var triedb *trie.Database
+	if stack.HasSeparateTrieDir() {
+		separateTrie := utils.MakeSeparateTrieDB(ctx, stack, true, false)
+		defer separateTrie.Close()
+		triedb = utils.MakeTrieDatabase(ctx, separateTrie, false, true)
+	} else {
+		triedb = utils.MakeTrieDatabase(ctx, chaindb, false, true)
+	}
 	defer triedb.Close()
 
 	snapConfig := snapshot.Config{
@@ -674,7 +681,14 @@ func traverseRawState(ctx *cli.Context) error {
 	chaindb := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer chaindb.Close()
 
-	triedb := utils.MakeTrieDatabase(ctx, chaindb, false, true)
+	var triedb *trie.Database
+	if stack.HasSeparateTrieDir() {
+		separateTrie := utils.MakeSeparateTrieDB(ctx, stack, true, false)
+		defer separateTrie.Close()
+		triedb = utils.MakeTrieDatabase(ctx, separateTrie, false, true)
+	} else {
+		triedb = utils.MakeTrieDatabase(ctx, chaindb, false, true)
+	}
 	defer triedb.Close()
 
 	headBlock := rawdb.ReadHeadBlock(chaindb)
@@ -834,6 +848,13 @@ func dumpState(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+
+	var separateTrie ethdb.Database
+	if stack.HasSeparateTrieDir() {
+		separateTrie = utils.MakeSeparateTrieDB(ctx, stack, true, false)
+		defer separateTrie.Close()
+	}
+
 	triedb := utils.MakeTrieDatabase(ctx, db, false, true)
 	defer triedb.Close()
 
@@ -844,7 +865,13 @@ func dumpState(ctx *cli.Context) error {
 		AsyncBuild: false,
 	}
 	triesInMemory := ctx.Uint64(utils.TriesInMemoryFlag.Name)
-	snaptree, err := snapshot.New(snapConfig, db, trie.NewDatabase(db, nil), root, int(triesInMemory), false)
+
+	var snaptree *snapshot.Tree
+	if separateTrie != nil {
+		snaptree, err = snapshot.New(snapConfig, db, trie.NewDatabase(separateTrie, nil), root, int(triesInMemory), false)
+	} else {
+		snaptree, err = snapshot.New(snapConfig, db, trie.NewDatabase(db, nil), root, int(triesInMemory), false)
+	}
 	if err != nil {
 		return err
 	}
