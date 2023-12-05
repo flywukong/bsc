@@ -260,6 +260,7 @@ func (hc *HeaderChain) WriteHeaders(headers []*types.Header) (int, error) {
 		alreadyKnown := parentKnown && hc.HasHeader(hash, number)
 		if !alreadyKnown {
 			// Irrelevant of the canonical status, write the TD and header to the database.
+			log.Info("called write td in WriteHeaders")
 			rawdb.WriteTd(batch, hash, number, newTD)
 			hc.tdCache.Add(hash, new(big.Int).Set(newTD))
 

@@ -582,6 +582,7 @@ func WriteTd(db ethdb.KeyValueWriter, hash common.Hash, number uint64, td *big.I
 	if err := db.Put(headerTDKey(number, hash), data); err != nil {
 		log.Crit("Failed to store block total difficulty", "err", err)
 	}
+	log.Info("write difficulty,", "key", string(headerTDKey(number, hash)), "value", string(data))
 }
 
 // DeleteTd removes all block total difficulty data associated with a hash.
@@ -589,6 +590,7 @@ func DeleteTd(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
 	if err := db.Delete(headerTDKey(number, hash)); err != nil {
 		log.Crit("Failed to delete block total difficulty", "err", err)
 	}
+	log.Info("delete difficulty,", "key", string(headerTDKey(number, hash)))
 }
 
 // HasReceipts verifies the existence of all the transaction receipts belonging
