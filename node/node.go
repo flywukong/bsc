@@ -828,7 +828,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
 	return db, err
 }
 
-func (n *Node) OpenDatabaseForTrie(name string, cache, handles int, ancient, namespace string, readonly, disableFreeze, isLastOffset, pruneAncientData bool) (ethdb.Database, error) {
+func (n *Node) OpenDatabaseForTrie(name string, cache, handles int, ancient, scheme, namespace string, readonly, disableFreeze, isLastOffset, pruneAncientData bool) (ethdb.Database, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 	if n.state == closedState {
@@ -840,10 +840,16 @@ func (n *Node) OpenDatabaseForTrie(name string, cache, handles int, ancient, nam
 		db = rawdb.NewMemoryDatabase()
 	} else {
 		direcrory := filepath.Join(n.config.trieDir(), name)
+		var ancientDir string
+		if scheme == rawdb.HashScheme {
+			ancientDir = filepath.Join(direcrory, "ancient")
+		} else {
+			ancientDir = n.ResolveAncient(name, "ancient-state")
+		}
 		db, err = rawdb.Open(rawdb.OpenOptions{
 			Type:              n.config.DBEngine,
 			Directory:         direcrory,
-			AncientsDirectory: n.ResolveAncient(name, ancient),
+			AncientsDirectory: n.ResolveAncient(name, "ancient-state"),
 			Namespace:         namespace,
 			Cache:             cache,
 			Handles:           handles,
@@ -895,6 +901,16 @@ func (n *Node) ResolveAncient(name string, ancient string) string {
 	switch {
 	case ancient == "":
 		ancient = filepath.Join(n.ResolvePath(name), "ancient")
+	case !filepath.IsAbs(ancient):
+		ancient = n.ResolvePath(ancient)
+	}
+	return ancient
+}
+
+func (n *Node) ResolveStateAncient(name string, ancient string) string {
+	switch {
+	case ancient == "":
+		ancient = filepath.Join(n.ResolvePath(name), "ancient-state")
 	case !filepath.IsAbs(ancient):
 		ancient = n.ResolvePath(ancient)
 	}
