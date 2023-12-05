@@ -100,7 +100,6 @@ var (
 	TrieDirFlag = &flags.DirectoryFlag{
 		Name:     "triedir",
 		Usage:    "Data directory for the trie data base",
-		Value:    flags.DirectoryString(node.DefaultDataDir() + "trie"),
 		Category: flags.EthCategory,
 	}
 	DirectBroadcastFlag = &cli.BoolFlag{
@@ -1662,11 +1661,11 @@ func SetDataDir(ctx *cli.Context, cfg *node.Config) {
 	switch {
 	case ctx.IsSet(DataDirFlag.Name):
 		cfg.DataDir = ctx.String(DataDirFlag.Name)
-	case ctx.IsSet(TrieDirFlag.Name):
-		fmt.Println("setting TrieDirFlag.Name", ctx.String(TrieDirFlag.Name))
-		cfg.TrieDir = ctx.String(TrieDirFlag.Name)
 	case ctx.Bool(DeveloperFlag.Name):
 		cfg.DataDir = "" // unless explicitly requested, use memory databases
+	}
+	if ctx.IsSet(TrieDirFlag.Name) {
+		cfg.TrieDir = ctx.String(TrieDirFlag.Name)
 	}
 }
 
