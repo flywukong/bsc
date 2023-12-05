@@ -765,9 +765,6 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 				table.size.String(),
 				fmt.Sprintf("%d", ancient.count()),
 			})
-			if strings.Title(table.name) == "Account.Index" {
-
-			}
 		}
 		total += ancient.size()
 	}
@@ -890,12 +887,23 @@ func SplitDatabase(db ethdb.Database, newDB ethdb.Database) error {
 			newDB.Put(key, value)
 			db.Delete(key)
 		default:
-			for _, meta := range [][]byte{fastTrieProgressKey} {
-				if bytes.Equal(key, meta) {
-					metadata.Add(size)
+			for _, meta := range [][]byte{databaseVersionKey, headHeaderKey, headBlockKey, headFastBlockKey,
+				lastPivotKey, fastTrieProgressKey, snapshotDisabledKey, SnapshotRootKey, snapshotJournalKey,
+				snapshotGeneratorKey, snapshotRecoveryKey, txIndexTailKey, fastTxLookupLimitKey,
+				uncleanShutdownKey, badBlockKey, transitionStatusKey, skeletonSyncStatusKey,
+				persistentStateIDKey, trieJournalKey, snapshotSyncStatusKey} {
+				if bytes.Equal(key, fastTrieProgressKey) {
+					log.Info("trie meta get")
 					newDB.Put(key, value)
-					break
+				} else {
+					if bytes.Equal(key, meta) {
+						log.Info("not trie data", "key", string(key))
+						metadata.Add(size)
+						newDB.Put(key, value)
+						break
+					}
 				}
+
 			}
 		}
 		count++
