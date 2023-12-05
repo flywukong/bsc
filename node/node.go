@@ -849,7 +849,7 @@ func (n *Node) OpenDatabaseForTrie(name string, cache, handles int, ancient, sch
 		db, err = rawdb.Open(rawdb.OpenOptions{
 			Type:              n.config.DBEngine,
 			Directory:         direcrory,
-			AncientsDirectory: n.ResolveAncient(name, "ancient-state"),
+			AncientsDirectory: ancientDir,
 			Namespace:         namespace,
 			Cache:             cache,
 			Handles:           handles,
