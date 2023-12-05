@@ -217,7 +217,7 @@ func initGenesis(ctx *cli.Context) error {
 		utils.Fatalf("invalid genesis file: %v", err)
 	}
 	// Open and initialise both full and light databases
-	stack, _ := makeConfigNode(ctx)
+	stack, ethConfig := makeConfigNode(ctx)
 	defer stack.Close()
 	stack.Config().TrieDir = ctx.String(utils.TrieDirFlag.Name)
 	for _, name := range []string{"chaindata", "lightchaindata"} {
@@ -230,7 +230,7 @@ func initGenesis(ctx *cli.Context) error {
 		var triedb *trie.Database
 		// if the trie datadir has been set , new triedb with a new chaindb
 		if ctx.IsSet(utils.TrieDirFlag.Name) {
-			newChaindb, dbErr := stack.OpenDatabaseForTrie(name, 0, 0, "", "", false, false, false, false)
+			newChaindb, dbErr := stack.OpenDatabaseForTrie(name, 0, 0, "", ethConfig.Eth.StateScheme, "", false, false, false, false)
 			if dbErr != nil {
 				utils.Fatalf("Failed to open separate trie database: %v", dbErr)
 			}
