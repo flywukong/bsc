@@ -844,7 +844,7 @@ func (n *Node) OpenDatabaseForTrie(name string, cache, handles int, ancient, sch
 		if scheme == rawdb.HashScheme {
 			ancientDir = filepath.Join(direcrory, "ancient")
 		} else {
-			ancientDir = n.ResolveAncient(name, "ancient-state")
+			ancientDir = n.ResolveStateAncient(name, "")
 		}
 		db, err = rawdb.Open(rawdb.OpenOptions{
 			Type:              n.config.DBEngine,
