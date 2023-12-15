@@ -200,6 +200,7 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 	}
 
 	for i := 0; i < len(opt.Levels); i++ {
+		logger.Info("setting levels", "level", i)
 		l := &opt.Levels[i]
 		l.BlockSize = 32 << 10       // 32 KB
 		l.IndexBlockSize = 256 << 10 // 256 KB
@@ -215,11 +216,15 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 	// for more details.
 	opt.Experimental.ReadSamplingMultiplier = -1
 
+	if opt.Levels == nil {
+		fmt.Println("level info not set")
+	}
 	// Open the db and recover any potential corruptions
 	innerDB, err := pebble.Open(file, opt)
 	if err != nil {
 		return nil, err
 	}
+
 	db.db = innerDB
 
 	db.compTimeMeter = metrics.NewRegisteredMeter(namespace+"compact/time", nil)
