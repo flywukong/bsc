@@ -1041,7 +1041,7 @@ func SplitDatabaseV2(db ethdb.Database, trieDB ethdb.Database) error {
 
 	start := time.Now()
 	// start a task dispatcher with 1000 threads
-	dispatcher := MigrateStart(1000)
+	dispatcher := MigrateStart(1200)
 
 	var (
 		count       uint64
