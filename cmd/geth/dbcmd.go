@@ -632,7 +632,7 @@ func dbTrieSplit(ctx *cli.Context) error {
 	seprateDB := utils.SplitTrieDatabase(ctx, stack, false, false)
 	defer seprateDB.Close()
 
-	err := rawdb.SplitDatabase(db, seprateDB)
+	err := rawdb.SplitDatabaseV2(db, seprateDB)
 	if err != nil {
 		return err
 	}
