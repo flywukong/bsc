@@ -18,6 +18,7 @@ package rawdb
 
 import (
 	"bytes"
+	"container/list"
 	"errors"
 	"fmt"
 	"os"
@@ -821,6 +822,35 @@ func ReadChainMetadata(db ethdb.KeyValueStore) [][]string {
 	return data
 }
 
+func isTrieKey(key, value []byte) bool {
+	switch {
+	case IsLegacyTrieNode(key, value):
+		return true
+	case bytes.HasPrefix(key, stateIDPrefix) && len(key) == len(stateIDPrefix)+common.HashLength:
+		return true
+	case IsAccountTrieNode(key):
+		return true
+	case IsStorageTrieNode(key):
+		return true
+	case bytes.HasPrefix(key, PreimagePrefix) && len(key) == (len(PreimagePrefix)+common.HashLength):
+		return true
+
+	case bytes.HasPrefix(key, ChtTablePrefix) ||
+		bytes.HasPrefix(key, ChtIndexTablePrefix) ||
+		bytes.HasPrefix(key, ChtPrefix): // Canonical hash trie
+		return true
+	case bytes.HasPrefix(key, BloomTrieTablePrefix) ||
+		bytes.HasPrefix(key, BloomTrieIndexPrefix) ||
+		bytes.HasPrefix(key, BloomTriePrefix): // Bloomtrie sub
+		return true
+	default:
+		if bytes.Equal(key, fastTrieProgressKey) || bytes.Equal(key, trieJournalKey) || bytes.Equal(key, persistentStateIDKey) {
+			return true
+		}
+	}
+	return false
+}
+
 func SplitDatabase(db ethdb.Database, trieDB ethdb.Database) error {
 	it := db.NewIterator([]byte(""), []byte(""))
 	defer it.Release()
@@ -899,7 +929,7 @@ func SplitDatabase(db ethdb.Database, trieDB ethdb.Database) error {
 			}
 		}
 		count++
-		if count%1000 == 0 && time.Since(logged) > 8*time.Second {
+		if count%100000 == 0 && time.Since(logged) > 8*time.Second {
 			log.Info("Migrating trie database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
 			logged = time.Now()
 		}
@@ -932,5 +962,169 @@ func migrateKey(db ethdb.Database, newDB ethdb.Database, key, value []byte) erro
 	if err := db.Delete(key); err != nil {
 		return err
 	}
+	return nil
+}
+
+func SplitDatabaseV2(db ethdb.Database, trieDB ethdb.Database) error {
+	fmt.Println("begin migrate")
+
+	// get startKey from db if exist
+	var startKey []byte
+	path, _ := os.Getwd()
+	startDB, _ := leveldb.New(path+"/startdb", 500, 200, "chaindata", false)
+	startKey, err := startDB.Get([]byte("startKey"))
+	if err == nil {
+		fmt.Println("get start key:", startKey)
+	} else {
+		fmt.Println("get first key error", err.Error())
+	}
+
+	it := db.NewIterator([]byte(""), startKey)
+
+	// taskCache store recent 15000 batch info,
+	// only store the first key of batch as the startKey if task fail
+	taskCache := list.New()
+
+	// this routine mark the startKey in the queue half an hour once
+	ticker := time.NewTicker(1 * time.Second)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if GetFailFlag() == 1 && taskCache.Len() > 0 {
+					fmt.Println("find some task fail, need mark and panic")
+					if startDB == nil {
+						startPath, _ := os.Getwd()
+						startDB, _ = leveldb.New(startPath+"/startdb", 5000, 200, "chaindata", false)
+					}
+					key := taskCache.Front().Value
+
+					// mark the fail key, and panic
+					if startDB != nil {
+						err = startDB.Put([]byte("startKey"), []byte(key.(string)))
+						if err != nil {
+							fmt.Println("write first key error:", err.Error())
+						}
+					}
+					fmt.Println("leveldb migrate fail , finish key:", GetDoneTaskNum()*100)
+					panic("task fail")
+				}
+			}
+		}
+	}()
+	// this routine mark the startKey in the queue half an hour once
+	marker := time.NewTicker(20 * time.Minute)
+	go func() {
+		defer marker.Stop()
+		for {
+			select {
+			case <-marker.C:
+				if taskCache.Len() > 0 {
+					fmt.Println("mark start key half an hour once")
+					if startDB == nil {
+						startPath, _ := os.Getwd()
+						startDB, _ = leveldb.New(startPath+"/startdb", 5000, 200, "chaindata", false)
+					}
+					key := taskCache.Front().Value
+					// mark the done key
+					if startDB != nil {
+						err = startDB.Put([]byte("startKey"), []byte(key.(string)))
+						if err != nil {
+							fmt.Println("write first key error:", err.Error())
+						}
+					}
+				}
+			}
+		}
+	}()
+
+	start := time.Now()
+	// start a task dispatcher with 1000 threads
+	dispatcher := MigrateStart(1000)
+
+	var (
+		count       uint64
+		batch_count uint64
+		snapcount   uint64
+	)
+	// init remote db for data sending
+	InitDb(db, trieDB)
+
+	count = 0
+	snapcount = 0
+	defer it.Release()
+	tempBatch := make(map[string][]byte)
+
+	isbatchFirstKey := false
+
+	for it.Next() {
+		var (
+			key = it.Key()
+			v   = it.Value()
+		)
+		value := make([]byte, len(v))
+		copy(value, v)
+
+		if !isTrieKey(key, value) {
+			continue
+		}
+		// push the first key of batch into queue,
+		// if migrate error happen, key of queue head will store into kvstore before panic
+		if isbatchFirstKey {
+			taskCache.PushBack(string(key))
+
+			isbatchFirstKey = false
+			if taskCache.Len() > 15000 {
+				taskCache.Remove(taskCache.Front())
+			}
+		}
+
+		tempBatch[string(key[:])] = value
+		count++
+		// make a batch contain 100 keys , and send job work pool
+		if count >= 1 && count%100 == 0 {
+			// make a batch as a job, send it to worker pool
+			batch_count++
+			dispatcher.SendKv(tempBatch, batch_count)
+			// if producer much faster than workers(more than 8000 jobs), make it slower
+			distance := batch_count - GetDoneTaskNum()
+			if distance > 8000 {
+				if distance > 12000 {
+					fmt.Println("worker lag too much", distance)
+					time.Sleep(1 * time.Minute)
+				}
+				time.Sleep(5 * time.Second)
+			}
+			// print cost time every 50000000 keys
+			if batch_count%500000 == 0 {
+				fmt.Println("finish level db k,v num:", batch_count*100,
+					"cost time:", time.Since(start).Nanoseconds()/1000000000, "s")
+			}
+			isbatchFirstKey = true
+			tempBatch = make(map[string][]byte)
+		}
+
+	}
+	if len(tempBatch) > 0 {
+		batch_count++
+		dispatcher.SendKv(tempBatch, batch_count)
+	}
+
+	fmt.Println("send batch num:", batch_count, "key num:", count, "pass snapshout:", snapcount)
+	dispatcher.setTaskNum(batch_count)
+
+	finish := dispatcher.WaitDbFinish()
+	if finish == false {
+		fmt.Println("leveldb key migrate fail")
+		panic("task fail")
+	}
+
+	// all leveldb keys migrating has been done, reset cache and jobs num
+	taskCache.Init()
+	leveldbCost := time.Since(start).Nanoseconds() / 1000000
+	fmt.Println("migrate succ , migrate leveldb cost time:", leveldbCost,
+		"migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
+
 	return nil
 }
