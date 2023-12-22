@@ -1,10 +1,8 @@
 package rawdb
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -31,56 +29,71 @@ func InitDb(db ethdb.Database, trieDB ethdb.Database) {
 
 func (job *Job) UploadToKvRocks() error {
 	if len(job.Kvbuffer) > 0 {
-		copiedKvbuffer := make(map[string][]byte)
-		for k, v := range job.Kvbuffer {
-			copiedKvbuffer[k] = v
+		kvBatch := triedbInstance.NewBatch()
+		for key, value := range job.Kvbuffer {
+			batchErr := kvBatch.Put([]byte(key), value)
+			if batchErr != nil {
+				return batchErr
+			}
 		}
 
-		errCh := make(chan error, 2) // 错误通道
-
-		var wg sync.WaitGroup
-		wg.Add(2)
-
-		go func() {
-			defer wg.Done()
-			kvBatch := triedbInstance.NewBatch()
-			for key, value := range job.Kvbuffer {
-				batchErr := kvBatch.Put([]byte(key), value)
-				if batchErr != nil {
-					errCh <- batchErr // 发送错误到通道
-					return
-				}
-			}
-
-			if err := kvBatch.Write(); err != nil {
-				fmt.Println("send kv rocks error", err.Error())
-				errCh <- err
-				return
-			}
-		}()
-
-		go func() {
-			defer wg.Done()
-			for delKey, _ := range copiedKvbuffer {
-				k := []byte(delKey)
-				if bytes.Equal(k, fastTrieProgressKey) || bytes.Equal(k, trieJournalKey) || bytes.Equal(k, persistentStateIDKey) {
-					continue
-				}
-				if err := pebbleDB.Delete(k); err != nil {
-					fmt.Println("delelte kv rocks error", err.Error())
-					errCh <- err // 发送错误到通道
-					return
-				}
-			}
-		}()
-
-		wg.Wait()
-		close(errCh)
-		// 从错误通道中读取错误
-		for err := range errCh {
+		if err := kvBatch.Write(); err != nil {
+			fmt.Println("send kv rocks error", err.Error())
 			return err
-			fmt.Println("migrate err:", err)
 		}
+		/*
+			copiedKvbuffer := make(map[string][]byte)
+			for k, v := range job.Kvbuffer {
+				copiedKvbuffer[k] = v
+			}
+
+			errCh := make(chan error, 2) // 错误通道
+
+			var wg sync.WaitGroup
+			wg.Add(2)
+
+			go func() {
+				defer wg.Done()
+				kvBatch := triedbInstance.NewBatch()
+				for key, value := range job.Kvbuffer {
+					batchErr := kvBatch.Put([]byte(key), value)
+					if batchErr != nil {
+						errCh <- batchErr // 发送错误到通道
+						return
+					}
+				}
+
+				if err := kvBatch.Write(); err != nil {
+					fmt.Println("send kv rocks error", err.Error())
+					errCh <- err
+					return
+				}
+			}()
+
+			go func() {
+				defer wg.Done()
+				for delKey, _ := range copiedKvbuffer {
+					k := []byte(delKey)
+					if bytes.Equal(k, fastTrieProgressKey) || bytes.Equal(k, trieJournalKey) || bytes.Equal(k, persistentStateIDKey) {
+						continue
+					}
+					if err := pebbleDB.Delete(k); err != nil {
+						fmt.Println("delelte kv rocks error", err.Error())
+						errCh <- err // 发送错误到通道
+						return
+					}
+				}
+			}()
+
+			wg.Wait()
+			close(errCh)
+			// 从错误通道中读取错误
+			for err := range errCh {
+				fmt.Println("migrate err:", err)
+				return err
+			}
+
+		*/
 	}
 
 	return nil

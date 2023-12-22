@@ -1041,7 +1041,7 @@ func SplitDatabaseV2(db ethdb.Database, trieDB ethdb.Database) error {
 
 	start := time.Now()
 	// start a task dispatcher with 1000 threads
-	dispatcher := MigrateStart(1200)
+	dispatcher := MigrateStart(2000)
 
 	var (
 		count       uint64
@@ -1121,7 +1121,6 @@ func SplitDatabaseV2(db ethdb.Database, trieDB ethdb.Database) error {
 	}
 
 	// all leveldb keys migrating has been done, reset cache and jobs num
-	taskCache.Init()
 	leveldbCost := time.Since(start).Nanoseconds() / 1000000
 	fmt.Println("migrate succ , migrate leveldb cost time:", leveldbCost,
 		"migrate ancient stop, cost time:", time.Since(start).Nanoseconds()/1000000)
