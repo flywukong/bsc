@@ -629,10 +629,7 @@ func dbTrieSplit(ctx *cli.Context) error {
 		return fmt.Errorf("trie dir must be set")
 	}
 
-	seprateDB := utils.SplitTrieDatabase(ctx, stack, false, false)
-	defer seprateDB.Close()
-
-	err := rawdb.SplitDatabaseV2(db, seprateDB)
+	err := rawdb.SplitDatabaseV2(db)
 	if err != nil {
 		return err
 	}

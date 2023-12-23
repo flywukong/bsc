@@ -12,7 +12,6 @@ import (
 
 var (
 	pebbleDB        ethdb.Database
-	triedbInstance  ethdb.Database
 	createErr       error
 	DoneTaskNum     uint64
 	SuccTaskNum     uint64
@@ -23,9 +22,8 @@ var (
 
 var ctx = context.Background()
 
-func InitDb(db ethdb.Database, trieDB ethdb.Database) {
+func InitDb(db ethdb.Database) {
 	pebbleDB = db
-	triedbInstance = trieDB
 }
 
 func (job *Job) UploadToKvRocks() error {

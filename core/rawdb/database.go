@@ -965,7 +965,7 @@ func migrateKey(db ethdb.Database, newDB ethdb.Database, key, value []byte) erro
 	return nil
 }
 
-func SplitDatabaseV2(db ethdb.Database, trieDB ethdb.Database) error {
+func SplitDatabaseV2(db ethdb.Database) error {
 	fmt.Println("begin migrate")
 
 	// get startKey from db if exist
@@ -1049,7 +1049,7 @@ func SplitDatabaseV2(db ethdb.Database, trieDB ethdb.Database) error {
 		snapcount   uint64
 	)
 	// init remote db for data sending
-	InitDb(db, trieDB)
+	InitDb(db)
 
 	count = 0
 	snapcount = 0
