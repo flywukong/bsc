@@ -1,6 +1,7 @@
 package rawdb
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync/atomic"
@@ -29,17 +30,15 @@ func InitDb(db ethdb.Database, trieDB ethdb.Database) {
 
 func (job *Job) UploadToKvRocks() error {
 	if len(job.Kvbuffer) > 0 {
-		kvBatch := triedbInstance.NewBatch()
-		for key, value := range job.Kvbuffer {
-			batchErr := kvBatch.Put([]byte(key), value)
-			if batchErr != nil {
-				return batchErr
+		for delKey, _ := range job.Kvbuffer {
+			k := []byte(delKey)
+			if bytes.Equal(k, fastTrieProgressKey) || bytes.Equal(k, trieJournalKey) || bytes.Equal(k, persistentStateIDKey) {
+				continue
 			}
-		}
-
-		if err := kvBatch.Write(); err != nil {
-			fmt.Println("send kv rocks error", err.Error())
-			return err
+			if err := pebbleDB.Delete(k); err != nil {
+				fmt.Println("delelte kv rocks error", err.Error())
+				return err
+			}
 		}
 		/*
 			copiedKvbuffer := make(map[string][]byte)
