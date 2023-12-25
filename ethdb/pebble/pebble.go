@@ -138,6 +138,8 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 	if handles < minHandles {
 		handles = minHandles
 	}
+
+	handles = handles / 2
 	logger := log.New("database", file)
 
 	// The max memtable size is limited by the uint32 offsets stored in

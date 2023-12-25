@@ -780,6 +780,7 @@ func (n *Node) OpenAndMergeDatabase(name string, cache, handles int, freezer, di
 	chainDataHandles := handles
 	if persistDiff {
 		chainDataHandles = handles * chainDataHandlesPercentage / 100
+		log.Info("persist diff is true", "handler", chainDataHandles)
 	}
 	chainDB, err := n.OpenDatabaseWithFreezer(name, cache, chainDataHandles, freezer, namespace, readonly, false, false, pruneAncientData)
 	if err != nil {
