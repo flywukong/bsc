@@ -834,21 +834,19 @@ func isTrieKey(key, value []byte) bool {
 		return true
 	case bytes.HasPrefix(key, PreimagePrefix) && len(key) == (len(PreimagePrefix)+common.HashLength):
 		return true
-
-	case bytes.HasPrefix(key, ChtTablePrefix) ||
-		bytes.HasPrefix(key, ChtIndexTablePrefix) ||
-		bytes.HasPrefix(key, ChtPrefix): // Canonical hash trie
-		return true
-	case bytes.HasPrefix(key, BloomTrieTablePrefix) ||
-		bytes.HasPrefix(key, BloomTrieIndexPrefix) ||
-		bytes.HasPrefix(key, BloomTriePrefix): // Bloomtrie sub
-		return true
-	default:
-		if bytes.Equal(key, fastTrieProgressKey) || bytes.Equal(key, trieJournalKey) || bytes.Equal(key, persistentStateIDKey) {
+	/*
+		case bytes.HasPrefix(key, ChtTablePrefix) ||
+			bytes.HasPrefix(key, ChtIndexTablePrefix) ||
+			bytes.HasPrefix(key, ChtPrefix): // Canonical hash trie
 			return true
-		}
+		case bytes.HasPrefix(key, BloomTrieTablePrefix) ||
+			bytes.HasPrefix(key, BloomTrieIndexPrefix) ||
+			bytes.HasPrefix(key, BloomTriePrefix): // Bloomtrie sub
+			return true
+	*/
+	default:
+		return false
 	}
-	return false
 }
 
 func SplitDatabase(db ethdb.Database, trieDB ethdb.Database) error {
