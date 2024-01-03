@@ -164,6 +164,7 @@ type CacheConfig struct {
 
 	SnapshotNoBuild bool // Whether the background generation is allowed
 	SnapshotWait    bool // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
+	SeparateTrie    bool //Indicate whether trie database use a separated db
 }
 
 // triedbConfig derives the configures for trie database.
@@ -355,20 +356,16 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		diffQueueBuffer:    make(chan *types.DiffLayer),
 	}
 
-	if bc.validator == nil {
-		log.Info("validator is nil1")
-	}
 	var err error
-	// do options before start any routine
-	for _, option := range options {
-		bc, err = option(bc)
-		if err != nil {
-			return nil, err
+	// if separated trie db has been set, it should be the last option
+	if cacheConfig.SeparateTrie {
+		if len(options) >= 1 {
+			option := options[len(options)-1]
+			bc, err = option(bc)
+			if err != nil {
+				return nil, err
+			}
 		}
-	}
-
-	if bc.validator == nil {
-		log.Info("validator is nil2")
 	}
 
 	// Open trie database with provided config
@@ -395,7 +392,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	bc.stateCache = state.NewDatabaseWithNodeDB(bc.db, bc.triedb)
 	// validator may already been inited in the EnableBlockValidator function in the option
 	if bc.validator == nil {
-		log.Info("validator is nil3")
 		bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	}
 
@@ -535,6 +531,18 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 			AsyncBuild: !bc.cacheConfig.SnapshotWait,
 		}
 		bc.snaps, _ = snapshot.New(snapconfig, bc.db, bc.triedb, head.Root, int(bc.cacheConfig.TriesInMemory), bc.stateCache.NoTries())
+	}
+
+	// do options before start any routine
+	if cacheConfig.SeparateTrie && len(options) >= 1 {
+		options = options[:len(options)-1]
+	}
+
+	for _, option := range options {
+		bc, err = option(bc)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Start future block processor.

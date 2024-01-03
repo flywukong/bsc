@@ -258,6 +258,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		bcOps = append(bcOps, core.EnableDoubleSignChecker)
 	}
 
+	peers := newPeerSet()
+	bcOps = append(bcOps, core.EnableBlockValidator(chainConfig, eth.engine, config.TriesVerifyMode, peers))
+
 	// if the separated trie db has set, need to new blockchain with the separated trie database
 	if stack.Config().TrieDir != "" {
 		log.Info("trie data dir has setted to ", stack.Config().TrieDir)
@@ -268,10 +271,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			return nil, err
 		}
 		bcOps = append(bcOps, core.EnableSeparateDB(separatedDB))
+		cacheConfig.SeparateTrie = true
 	}
 
-	peers := newPeerSet()
-	bcOps = append(bcOps, core.EnableBlockValidator(chainConfig, eth.engine, config.TriesVerifyMode, peers))
 	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, config.Genesis, &overrides, eth.engine, vmConfig, eth.shouldPreserve, &config.TransactionHistory, bcOps...)
 	if err != nil {
 		return nil, err
