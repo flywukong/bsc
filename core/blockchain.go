@@ -356,6 +356,10 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		diffQueue:          prque.New[int64, *types.DiffLayer](nil),
 		diffQueueBuffer:    make(chan *types.DiffLayer),
 	}
+
+	if bc.validator == nil {
+		log.Info("validator is nil1")
+	}
 	var err error
 	// do options before start any routine
 	for _, option := range options {
@@ -363,6 +367,10 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if bc.validator == nil {
+		log.Info("validator is nil2")
 	}
 
 	// Open trie database with provided config
@@ -390,8 +398,10 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	bc.stateCache = state.NewDatabaseWithNodeDB(bc.db, bc.triedb)
 	// validator may already been inited in the EnableBlockValidator function in the option
 	if bc.validator == nil {
+		log.Info("validator is nil3")
 		bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	}
+
 	bc.prefetcher = NewStatePrefetcher(chainConfig, bc, engine)
 	bc.processor = NewStateProcessor(chainConfig, bc, engine)
 
