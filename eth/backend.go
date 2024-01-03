@@ -258,7 +258,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		bcOps = append(bcOps, core.EnableDoubleSignChecker)
 	}
 
-	// if the seperated trie db has set, need to new blockchain with the seperated trie database
+	// if the separated trie db has set, need to new blockchain with the separated trie database
 	if stack.Config().TrieDir != "" {
 		log.Info("trie data dir has setted to ", stack.Config().TrieDir)
 		separatedDB, err := stack.OpenTrieDataBase("chaindata", config.DatabaseCache, config.DatabaseHandles,
