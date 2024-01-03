@@ -355,7 +355,9 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		diffQueue:          prque.New[int64, *types.DiffLayer](nil),
 		diffQueueBuffer:    make(chan *types.DiffLayer),
 	}
-
+	if bc.validator == nil {
+		log.Info("validator is nil1")
+	}
 	var err error
 	// if separated trie db has been set, it should be the last option
 	if cacheConfig.SeparateTrie {
@@ -366,6 +368,9 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 				return nil, err
 			}
 		}
+	}
+	if bc.validator == nil {
+		log.Info("validator is nil2")
 	}
 
 	// Open trie database with provided config
@@ -392,6 +397,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	bc.stateCache = state.NewDatabaseWithNodeDB(bc.db, bc.triedb)
 	// validator may already been inited in the EnableBlockValidator function in the option
 	if bc.validator == nil {
+		log.Info("validator is nil3")
 		bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	}
 
