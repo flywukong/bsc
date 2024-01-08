@@ -230,7 +230,7 @@ func initGenesis(ctx *cli.Context) error {
 		var triedb *trie.Database
 		// if the trie data dir has been set , new trie db with a new trie database
 		if ctx.IsSet(utils.TrieDirFlag.Name) {
-			separatedDB, dbErr := stack.OpenTrieDataBase(name, 0, 0, "", "", false, false, false, false)
+			separatedDB, dbErr := stack.OpenTrieDataBase(name, 0, 0, "", false, false, false, false)
 			if dbErr != nil {
 				utils.Fatalf("Failed to open separate trie database: %v", dbErr)
 			}
