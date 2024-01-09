@@ -263,14 +263,15 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	// if the separated trie db has set, need to new blockchain with the separated trie database
 	if stack.Config().TrieDir != "" {
-		log.Info("trie data dir has setted to ", stack.Config().TrieDir)
-		separatedDB, err := stack.OpenTrieDataBase("chaindata", config.DatabaseCache, config.DatabaseHandles, "eth/db/chaindata/", false, false, false, config.PruneAncientData)
-		if err != nil {
-			log.Info("open db err", err)
-			return nil, err
+		separatedDBConfig := &core.SeparateTrieConfig{
+			SeparateDBHandles: config.DatabaseHandles,
+			SeparateDBCache:   config.DatabaseCache,
+			SeparateDBEngine:  stack.Config().DBEngine,
+			TrieDataDir:       stack.Config().GetTrieDir(),
+			TrieNameSpace:     "eth/db/chaindata/",
+			TrieName:          "chaindata",
 		}
-		bcOps = append(bcOps, core.EnableSeparateDB(separatedDB))
-		cacheConfig.SeparateTrie = true
+		cacheConfig.SeparateTrieConfig = separatedDBConfig
 	}
 
 	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, config.Genesis, &overrides, eth.engine, vmConfig, eth.shouldPreserve, &config.TransactionHistory, bcOps...)

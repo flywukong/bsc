@@ -396,7 +396,7 @@ func (c *Config) instanceDir() string {
 	return filepath.Join(c.DataDir, c.name())
 }
 
-func (c *Config) trieDir() string {
+func (c *Config) GetTrieDir() string {
 	if c.TrieDir == "" {
 		return ""
 	}
