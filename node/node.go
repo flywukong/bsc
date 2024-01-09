@@ -810,9 +810,9 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
 	}
 	var db ethdb.Database
 	var err error
-	var isSeprateDB bool
-	if n.config.trieDir() != "" {
-		isSeprateDB = true
+	var isSeparateDB bool
+	if n.config.GetTrieDir() != "" {
+		isSeparateDB = true
 	}
 	if n.config.DataDir == "" {
 		db = rawdb.NewMemoryDatabase()
@@ -828,7 +828,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
 			DisableFreeze:     disableFreeze,
 			IsLastOffset:      isLastOffset,
 			PruneAncientData:  pruneAncientData,
-			IsSperateDB:       isSeprateDB,
+			IsSperateDB:       isSeparateDB,
 		})
 	}
 
@@ -849,11 +849,11 @@ func (n *Node) OpenTrieDataBase(name string, cache, handles int, namespace strin
 	if n.config.DataDir == "" {
 		db = rawdb.NewMemoryDatabase()
 	} else {
-		seprateDir := filepath.Join(n.config.trieDir(), name)
+		separateDir := filepath.Join(n.config.GetTrieDir(), name)
 		db, err = rawdb.Open(rawdb.OpenOptions{
 			Type:              n.config.DBEngine,
-			Directory:         seprateDir,
-			AncientsDirectory: filepath.Join(seprateDir, "ancient"),
+			Directory:         separateDir,
+			AncientsDirectory: filepath.Join(separateDir, "ancient"),
 			Namespace:         namespace,
 			Cache:             cache,
 			Handles:           handles,
