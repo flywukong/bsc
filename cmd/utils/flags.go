@@ -2289,19 +2289,6 @@ func MakeChainDatabase(ctx *cli.Context, stack *node.Node, readonly, disableFree
 	return chainDb
 }
 
-func SplitTrieDatabase(ctx *cli.Context, stack *node.Node, readonly, disableFreeze bool) ethdb.Database {
-	var (
-		cache   = ctx.Int(CacheFlag.Name) * ctx.Int(CacheDatabaseFlag.Name) / 100
-		handles = MakeDatabaseHandles(ctx.Int(FDLimitFlag.Name))
-	)
-
-	trieDB, err := stack.OpenTrieDataBase("chaindata", cache, handles, "eth/db/chaindata/", false, false, false, false)
-	if err != nil {
-		Fatalf("Could not open trie database: %v", err)
-	}
-	return trieDB
-}
-
 // tryMakeReadOnlyDatabase try to open the chain database in read-only mode,
 // or fallback to write mode if the database is not initialized.
 func tryMakeReadOnlyDatabase(ctx *cli.Context, stack *node.Node) ethdb.Database {
