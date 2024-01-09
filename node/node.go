@@ -817,6 +817,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
 	if n.config.DataDir == "" {
 		db = rawdb.NewMemoryDatabase()
 	} else {
+		log.Info("snap db dir is1", "dir", n.ResolvePath(name), "namespace", namespace)
 		db, err = rawdb.Open(rawdb.OpenOptions{
 			Type:              n.config.DBEngine,
 			Directory:         n.ResolvePath(name),
@@ -850,6 +851,7 @@ func (n *Node) OpenTrieDataBase(name string, cache, handles int, ancient, namesp
 		db = rawdb.NewMemoryDatabase()
 	} else {
 		seprateDir := filepath.Join(n.config.trieDir(), name)
+		log.Info("trie db dir is1", "dir", seprateDir, "namespace", namespace)
 		db, err = rawdb.Open(rawdb.OpenOptions{
 			Type:              n.config.DBEngine,
 			Directory:         seprateDir,
