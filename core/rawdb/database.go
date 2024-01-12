@@ -399,8 +399,8 @@ func NewMemoryDatabaseWithCap(size int) ethdb.Database {
 
 // NewLevelDBDatabase creates a persistent key-value database without a freezer
 // moving immutable chain segments into cold storage.
-func NewLevelDBDatabase(file string, cache int, handles int, namespace string, readonly bool) (ethdb.Database, error) {
-	db, err := leveldb.New(file, cache, handles, namespace, readonly)
+func NewLevelDBDatabase(file string, cache int, handles int, namespace string, readonly, useSeparateDB, isSingleTrieDB bool) (ethdb.Database, error) {
+	db, err := leveldb.New(file, cache, handles, namespace, readonly, useSeparateDB, isSingleTrieDB)
 	if err != nil {
 		return nil, err
 	}
@@ -413,8 +413,11 @@ func NewLevelDBDatabase(file string, cache int, handles int, namespace string, r
 // indicates the path of root ancient directory where the chain freezer can be
 // opened.
 // just used for test now
-func NewLevelDBDatabaseWithFreezer(file string, cache int, handles int, ancient string, namespace string, readonly, disableFreeze, isLastOffset, pruneAncientData bool) (ethdb.Database, error) {
-	kvdb, err := leveldb.New(file, cache, handles, namespace, readonly)
+func NewLevelDBDatabaseWithFreezer(file string, cache int, handles int, ancient string, namespace string, readonly, disableFreeze, isLastOffset, pruneAncientData, isSeparatedDB, isSingleTrieDB bool) (ethdb.Database, error) {
+	if isSeparatedDB && isSingleTrieDB {
+		return nil, errors.New("separate DB and independent triedb cannot be supported at the same time")
+	}
+	kvdb, err := leveldb.New(file, cache, handles, namespace, readonly, isSeparatedDB, isSingleTrieDB)
 	if err != nil {
 		return nil, err
 	}
@@ -428,8 +431,11 @@ func NewLevelDBDatabaseWithFreezer(file string, cache int, handles int, ancient 
 
 // NewPebbleDBDatabase creates a persistent key-value database without a freezer
 // moving immutable chain segments into cold storage.
-func NewPebbleDBDatabase(file string, cache int, handles int, namespace string, readonly bool, seprateDB, isTrie bool) (ethdb.Database, error) {
-	db, err := pebble.New(file, cache, handles, namespace, readonly, seprateDB, isTrie)
+func NewPebbleDBDatabase(file string, cache int, handles int, namespace string, readonly, useSeparateDB, isSingleTrieDB bool) (ethdb.Database, error) {
+	if useSeparateDB && isSingleTrieDB {
+		return nil, errors.New("separate DB and independent triedb cannot be supported at the same time")
+	}
+	db, err := pebble.New(file, cache, handles, namespace, readonly, useSeparateDB, isSingleTrieDB)
 	if err != nil {
 		return nil, err
 	}
@@ -471,8 +477,8 @@ type OpenOptions struct {
 	DisableFreeze    bool
 	IsLastOffset     bool
 	PruneAncientData bool
-	IsSperateDB      bool
-	IsTrieDB         bool
+	IsSeparateDB     bool // indicates if it is a separated db which stored snapshot, meta and block data.
+	IsSingleTrieDB   bool // indicates if it is a separated which stored trie data.
 }
 
 // openKeyValueDatabase opens a disk-based key-value database, e.g. leveldb or pebble.
@@ -494,18 +500,18 @@ func openKeyValueDatabase(o OpenOptions) (ethdb.Database, error) {
 	}
 	if o.Type == dbPebble || existingDb == dbPebble {
 		log.Info("Using pebble as the backing database")
-		return NewPebbleDBDatabase(o.Directory, o.Cache, o.Handles, o.Namespace, o.ReadOnly, o.IsSperateDB, o.IsTrieDB)
+		return NewPebbleDBDatabase(o.Directory, o.Cache, o.Handles, o.Namespace, o.ReadOnly, o.IsSeparateDB, o.IsSingleTrieDB)
 	}
 	if o.Type == dbLeveldb || existingDb == dbLeveldb {
 		log.Info("Using leveldb as the backing database")
-		return NewLevelDBDatabase(o.Directory, o.Cache, o.Handles, o.Namespace, o.ReadOnly)
+		return NewLevelDBDatabase(o.Directory, o.Cache, o.Handles, o.Namespace, o.ReadOnly, o.IsSeparateDB, o.IsSingleTrieDB)
 	}
 	// No pre-existing database, no user-requested one either. Default to Pebble
 	// on supported platforms and LevelDB on anything else.
 	// 	log.Info("Defaulting to pebble as the backing database")
 	// 	return NewPebbleDBDatabase(o.Directory, o.Cache, o.Handles, o.Namespace, o.ReadOnly)
 	log.Info("Defaulting to leveldb as the backing database")
-	return NewLevelDBDatabase(o.Directory, o.Cache, o.Handles, o.Namespace, o.ReadOnly)
+	return NewLevelDBDatabase(o.Directory, o.Cache, o.Handles, o.Namespace, o.ReadOnly, o.IsSeparateDB, o.IsSingleTrieDB)
 }
 
 // Open opens both a disk-based key-value database such as leveldb or pebble, but also

@@ -828,7 +828,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
 			DisableFreeze:     disableFreeze,
 			IsLastOffset:      isLastOffset,
 			PruneAncientData:  pruneAncientData,
-			IsSperateDB:       isSeparateDB,
+			IsSeparateDB:      isSeparateDB,
 		})
 	}
 
@@ -861,7 +861,7 @@ func (n *Node) OpenTrieDataBase(name string, cache, handles int, namespace strin
 			DisableFreeze:     disableFreeze,
 			IsLastOffset:      isLastOffset,
 			PruneAncientData:  pruneAncientData,
-			IsTrieDB:          true,
+			IsSingleTrieDB:    true,
 		})
 	}
 
@@ -890,7 +890,7 @@ func (n *Node) OpenDiffDatabase(name string, handles int, diff, namespace string
 	case !filepath.IsAbs(diff):
 		diff = n.ResolvePath(diff)
 	}
-	db, err = leveldb.New(diff, 0, handles, namespace, readonly)
+	db, err = leveldb.New(diff, 0, handles, namespace, readonly, false, false)
 
 	return db, err
 }

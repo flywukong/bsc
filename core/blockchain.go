@@ -386,7 +386,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 			DisableFreeze:     false,
 			IsLastOffset:      false,
 			PruneAncientData:  triedbConfig.PruneAncientData,
-			IsTrieDB:          true,
+			IsSingleTrieDB:    true,
 		})
 
 		if dbErr != nil {
