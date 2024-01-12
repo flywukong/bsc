@@ -139,7 +139,7 @@ func New(file string, cache int, handles int, namespace string, readonly, useSep
 		handles = minHandles
 	}
 
-	// if it is the origin snapshot DB, use less handler number because the db size is smaller than trie db.
+	// if it is the originDB which contain snapshot, meta and block data, use less handler number because the db size is smaller than trie db.
 	if useSeparateDB && !isSingleTrieDB {
 		handles = int(float64(handles) * 0.4)
 	}
