@@ -171,12 +171,12 @@ type CacheConfig struct {
 
 // SeparateTrieConfig contains the configuration values for the separated trie database
 type SeparateTrieConfig struct {
-	SeparateDBHandles int
-	SeparateDBCache   int
-	SeparateDBEngine  string
-	TrieDataDir       string
-	TrieNameSpace     string
-	TrieName          string
+	SeparateDBHandles int    // The handler num used by the separated trie db
+	SeparateDBCache   int    // The cache size used by the separated trie db
+	SeparateDBEngine  string // The db engine (pebble or leveldb) used by the separated trie db
+	TrieDataDir       string // The directory of the separated trie db
+	TrieNameSpace     string // The namespace of the separated trie db
+	TrieName          string // The name of the separated trie db
 	PruneAncientData  bool
 }
 
@@ -345,10 +345,8 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	*/
 
 	bc := &BlockChain{
-		//	chainConfig:        chainConfig,
-		cacheConfig: cacheConfig,
-		db:          db,
-		//	triedb:             triedb,
+		cacheConfig:        cacheConfig,
+		db:                 db,
 		triegc:             prque.New[int64, common.Hash](nil),
 		quit:               make(chan struct{}),
 		triesInMemory:      cacheConfig.TriesInMemory,
@@ -405,9 +403,9 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
+	bc.chainConfig = chainConfig
 	systemcontracts.GenesisHash = genesisHash
 	log.Info("Initialised chain configuration", "config", chainConfig)
-	bc.chainConfig = chainConfig
 
 	bc.flushInterval.Store(int64(cacheConfig.TrieTimeLimit))
 	bc.forker = NewForkChoice(bc, shouldPreserve)
