@@ -130,7 +130,7 @@ func (l panicLogger) Fatalf(format string, args ...interface{}) {
 
 // New returns a wrapped pebble DB object. The namespace is the prefix that the
 // metrics reporting should use for surfacing internal stats.
-func New(file string, cache int, handles int, namespace string, readonly bool, isSnapDB bool, isTrieDB bool) (*Database, error) {
+func New(file string, cache int, handles int, namespace string, readonly, useSeparateDB, isSingleTrieDB bool) (*Database, error) {
 	// Ensure we have some minimal caching and file guarantees
 	if cache < minCache {
 		cache = minCache
@@ -140,12 +140,12 @@ func New(file string, cache int, handles int, namespace string, readonly bool, i
 	}
 
 	// if it is the origin snapshot DB, use less handler number because the db size is smaller than trie db.
-	if isSnapDB && !isTrieDB {
+	if useSeparateDB && !isSingleTrieDB {
 		handles = int(float64(handles) * 0.4)
 	}
 
 	// if it is the single trie DB, use more handler because the trie db size is larger than snap db.
-	if !isSnapDB && isTrieDB {
+	if !useSeparateDB && isSingleTrieDB {
 		handles = int(float64(handles) * 0.6)
 	}
 
@@ -244,7 +244,7 @@ func New(file string, cache int, handles int, namespace string, readonly bool, i
 	}
 	db.db = innerDB
 
-	if !isSnapDB && !isTrieDB {
+	if !useSeparateDB && !isSingleTrieDB {
 		db.compTimeMeter = metrics.NewRegisteredMeter(namespace+"compact/time", nil)
 		db.compReadMeter = metrics.NewRegisteredMeter(namespace+"compact/input", nil)
 		db.compWriteMeter = metrics.NewRegisteredMeter(namespace+"compact/output", nil)
@@ -258,36 +258,36 @@ func New(file string, cache int, handles int, namespace string, readonly bool, i
 		db.nonlevel0CompGauge = metrics.NewRegisteredGauge(namespace+"compact/nonlevel0", nil)
 		db.seekCompGauge = metrics.NewRegisteredGauge(namespace+"compact/seek", nil)
 		db.manualMemAllocGauge = metrics.NewRegisteredGauge(namespace+"memory/manualalloc", nil)
-	} else if isSnapDB && !isTrieDB {
+	} else if useSeparateDB && !isSingleTrieDB {
 		// it is the metrics of single snapshot db
-		db.compTimeMeter = metrics.NewRegisteredMeter(namespace+"snap-compact/time", nil)
-		db.compReadMeter = metrics.NewRegisteredMeter(namespace+"snap-compact/input", nil)
-		db.compWriteMeter = metrics.NewRegisteredMeter(namespace+"snap-compact/output", nil)
-		db.diskSizeGauge = metrics.NewRegisteredGauge(namespace+"snap-disk/size", nil)
-		db.diskReadMeter = metrics.NewRegisteredMeter(namespace+"snap-disk/read", nil)
-		db.diskWriteMeter = metrics.NewRegisteredMeter(namespace+"snap-disk/write", nil)
-		db.writeDelayMeter = metrics.NewRegisteredMeter(namespace+"snap-compact/writedelay/duration", nil)
-		db.writeDelayNMeter = metrics.NewRegisteredMeter(namespace+"snap-compact/writedelay/counter", nil)
-		db.memCompGauge = metrics.NewRegisteredGauge(namespace+"snap-compact/memory", nil)
-		db.level0CompGauge = metrics.NewRegisteredGauge(namespace+"snap-compact/level0", nil)
-		db.nonlevel0CompGauge = metrics.NewRegisteredGauge(namespace+"snap-compact/nonlevel0", nil)
-		db.seekCompGauge = metrics.NewRegisteredGauge(namespace+"snap-compact/seek", nil)
-		db.manualMemAllocGauge = metrics.NewRegisteredGauge(namespace+"snap-memory/manualalloc", nil)
+		db.compTimeMeter = metrics.NewRegisteredMeter(namespace+"snapdbcompact/time", nil)
+		db.compReadMeter = metrics.NewRegisteredMeter(namespace+"snapdbcompact/input", nil)
+		db.compWriteMeter = metrics.NewRegisteredMeter(namespace+"snapdbcompact/output", nil)
+		db.diskSizeGauge = metrics.NewRegisteredGauge(namespace+"snapdbdisk/size", nil)
+		db.diskReadMeter = metrics.NewRegisteredMeter(namespace+"snapdbdisk/read", nil)
+		db.diskWriteMeter = metrics.NewRegisteredMeter(namespace+"snapdbdisk/write", nil)
+		db.writeDelayMeter = metrics.NewRegisteredMeter(namespace+"snapdbcompact/writedelay/duration", nil)
+		db.writeDelayNMeter = metrics.NewRegisteredMeter(namespace+"snapdbcompact/writedelay/counter", nil)
+		db.memCompGauge = metrics.NewRegisteredGauge(namespace+"snapdbcompact/memory", nil)
+		db.level0CompGauge = metrics.NewRegisteredGauge(namespace+"snapdbcompact/level0", nil)
+		db.nonlevel0CompGauge = metrics.NewRegisteredGauge(namespace+"snapdbcompact/nonlevel0", nil)
+		db.seekCompGauge = metrics.NewRegisteredGauge(namespace+"snapdbcompact/seek", nil)
+		db.manualMemAllocGauge = metrics.NewRegisteredGauge(namespace+"snapdbmemory/manualalloc", nil)
 	} else {
 		// it is the metrics of single trie db
-		db.compTimeMeter = metrics.NewRegisteredMeter(namespace+"triecompact/time", nil)
-		db.compReadMeter = metrics.NewRegisteredMeter(namespace+"triecompact/input", nil)
-		db.compWriteMeter = metrics.NewRegisteredMeter(namespace+"triecompact/output", nil)
-		db.diskSizeGauge = metrics.NewRegisteredGauge(namespace+"triedisk/size", nil)
-		db.diskReadMeter = metrics.NewRegisteredMeter(namespace+"triedisk/read", nil)
-		db.diskWriteMeter = metrics.NewRegisteredMeter(namespace+"triedisk/write", nil)
-		db.writeDelayMeter = metrics.NewRegisteredMeter(namespace+"triecompact/writedelay/duration", nil)
-		db.writeDelayNMeter = metrics.NewRegisteredMeter(namespace+"triecompact/writedelay/counter", nil)
-		db.memCompGauge = metrics.NewRegisteredGauge(namespace+"triecompact/memory", nil)
-		db.level0CompGauge = metrics.NewRegisteredGauge(namespace+"triecompact/level0", nil)
-		db.nonlevel0CompGauge = metrics.NewRegisteredGauge(namespace+"triecompact/nonlevel0", nil)
-		db.seekCompGauge = metrics.NewRegisteredGauge(namespace+"triecompact/seek", nil)
-		db.manualMemAllocGauge = metrics.NewRegisteredGauge(namespace+"triememory/manualalloc", nil)
+		db.compTimeMeter = metrics.NewRegisteredMeter(namespace+"triedbcompact/time", nil)
+		db.compReadMeter = metrics.NewRegisteredMeter(namespace+"triedbcompact/input", nil)
+		db.compWriteMeter = metrics.NewRegisteredMeter(namespace+"triedbcompact/output", nil)
+		db.diskSizeGauge = metrics.NewRegisteredGauge(namespace+"triedbdisk/size", nil)
+		db.diskReadMeter = metrics.NewRegisteredMeter(namespace+"triedbdisk/read", nil)
+		db.diskWriteMeter = metrics.NewRegisteredMeter(namespace+"triedbdisk/write", nil)
+		db.writeDelayMeter = metrics.NewRegisteredMeter(namespace+"triedbcompact/writedelay/duration", nil)
+		db.writeDelayNMeter = metrics.NewRegisteredMeter(namespace+"triedbcompact/writedelay/counter", nil)
+		db.memCompGauge = metrics.NewRegisteredGauge(namespace+"triedbcompact/memory", nil)
+		db.level0CompGauge = metrics.NewRegisteredGauge(namespace+"triedbcompact/level0", nil)
+		db.nonlevel0CompGauge = metrics.NewRegisteredGauge(namespace+"triedbcompact/nonlevel0", nil)
+		db.seekCompGauge = metrics.NewRegisteredGauge(namespace+"triedbcompact/seek", nil)
+		db.manualMemAllocGauge = metrics.NewRegisteredGauge(namespace+"triedbmemory/manualalloc", nil)
 	}
 
 	// Start up the metrics gathering and return
