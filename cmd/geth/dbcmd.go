@@ -152,7 +152,6 @@ a data corruption.`,
 		},
 		Description: "This command delete the specify trie node from the database.",
 	}
-
 	dbStatCmd = &cli.Command{
 		Action: dbStats,
 		Name:   "stats",
