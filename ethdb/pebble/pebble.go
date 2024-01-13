@@ -142,7 +142,7 @@ func New(file string, cache int, handles int, namespace string, readonly bool, i
 
 	// if it is the origin snapshot DB, use less handler number because the db size is smaller than trie db.
 	if isSnapDB && !isTrieDB {
-		handles = int(float64(handles) * 0.4)
+		handles = int(float64(handles) * 0.6)
 	}
 
 	// if it is the single trie DB, use more handler because the trie db size is larger than snap db.
