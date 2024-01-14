@@ -132,10 +132,22 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	// Assemble the Ethereum object
-	chainDb, err := stack.OpenAndMergeDatabase("chaindata", config.DatabaseCache, config.DatabaseHandles,
-		config.DatabaseFreezer, config.DatabaseDiff, "eth/db/chaindata/", false, config.PersistDiff, config.PruneAncientData)
-	if err != nil {
-		return nil, err
+	var chainDb ethdb.Database
+	var err error
+	if stack.Config().TrieDir != "" {
+		// It is the separated db which contain snapshot, meta and block data with no trie data storing in it.
+		// Allocate partial handles and cache to this separate database because it is not a complete database.
+		chainDb, err = stack.OpenAndMergeDatabase("chaindata", int(float64(config.DatabaseCache)*0.6), int(float64(config.DatabaseHandles)*0.6),
+			config.DatabaseFreezer, config.DatabaseDiff, "eth/separatedb/chaindata/", false, config.PersistDiff, config.PruneAncientData)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		chainDb, err = stack.OpenAndMergeDatabase("chaindata", config.DatabaseCache, config.DatabaseHandles,
+			config.DatabaseFreezer, config.DatabaseDiff, "eth/db/chaindata/", false, config.PersistDiff, config.PruneAncientData)
+		if err != nil {
+			return nil, err
+		}
 	}
 	config.StateScheme, err = rawdb.ParseStateScheme(config.StateScheme, chainDb)
 	if err != nil {
@@ -269,12 +281,13 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	// if the separated trie db has set, need to new blockchain with the separated trie database
 	if stack.Config().TrieDir != "" {
 		separatedDBConfig := &core.SeparateTrieConfig{
-			SeparateDBHandles: config.DatabaseHandles,
-			SeparateDBCache:   config.DatabaseCache,
+			SeparateDBHandles: int(float64(config.DatabaseHandles) * 0.6),
+			SeparateDBCache:   int(float64(config.DatabaseCache) * 0.5),
 			SeparateDBEngine:  stack.Config().DBEngine,
 			TrieDataDir:       stack.Config().GetTrieDir(),
-			TrieNameSpace:     "eth/db/chaindata/",
+			TrieNameSpace:     "eth/triedb/chaindata/",
 			TrieName:          "chaindata",
+			SeparateDBAncient: config.DatabaseFreezer,
 		}
 		cacheConfig.SeparateTrieConfig = separatedDBConfig
 	}

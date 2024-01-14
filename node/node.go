@@ -810,10 +810,6 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
 	}
 	var db ethdb.Database
 	var err error
-	var isSeparateDB bool
-	if n.config.GetTrieDir() != "" {
-		isSeparateDB = true
-	}
 	if n.config.DataDir == "" {
 		db = rawdb.NewMemoryDatabase()
 	} else {
@@ -828,7 +824,6 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
 			DisableFreeze:     disableFreeze,
 			IsLastOffset:      isLastOffset,
 			PruneAncientData:  pruneAncientData,
-			IsSeparateDB:      isSeparateDB,
 		})
 	}
 
@@ -838,7 +833,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
 	return db, err
 }
 
-func (n *Node) OpenTrieDataBase(name string, cache, handles int, namespace string, readonly, disableFreeze, isLastOffset, pruneAncientData bool) (ethdb.Database, error) {
+func (n *Node) OpenTrieDataBase(name string, cache, handles int, ancient, namespace string, readonly, disableFreeze, isLastOffset, pruneAncientData bool) (ethdb.Database, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 	if n.state == closedState {
@@ -853,7 +848,7 @@ func (n *Node) OpenTrieDataBase(name string, cache, handles int, namespace strin
 		db, err = rawdb.Open(rawdb.OpenOptions{
 			Type:              n.config.DBEngine,
 			Directory:         separateDir,
-			AncientsDirectory: filepath.Join(separateDir, "ancient"),
+			AncientsDirectory: filepath.Join(separateDir, ancient),
 			Namespace:         namespace,
 			Cache:             cache,
 			Handles:           handles,
@@ -861,7 +856,6 @@ func (n *Node) OpenTrieDataBase(name string, cache, handles int, namespace strin
 			DisableFreeze:     disableFreeze,
 			IsLastOffset:      isLastOffset,
 			PruneAncientData:  pruneAncientData,
-			IsSingleTrieDB:    true,
 		})
 	}
 
@@ -890,7 +884,7 @@ func (n *Node) OpenDiffDatabase(name string, handles int, diff, namespace string
 	case !filepath.IsAbs(diff):
 		diff = n.ResolvePath(diff)
 	}
-	db, err = leveldb.New(diff, 0, handles, namespace, readonly, false, false)
+	db, err = leveldb.New(diff, 0, handles, namespace, readonly)
 
 	return db, err
 }

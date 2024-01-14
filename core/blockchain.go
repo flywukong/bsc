@@ -169,7 +169,7 @@ type CacheConfig struct {
 	SeparateTrieConfig *SeparateTrieConfig
 }
 
-// SeparateTrieConfig contains the configuration values for the separated trie database
+// SeparateTrieConfig contains the configuration values for the separated single trie database
 type SeparateTrieConfig struct {
 	SeparateDBHandles int    // The handler num used by the separated trie db
 	SeparateDBCache   int    // The cache size used by the separated trie db
@@ -177,6 +177,7 @@ type SeparateTrieConfig struct {
 	TrieDataDir       string // The directory of the separated trie db
 	TrieNameSpace     string // The namespace of the separated trie db
 	TrieName          string // The name of the separated trie db
+	SeparateDBAncient string // The ancient directory of the separated trie db
 	PruneAncientData  bool
 }
 
@@ -370,25 +371,24 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	// Open trie database with provided config
 	var triedb *trie.Database
 	if cacheConfig.SeparateTrieConfig != nil {
-		triedbConfig := cacheConfig.SeparateTrieConfig
-		log.Info("separated trie database dir has been set to ", "dir", triedbConfig.TrieDataDir)
-		separateDir := filepath.Join(triedbConfig.TrieDataDir, triedbConfig.TrieName)
+		separatedTrieConfig := cacheConfig.SeparateTrieConfig
+		log.Info("node run with separated trie database", "directory", separatedTrieConfig.TrieDataDir)
+		separateDir := filepath.Join(separatedTrieConfig.TrieDataDir, separatedTrieConfig.TrieName)
 		separateDB, dbErr := rawdb.Open(rawdb.OpenOptions{
-			Type:              triedbConfig.SeparateDBEngine,
+			Type:              separatedTrieConfig.SeparateDBEngine,
 			Directory:         separateDir,
-			AncientsDirectory: filepath.Join(separateDir, "ancient"),
-			Namespace:         triedbConfig.TrieNameSpace,
-			Cache:             triedbConfig.SeparateDBCache,
-			Handles:           triedbConfig.SeparateDBHandles,
+			AncientsDirectory: filepath.Join(separateDir, separatedTrieConfig.SeparateDBAncient),
+			Namespace:         separatedTrieConfig.TrieNameSpace,
+			Cache:             separatedTrieConfig.SeparateDBCache,
+			Handles:           separatedTrieConfig.SeparateDBHandles,
 			ReadOnly:          false,
 			DisableFreeze:     false,
 			IsLastOffset:      false,
-			PruneAncientData:  triedbConfig.PruneAncientData,
-			IsSingleTrieDB:    true,
+			PruneAncientData:  separatedTrieConfig.PruneAncientData,
 		})
 
 		if dbErr != nil {
-			log.Error("failed to create separated trie database ", "err", dbErr)
+			log.Error("Failed to create separated trie database", "err", dbErr)
 			return nil, dbErr
 		}
 		triedb = trie.NewDatabase(separateDB, cacheConfig.triedbConfig())

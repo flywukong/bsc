@@ -85,8 +85,8 @@ type Database struct {
 
 // New returns a wrapped LevelDB object. The namespace is the prefix that the
 // metrics reporting should use for surfacing internal stats.
-func New(file string, cache int, handles int, namespace string, readonly, isSeparateDB, isSingleTrieDB bool) (*Database, error) {
-	return NewCustom(file, namespace, isSeparateDB, isSingleTrieDB, func(options *opt.Options) {
+func New(file string, cache int, handles int, namespace string, readonly bool) (*Database, error) {
+	return NewCustom(file, namespace, func(options *opt.Options) {
 		// Ensure we have some minimal caching and file guarantees
 		if cache < minCache {
 			cache = minCache
@@ -94,16 +94,6 @@ func New(file string, cache int, handles int, namespace string, readonly, isSepa
 		if handles < minHandles {
 			handles = minHandles
 		}
-		// if it is the separated DB which contain snapshot, meta and block data, use less handler number because the db size is smaller than trie db.
-		if isSeparateDB && !isSingleTrieDB {
-			handles = int(float64(handles) * 0.4)
-		}
-
-		// if it is the single trie DB, use more handler because the trie db size is larger than snap db.
-		if !isSeparateDB && isSingleTrieDB {
-			handles = int(float64(handles) * 0.6)
-		}
-
 		// Set default options
 		options.OpenFilesCacheCapacity = handles
 		options.BlockCacheCapacity = cache / 2 * opt.MiB
@@ -117,7 +107,7 @@ func New(file string, cache int, handles int, namespace string, readonly, isSepa
 // NewCustom returns a wrapped LevelDB object. The namespace is the prefix that the
 // metrics reporting should use for surfacing internal stats.
 // The customize function allows the caller to modify the leveldb options.
-func NewCustom(file string, namespace string, useSeparateDB, isSingleTrieDB bool, customize func(options *opt.Options)) (*Database, error) {
+func NewCustom(file string, namespace string, customize func(options *opt.Options)) (*Database, error) {
 	options := configureOptions(customize)
 	logger := log.New("database", file)
 	usedCache := options.GetBlockCacheCapacity() + options.GetWriteBuffer()*2
@@ -143,49 +133,20 @@ func NewCustom(file string, namespace string, useSeparateDB, isSingleTrieDB bool
 		quitChan: make(chan chan error),
 	}
 
-	if !useSeparateDB && !isSingleTrieDB {
-		ldb.compTimeMeter = metrics.NewRegisteredMeter(namespace+"compact/time", nil)
-		ldb.compReadMeter = metrics.NewRegisteredMeter(namespace+"compact/input", nil)
-		ldb.compWriteMeter = metrics.NewRegisteredMeter(namespace+"compact/output", nil)
-		ldb.diskSizeGauge = metrics.NewRegisteredGauge(namespace+"disk/size", nil)
-		ldb.diskReadMeter = metrics.NewRegisteredMeter(namespace+"disk/read", nil)
-		ldb.diskWriteMeter = metrics.NewRegisteredMeter(namespace+"disk/write", nil)
-		ldb.writeDelayMeter = metrics.NewRegisteredMeter(namespace+"compact/writedelay/duration", nil)
-		ldb.writeDelayNMeter = metrics.NewRegisteredMeter(namespace+"compact/writedelay/counter", nil)
-		ldb.memCompGauge = metrics.NewRegisteredGauge(namespace+"compact/memory", nil)
-		ldb.level0CompGauge = metrics.NewRegisteredGauge(namespace+"compact/level0", nil)
-		ldb.nonlevel0CompGauge = metrics.NewRegisteredGauge(namespace+"compact/nonlevel0", nil)
-		ldb.seekCompGauge = metrics.NewRegisteredGauge(namespace+"compact/seek", nil)
-		ldb.manualMemAllocGauge = metrics.NewRegisteredGauge(namespace+"memory/manualalloc", nil)
-	} else if useSeparateDB && !isSingleTrieDB {
-		ldb.compTimeMeter = metrics.NewRegisteredMeter(namespace+"snapdbcompact/time", nil)
-		ldb.compReadMeter = metrics.NewRegisteredMeter(namespace+"snapcompact/input", nil)
-		ldb.compWriteMeter = metrics.NewRegisteredMeter(namespace+"snapcompact/output", nil)
-		ldb.diskSizeGauge = metrics.NewRegisteredGauge(namespace+"snapdisk/size", nil)
-		ldb.diskReadMeter = metrics.NewRegisteredMeter(namespace+"snapdisk/read", nil)
-		ldb.diskWriteMeter = metrics.NewRegisteredMeter(namespace+"snapdisk/write", nil)
-		ldb.writeDelayMeter = metrics.NewRegisteredMeter(namespace+"snapcompact/writedelay/duration", nil)
-		ldb.writeDelayNMeter = metrics.NewRegisteredMeter(namespace+"snapcompact/writedelay/counter", nil)
-		ldb.memCompGauge = metrics.NewRegisteredGauge(namespace+"snapcompact/memory", nil)
-		ldb.level0CompGauge = metrics.NewRegisteredGauge(namespace+"snapcompact/level0", nil)
-		ldb.nonlevel0CompGauge = metrics.NewRegisteredGauge(namespace+"snapcompact/nonlevel0", nil)
-		ldb.seekCompGauge = metrics.NewRegisteredGauge(namespace+"snapcompact/seek", nil)
-		ldb.manualMemAllocGauge = metrics.NewRegisteredGauge(namespace+"snapmemory/manualalloc", nil)
-	} else {
-		ldb.compTimeMeter = metrics.NewRegisteredMeter(namespace+"triedbcompact/time", nil)
-		ldb.compReadMeter = metrics.NewRegisteredMeter(namespace+"triedbcompact/input", nil)
-		ldb.compWriteMeter = metrics.NewRegisteredMeter(namespace+"triedbcompact/output", nil)
-		ldb.diskSizeGauge = metrics.NewRegisteredGauge(namespace+"triedbdisk/size", nil)
-		ldb.diskReadMeter = metrics.NewRegisteredMeter(namespace+"triedbdisk/read", nil)
-		ldb.diskWriteMeter = metrics.NewRegisteredMeter(namespace+"triedbdisk/write", nil)
-		ldb.writeDelayMeter = metrics.NewRegisteredMeter(namespace+"triedbcompact/writedelay/duration", nil)
-		ldb.writeDelayNMeter = metrics.NewRegisteredMeter(namespace+"triedbcompact/writedelay/counter", nil)
-		ldb.memCompGauge = metrics.NewRegisteredGauge(namespace+"triedbcompact/memory", nil)
-		ldb.level0CompGauge = metrics.NewRegisteredGauge(namespace+"triedbcompact/level0", nil)
-		ldb.nonlevel0CompGauge = metrics.NewRegisteredGauge(namespace+"triedbcompact/nonlevel0", nil)
-		ldb.seekCompGauge = metrics.NewRegisteredGauge(namespace+"triedbcompact/seek", nil)
-		ldb.manualMemAllocGauge = metrics.NewRegisteredGauge(namespace+"triedbmemory/manualalloc", nil)
-	}
+	ldb.compTimeMeter = metrics.NewRegisteredMeter(namespace+"compact/time", nil)
+	ldb.compReadMeter = metrics.NewRegisteredMeter(namespace+"compact/input", nil)
+	ldb.compWriteMeter = metrics.NewRegisteredMeter(namespace+"compact/output", nil)
+	ldb.diskSizeGauge = metrics.NewRegisteredGauge(namespace+"disk/size", nil)
+	ldb.diskReadMeter = metrics.NewRegisteredMeter(namespace+"disk/read", nil)
+	ldb.diskWriteMeter = metrics.NewRegisteredMeter(namespace+"disk/write", nil)
+	ldb.writeDelayMeter = metrics.NewRegisteredMeter(namespace+"compact/writedelay/duration", nil)
+	ldb.writeDelayNMeter = metrics.NewRegisteredMeter(namespace+"compact/writedelay/counter", nil)
+	ldb.memCompGauge = metrics.NewRegisteredGauge(namespace+"compact/memory", nil)
+	ldb.level0CompGauge = metrics.NewRegisteredGauge(namespace+"compact/level0", nil)
+	ldb.nonlevel0CompGauge = metrics.NewRegisteredGauge(namespace+"compact/nonlevel0", nil)
+	ldb.seekCompGauge = metrics.NewRegisteredGauge(namespace+"compact/seek", nil)
+	ldb.manualMemAllocGauge = metrics.NewRegisteredGauge(namespace+"memory/manualalloc", nil)
+
 	// Start up the metrics gathering and return
 	go ldb.meter(metricsGatheringInterval, namespace)
 	return ldb, nil
