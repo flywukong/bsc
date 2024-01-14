@@ -810,10 +810,6 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
 	}
 	var db ethdb.Database
 	var err error
-	var isSeparateDB bool
-	if n.config.GetTrieDir() != "" {
-		isSeparateDB = true
-	}
 	if n.config.DataDir == "" {
 		db = rawdb.NewMemoryDatabase()
 	} else {
@@ -828,7 +824,6 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
 			DisableFreeze:     disableFreeze,
 			IsLastOffset:      isLastOffset,
 			PruneAncientData:  pruneAncientData,
-			IsSeparateDB:      isSeparateDB,
 		})
 	}
 
@@ -861,7 +856,6 @@ func (n *Node) OpenTrieDataBase(name string, cache, handles int, namespace strin
 			DisableFreeze:     disableFreeze,
 			IsLastOffset:      isLastOffset,
 			PruneAncientData:  pruneAncientData,
-			IsSingleTrieDB:    true,
 		})
 	}
 
@@ -890,7 +884,7 @@ func (n *Node) OpenDiffDatabase(name string, handles int, diff, namespace string
 	case !filepath.IsAbs(diff):
 		diff = n.ResolvePath(diff)
 	}
-	db, err = leveldb.New(diff, 0, handles, namespace, readonly, false, false)
+	db, err = leveldb.New(diff, 0, handles, namespace, readonly)
 
 	return db, err
 }

@@ -169,7 +169,7 @@ type CacheConfig struct {
 	SeparateTrieConfig *SeparateTrieConfig
 }
 
-// SeparateTrieConfig contains the configuration values for the separated trie database
+// SeparateTrieConfig contains the configuration values for the separated single trie database
 type SeparateTrieConfig struct {
 	SeparateDBHandles int    // The handler num used by the separated trie db
 	SeparateDBCache   int    // The cache size used by the separated trie db
@@ -384,7 +384,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 			DisableFreeze:     false,
 			IsLastOffset:      false,
 			PruneAncientData:  triedbConfig.PruneAncientData,
-			IsSingleTrieDB:    true,
 		})
 
 		if dbErr != nil {
