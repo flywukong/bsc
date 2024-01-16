@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"reflect"
 	"runtime"
 	"sort"
 	"sync"
@@ -358,17 +357,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		diffQueue:          prque.New[int64, *types.DiffLayer](nil),
 		diffQueueBuffer:    make(chan *types.DiffLayer),
 	}
-	if bc.validator == nil {
-		log.Info("validator is nil1")
-	}
-
-	for _, option := range options {
-		optionType := reflect.TypeOf(option)
-		if optionType.Kind() == reflect.Func {
-			functionName := optionType.Name()
-			fmt.Println("Function name:", functionName)
-		}
-	}
 
 	var err error
 	// if separated trie db has been set, it should be the last option
@@ -380,9 +368,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 				return nil, err
 			}
 		}
-	}
-	if bc.validator == nil {
-		log.Info("validator is nil2")
 	}
 
 	// Open trie database with provided config
