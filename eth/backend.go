@@ -66,6 +66,11 @@ import (
 	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
 )
 
+const (
+	SeparateDBNamespace   = "eth/separatedb/chaindata/"
+	SeparateTrieNamespace = "eth/triedb/chaindata/"
+)
+
 // Config contains the configuration options of the ETH protocol.
 // Deprecated: use ethconfig.Config instead.
 type Config = ethconfig.Config
@@ -138,7 +143,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		// It is the separated db which contain snapshot, meta and block data with no trie data storing in it.
 		// Allocate partial handles and cache to this separate database because it is not a complete database.
 		chainDb, err = stack.OpenAndMergeDatabase("chaindata", int(float64(config.DatabaseCache)*0.6), int(float64(config.DatabaseHandles)*0.6),
-			config.DatabaseFreezer, config.DatabaseDiff, "eth/separatedb/chaindata/", false, config.PersistDiff, config.PruneAncientData)
+			config.DatabaseFreezer, config.DatabaseDiff, SeparateDBNamespace, false, config.PersistDiff, config.PruneAncientData)
 		if err != nil {
 			return nil, err
 		}
@@ -280,15 +285,19 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	// if the separated trie db has set, need to new blockchain with the separated trie database
 	if stack.Config().TrieDir != "" {
+		ancientDir := config.DatabaseFreezer
+		if ancientDir == "" {
+			ancientDir = "ancient"
+		}
 		// Allocate partial handles and cache to this separated database.
 		separatedDBConfig := &core.SeparateTrieConfig{
 			SeparateDBHandles: int(float64(config.DatabaseHandles) * 0.5),
 			SeparateDBCache:   int(float64(config.DatabaseCache) * 0.5),
 			SeparateDBEngine:  stack.Config().DBEngine,
 			TrieDataDir:       stack.Config().GetTrieDir(),
-			TrieNameSpace:     "eth/triedb/chaindata/",
+			TrieNameSpace:     SeparateTrieNamespace,
 			TrieName:          "chaindata",
-			SeparateDBAncient: config.DatabaseFreezer,
+			SeparateDBAncient: ancientDir,
 		}
 		cacheConfig.SeparateTrieConfig = separatedDBConfig
 	}

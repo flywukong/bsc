@@ -372,8 +372,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	var triedb *trie.Database
 	if cacheConfig.SeparateTrieConfig != nil {
 		separatedTrieConfig := cacheConfig.SeparateTrieConfig
-		log.Info("node run with separated trie database", "directory", separatedTrieConfig.TrieDataDir,
-			"db engine", separatedTrieConfig.SeparateDBEngine)
+		log.Info("node run with separated trie database", "directory", separatedTrieConfig.TrieDataDir)
 		separateDir := filepath.Join(separatedTrieConfig.TrieDataDir, separatedTrieConfig.TrieName)
 		// open the separated db to init the trie database which only store the trie data
 		separateDB, dbErr := rawdb.Open(rawdb.OpenOptions{
