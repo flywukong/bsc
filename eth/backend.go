@@ -280,8 +280,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	// if the separated trie db has set, need to new blockchain with the separated trie database
 	if stack.Config().TrieDir != "" {
+		// Allocate partial handles and cache to this separated database.
 		separatedDBConfig := &core.SeparateTrieConfig{
-			SeparateDBHandles: int(float64(config.DatabaseHandles) * 0.6),
+			SeparateDBHandles: int(float64(config.DatabaseHandles) * 0.5),
 			SeparateDBCache:   int(float64(config.DatabaseCache) * 0.5),
 			SeparateDBEngine:  stack.Config().DBEngine,
 			TrieDataDir:       stack.Config().GetTrieDir(),
