@@ -780,7 +780,6 @@ func (n *Node) OpenAndMergeDatabase(name string, cache, handles int, freezer, di
 	chainDataHandles := handles
 	if persistDiff {
 		chainDataHandles = handles * chainDataHandlesPercentage / 100
-		log.Info("persist diff is true", "handler", chainDataHandles)
 	}
 	chainDB, err := n.OpenDatabaseWithFreezer(name, cache, chainDataHandles, freezer, namespace, readonly, false, false, pruneAncientData)
 	if err != nil {
@@ -833,6 +832,9 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
 	return db, err
 }
 
+// OpenTrieDataBase opens an existing database to store the trie data with the given name (or
+// creates one if no previous can be found) from within the node's data directory.
+// This function is only used in scenarios where the separate db is used.
 func (n *Node) OpenTrieDataBase(name string, cache, handles int, ancient, namespace string, readonly, disableFreeze, isLastOffset, pruneAncientData bool) (ethdb.Database, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
@@ -841,23 +843,19 @@ func (n *Node) OpenTrieDataBase(name string, cache, handles int, ancient, namesp
 	}
 	var db ethdb.Database
 	var err error
-	if n.config.DataDir == "" {
-		db = rawdb.NewMemoryDatabase()
-	} else {
-		separateDir := filepath.Join(n.config.GetTrieDir(), name)
-		db, err = rawdb.Open(rawdb.OpenOptions{
-			Type:              n.config.DBEngine,
-			Directory:         separateDir,
-			AncientsDirectory: filepath.Join(separateDir, ancient),
-			Namespace:         namespace,
-			Cache:             cache,
-			Handles:           handles,
-			ReadOnly:          readonly,
-			DisableFreeze:     disableFreeze,
-			IsLastOffset:      isLastOffset,
-			PruneAncientData:  pruneAncientData,
-		})
-	}
+	separateDir := filepath.Join(n.config.GetTrieDir(), name)
+	db, err = rawdb.Open(rawdb.OpenOptions{
+		Type:              n.config.DBEngine,
+		Directory:         separateDir,
+		AncientsDirectory: filepath.Join(separateDir, ancient),
+		Namespace:         namespace,
+		Cache:             cache,
+		Handles:           handles,
+		ReadOnly:          readonly,
+		DisableFreeze:     disableFreeze,
+		IsLastOffset:      isLastOffset,
+		PruneAncientData:  pruneAncientData,
+	})
 
 	if err == nil {
 		db = n.wrapDatabase(db)

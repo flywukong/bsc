@@ -475,8 +475,6 @@ type OpenOptions struct {
 	DisableFreeze    bool
 	IsLastOffset     bool
 	PruneAncientData bool
-	IsSeparateDB     bool // indicates if it is a separated db which stored snapshot, meta and block data.
-	IsSingleTrieDB   bool // indicates if it is a separated which stored trie data.
 }
 
 // openKeyValueDatabase opens a disk-based key-value database, e.g. leveldb or pebble.

@@ -372,8 +372,10 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	var triedb *trie.Database
 	if cacheConfig.SeparateTrieConfig != nil {
 		separatedTrieConfig := cacheConfig.SeparateTrieConfig
-		log.Info("node run with separated trie database", "directory", separatedTrieConfig.TrieDataDir)
+		log.Info("node run with separated trie database", "directory", separatedTrieConfig.TrieDataDir,
+			"db engine", separatedTrieConfig.SeparateDBEngine)
 		separateDir := filepath.Join(separatedTrieConfig.TrieDataDir, separatedTrieConfig.TrieName)
+		// open the separated db to init the trie database which only store the trie data
 		separateDB, dbErr := rawdb.Open(rawdb.OpenOptions{
 			Type:              separatedTrieConfig.SeparateDBEngine,
 			Directory:         separateDir,
@@ -410,10 +412,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	bc.flushInterval.Store(int64(cacheConfig.TrieTimeLimit))
 	bc.forker = NewForkChoice(bc, shouldPreserve)
 	bc.stateCache = state.NewDatabaseWithNodeDB(bc.db, bc.triedb)
-	// validator may already been inited in the EnableBlockValidator function in the option
-	if bc.validator == nil {
-		bc.validator = NewBlockValidator(chainConfig, bc, engine)
-	}
+	bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	bc.prefetcher = NewStatePrefetcher(chainConfig, bc, engine)
 	bc.processor = NewStateProcessor(chainConfig, bc, engine)
 
@@ -551,7 +550,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		}
 		bc.snaps, _ = snapshot.New(snapconfig, bc.db, bc.triedb, head.Root, int(bc.cacheConfig.TriesInMemory), bc.stateCache.NoTries())
 	}
-
 	// do options before start any routine
 	for _, option := range options {
 		bc, err = option(bc)
@@ -559,7 +557,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 			return nil, err
 		}
 	}
-
 	// Start future block processor.
 	bc.wg.Add(1)
 	go bc.updateFutureBlocks()
