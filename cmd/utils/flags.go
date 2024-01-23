@@ -95,10 +95,9 @@ var (
 		Value:    flags.DirectoryString(node.DefaultDataDir()),
 		Category: flags.EthCategory,
 	}
-
-	TrieDirFlag = &flags.DirectoryFlag{
-		Name:     "triedir",
-		Usage:    "Data directory for the trie data base",
+	SeparateDBFlag = &cli.BoolFlag{
+		Name:     "separatetrie",
+		Usage:    "Enable a separated trie database, it will be created within a subdirectory called trie-state",
 		Category: flags.EthCategory,
 	}
 	DirectBroadcastFlag = &cli.BoolFlag{
@@ -1114,7 +1113,7 @@ var (
 		RemoteDBFlag,
 		DBEngineFlag,
 		HttpHeaderFlag,
-		TrieDirFlag,
+		SeparateDBFlag,
 	}
 )
 
@@ -1618,8 +1617,8 @@ func SetDataDir(ctx *cli.Context, cfg *node.Config) {
 	case ctx.Bool(DeveloperFlag.Name):
 		cfg.DataDir = "" // unless explicitly requested, use memory databases
 	}
-	if ctx.IsSet(TrieDirFlag.Name) {
-		cfg.TrieDir = ctx.String(TrieDirFlag.Name)
+	if ctx.IsSet(SeparateDBFlag.Name) {
+		cfg.EnableSeparateTrie = true
 	}
 }
 

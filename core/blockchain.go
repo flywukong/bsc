@@ -164,19 +164,18 @@ type CacheConfig struct {
 	StateScheme         string        // Scheme used to store ethereum states and merkle tree nodes on top
 	PathSyncFlush       bool          // Whether sync flush the trienodebuffer of pathdb to disk.
 
-	SnapshotNoBuild    bool // Whether the background generation is allowed
-	SnapshotWait       bool // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
-	SeparateTrieConfig *SeparateTrieConfig
+	SnapshotNoBuild    bool                // Whether the background generation is allowed
+	SnapshotWait       bool                // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
+	SeparateTrieConfig *SeparateTrieConfig // The configuration of the separated single trie database
 }
 
-// SeparateTrieConfig contains the configuration values for the separated single trie database
+// SeparateTrieConfig contains the configuration values of the separated single trie database
 type SeparateTrieConfig struct {
 	SeparateDBHandles int    // The handler num used by the separated trie db
 	SeparateDBCache   int    // The cache size used by the separated trie db
 	SeparateDBEngine  string // The db engine (pebble or leveldb) used by the separated trie db
 	TrieDataDir       string // The directory of the separated trie db
 	TrieNameSpace     string // The namespace of the separated trie db
-	TrieName          string // The name of the separated trie db
 	SeparateDBAncient string // The ancient directory of the separated trie db
 	PruneAncientData  bool
 }
@@ -372,13 +371,13 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	var triedb *trie.Database
 	if cacheConfig.SeparateTrieConfig != nil {
 		separatedTrieConfig := cacheConfig.SeparateTrieConfig
-		log.Info("node run with separated trie database", "directory", separatedTrieConfig.TrieDataDir)
-		separateDir := filepath.Join(separatedTrieConfig.TrieDataDir, separatedTrieConfig.TrieName)
+		separatedTrieDir := separatedTrieConfig.TrieDataDir
+		log.Info("node run with separated trie database", "directory", separatedTrieDir)
 		// open the separated db to init the trie database which only store the trie data
 		separateDB, dbErr := rawdb.Open(rawdb.OpenOptions{
 			Type:              separatedTrieConfig.SeparateDBEngine,
-			Directory:         separateDir,
-			AncientsDirectory: filepath.Join(separateDir, separatedTrieConfig.SeparateDBAncient),
+			Directory:         separatedTrieDir,
+			AncientsDirectory: filepath.Join(separatedTrieDir, separatedTrieConfig.SeparateDBAncient),
 			Namespace:         separatedTrieConfig.TrieNameSpace,
 			Cache:             separatedTrieConfig.SeparateDBCache,
 			Handles:           separatedTrieConfig.SeparateDBHandles,

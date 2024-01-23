@@ -175,8 +175,8 @@ func New(conf *Config) (*Node, error) {
 		node.server.Config.NodeDatabase = node.config.NodeDB()
 	}
 
-	if conf.TrieDir != "" {
-		node.config.enableSeparateTrie(conf.TrieDir)
+	if conf.EnableSeparateTrie {
+		node.config.enableSeparateTrie()
 	}
 
 	// Check HTTP/WS prefixes are valid.
@@ -843,11 +843,11 @@ func (n *Node) OpenTrieDataBase(name string, cache, handles int, ancient, namesp
 	}
 	var db ethdb.Database
 	var err error
-	separateDir := filepath.Join(n.config.GetTrieDir(), name)
+	separateDir := filepath.Join(n.ResolvePath(name), "trie-state")
 	db, err = rawdb.Open(rawdb.OpenOptions{
 		Type:              n.config.DBEngine,
 		Directory:         separateDir,
-		AncientsDirectory: filepath.Join(separateDir, ancient),
+		AncientsDirectory: filepath.Join(separateDir, "ancient"),
 		Namespace:         namespace,
 		Cache:             cache,
 		Handles:           handles,
