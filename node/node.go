@@ -835,7 +835,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
 // OpenTrieDataBase opens an existing database to store the trie data with the given name (or
 // creates one if no previous can be found) from within the node's data directory.
 // This function is only used in scenarios where the separate db is used.
-func (n *Node) OpenTrieDataBase(name string, cache, handles int, ancient, namespace string, readonly, disableFreeze, isLastOffset, pruneAncientData bool) (ethdb.Database, error) {
+func (n *Node) OpenTrieDataBase(name string, cache, handles int, namespace string, readonly, disableFreeze, isLastOffset, pruneAncientData bool) (ethdb.Database, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 	if n.state == closedState {
@@ -861,6 +861,16 @@ func (n *Node) OpenTrieDataBase(name string, cache, handles int, ancient, namesp
 		db = n.wrapDatabase(db)
 	}
 	return db, err
+}
+
+// HasSeparateTrieDir check the trie-state subdirectory of db, if subdirectory exists, return true
+func (n *Node) HasSeparateTrieDir(name string) bool {
+	separateDir := filepath.Join(n.ResolvePath(name), "trie-state")
+	fileInfo, err := os.Stat(separateDir)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return fileInfo.IsDir()
 }
 
 func (n *Node) OpenDiffDatabase(name string, handles int, diff, namespace string, readonly bool) (*leveldb.Database, error) {

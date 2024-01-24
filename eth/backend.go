@@ -140,7 +140,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	// Assemble the Ethereum object
 	var chainDb ethdb.Database
 	var err error
-	if stack.Config().EnableSeparateTrie {
+	if stack.Config().EnableSeparateTrie || stack.HasSeparateTrieDir("chaindata") {
 		// It is the separated db which contain snapshot, meta and block data with no trie data storing in it.
 		// Allocate partial handles and cache to this separate database because it is not a complete database.
 		chainDb, err = stack.OpenAndMergeDatabase("chaindata", int(float64(config.DatabaseCache)*0.6), int(float64(config.DatabaseHandles)*0.6),
@@ -285,7 +285,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	bcOps = append(bcOps, core.EnableBlockValidator(chainConfig, eth.engine, config.TriesVerifyMode, peers))
 
 	// if the separated trie db has set, need to new blockchain with the separated trie database
-	if stack.Config().EnableSeparateTrie {
+	if stack.Config().EnableSeparateTrie || stack.HasSeparateTrieDir("chaindata") {
 		ancientDir := config.DatabaseFreezer
 		if ancientDir == "" {
 			ancientDir = "ancient"
