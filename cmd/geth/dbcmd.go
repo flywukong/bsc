@@ -345,7 +345,12 @@ func inspectTrie(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
-	db := utils.MakeChainDatabase(ctx, stack, true, false)
+	var db ethdb.Database
+	if stack.HasSeparateTrieDir() {
+		db = utils.MakeSeparateTrieDB(ctx, stack, true, false)
+	} else {
+		db = utils.MakeChainDatabase(ctx, stack, true, false)
+	}
 	defer db.Close()
 
 	var headerBlockHash common.Hash
@@ -585,7 +590,12 @@ func dbTrieGet(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
-	db := utils.MakeChainDatabase(ctx, stack, false, false)
+	var db ethdb.Database
+	if stack.HasSeparateTrieDir() {
+		db = utils.MakeSeparateTrieDB(ctx, stack, true, false)
+	} else {
+		db = utils.MakeChainDatabase(ctx, stack, true, false)
+	}
 	defer db.Close()
 
 	scheme := ctx.String(utils.StateSchemeFlag.Name)
@@ -651,7 +661,12 @@ func dbTrieDelete(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
-	db := utils.MakeChainDatabase(ctx, stack, false, false)
+	var db ethdb.Database
+	if stack.HasSeparateTrieDir() {
+		db = utils.MakeSeparateTrieDB(ctx, stack, true, false)
+	} else {
+		db = utils.MakeChainDatabase(ctx, stack, true, false)
+	}
 	defer db.Close()
 
 	scheme := ctx.String(utils.StateSchemeFlag.Name)
@@ -773,9 +788,13 @@ func dbDumpTrie(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
-	db := utils.MakeChainDatabase(ctx, stack, true, false)
+	var db ethdb.Database
+	if stack.HasSeparateTrieDir() {
+		db = utils.MakeSeparateTrieDB(ctx, stack, true, false)
+	} else {
+		db = utils.MakeChainDatabase(ctx, stack, true, false)
+	}
 	defer db.Close()
-
 	triedb := utils.MakeTrieDatabase(ctx, db, false, true)
 	defer triedb.Close()
 

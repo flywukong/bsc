@@ -2284,6 +2284,17 @@ func MakeChainDatabase(ctx *cli.Context, stack *node.Node, readonly, disableFree
 	return chainDb
 }
 
+// MakeSeparateTrieDB open a separate trie database using the flags passed to the client and will hard crash if it fails.
+func MakeSeparateTrieDB(ctx *cli.Context, stack *node.Node, readonly, disableFreeze bool) ethdb.Database {
+	cache := ctx.Int(CacheFlag.Name) * ctx.Int(CacheDatabaseFlag.Name) / 100
+	handles := MakeDatabaseHandles(ctx.Int(FDLimitFlag.Name))
+	chainDb, err := stack.OpenTrieDataBase("chaindata", cache, handles, "", readonly, disableFreeze, false, false)
+	if err != nil {
+		Fatalf("Failed to open separate trie database: %v", err)
+	}
+	return chainDb
+}
+
 // tryMakeReadOnlyDatabase try to open the chain database in read-only mode,
 // or fallback to write mode if the database is not initialized.
 //

@@ -864,8 +864,8 @@ func (n *Node) OpenTrieDataBase(name string, cache, handles int, namespace strin
 }
 
 // HasSeparateTrieDir check the trie-state subdirectory of db, if subdirectory exists, return true
-func (n *Node) HasSeparateTrieDir(name string) bool {
-	separateDir := filepath.Join(n.ResolvePath(name), "trie-state")
+func (n *Node) HasSeparateTrieDir() bool {
+	separateDir := filepath.Join(n.ResolvePath("chaindata"), "trie-state")
 	fileInfo, err := os.Stat(separateDir)
 	if os.IsNotExist(err) {
 		return false
