@@ -412,7 +412,7 @@ func inspectTrie(ctx *cli.Context) error {
 		if err != nil {
 			return err
 		}
-		theInspect.Ru	n()
+		theInspect.Run()
 		theInspect.DisplayResult()
 	}
 	return nil
@@ -446,8 +446,12 @@ func inspect(ctx *cli.Context) error {
 	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
 
-
-	return rawdb.InspectDatabase(db, prefix, start)
+	var seprateDB ethdb.Database
+	if stack.HasSeparateTrieDir() {
+		seprateDB = utils.MakeSeparateTrieDB(ctx, stack, true, false)
+		defer seprateDB.Close()
+	}
+	return rawdb.InspectDatabase(db, seprateDB, prefix, start)
 }
 
 func ancientInspect(ctx *cli.Context) error {
@@ -456,7 +460,16 @@ func ancientInspect(ctx *cli.Context) error {
 
 	db := utils.MakeChainDatabase(ctx, stack, true, true)
 	defer db.Close()
-	return rawdb.AncientInspect(db)
+	if err := rawdb.AncientInspect(db); err != nil {
+		return err
+	}
+	if stack.HasSeparateTrieDir() {
+		db = utils.MakeSeparateTrieDB(ctx, stack, true, false)
+		if err := rawdb.AncientInspect(db); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func checkStateContent(ctx *cli.Context) error {
@@ -552,8 +565,22 @@ func dbCompact(ctx *cli.Context) error {
 		log.Info("Compact err", "error", err)
 		return err
 	}
+
+	var seprateTrieDB ethdb.Database
+	if stack.HasSeparateTrieDir() {
+		seprateTrieDB = utils.MakeSeparateTrieDB(ctx, stack, true, false)
+		defer seprateTrieDB.Close()
+		if err := seprateTrieDB.Compact(nil, nil); err != nil {
+			log.Info("Compact err", "error", err)
+			return err
+		}
+	}
+
 	log.Info("Stats after compaction")
 	showLeveldbStats(db)
+	if seprateTrieDB != nil {
+		showLeveldbStats(seprateTrieDB)
+	}
 	return nil
 }
 
@@ -576,6 +603,16 @@ func dbGet(ctx *cli.Context) error {
 
 	data, err := db.Get(key)
 	if err != nil {
+		// if separate trie db exist, try to get it from separate db
+		if stack.HasSeparateTrieDir() {
+			trieDB := utils.MakeSeparateTrieDB(ctx, stack, true, false)
+			defer trieDB.Close()
+			triedata, dberr := trieDB.Get(key)
+			if dberr == nil {
+				fmt.Printf("key %#x: %#x\n", key, triedata)
+				return nil
+			}
+		}
 		log.Info("Get operation failed", "key", fmt.Sprintf("%#x", key), "error", err)
 		return err
 	}

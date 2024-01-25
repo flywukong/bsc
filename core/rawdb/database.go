@@ -618,12 +618,32 @@ func PruneHashTrieNodeInDataBase(db ethdb.Database) error {
 	return nil
 }
 
+func inspectTrieData(key, value []byte, legacyTries, accountTries, storageTries, stateLookups *stat) {
+	size := common.StorageSize(len(key) + len(value))
+	switch {
+	case IsLegacyTrieNode(key, value):
+		legacyTries.Add(size)
+	case bytes.HasPrefix(key, stateIDPrefix) && len(key) == len(stateIDPrefix)+common.HashLength:
+		stateLookups.Add(size)
+	case IsAccountTrieNode(key):
+		accountTries.Add(size)
+	case IsStorageTrieNode(key):
+		storageTries.Add(size)
+	default:
+		return
+	}
+}
+
 // InspectDatabase traverses the entire database and checks the size
 // of all different categories of data.
-func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
+func InspectDatabase(db ethdb.Database, separateDB ethdb.Database, keyPrefix, keyStart []byte) error {
 	it := db.NewIterator(keyPrefix, keyStart)
 	defer it.Release()
 
+	var separateIter ethdb.Iterator
+	if separateIter != nil {
+		separateIter = separateDB.NewIterator(keyPrefix, nil)
+	}
 	var (
 		count  int64
 		start  = time.Now()
@@ -663,8 +683,9 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	// Inspect key-value database first.
 	for it.Next() {
 		var (
-			key  = it.Key()
-			size = common.StorageSize(len(key) + len(it.Value()))
+			key   = it.Key()
+			value = it.Value()
+			size  = common.StorageSize(len(key) + len(value))
 		)
 		total += size
 		switch {
@@ -674,20 +695,12 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			bodies.Add(size)
 		case bytes.HasPrefix(key, blockReceiptsPrefix) && len(key) == (len(blockReceiptsPrefix)+8+common.HashLength):
 			receipts.Add(size)
-		case IsLegacyTrieNode(key, it.Value()):
-			legacyTries.Add(size)
 		case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerTDSuffix):
 			tds.Add(size)
 		case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerHashSuffix):
 			numHashPairings.Add(size)
 		case bytes.HasPrefix(key, headerNumberPrefix) && len(key) == (len(headerNumberPrefix)+common.HashLength):
 			hashNumPairings.Add(size)
-		case bytes.HasPrefix(key, stateIDPrefix) && len(key) == len(stateIDPrefix)+common.HashLength:
-			stateLookups.Add(size)
-		case IsAccountTrieNode(key):
-			accountTries.Add(size)
-		case IsStorageTrieNode(key):
-			storageTries.Add(size)
 		case bytes.HasPrefix(key, CodePrefix) && len(key) == len(CodePrefix)+common.HashLength:
 			codes.Add(size)
 		case bytes.HasPrefix(key, txLookupPrefix) && len(key) == (len(txLookupPrefix)+common.HashLength):
@@ -719,6 +732,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			bytes.HasPrefix(key, BloomTriePrefix): // Bloomtrie sub
 			bloomTrieNodes.Add(size)
 		default:
+			inspectTrieData(key, value, &legacyTries, &accountTries, &storageTries, &stateLookups)
 			var accounted bool
 			for _, meta := range [][]byte{
 				databaseVersionKey, headHeaderKey, headBlockKey, headFastBlockKey,
@@ -741,6 +755,24 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		if count%1000 == 0 && time.Since(logged) > 8*time.Second {
 			log.Info("Inspecting database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
 			logged = time.Now()
+		}
+	}
+
+	if separateIter != nil {
+		for separateIter.Next() {
+			var (
+				key   = it.Key()
+				value = it.Value()
+				size  = common.StorageSize(len(key) + len(value))
+			)
+			inspectTrieData(key, it.Value(), &legacyTries, &accountTries, &storageTries, &stateLookups)
+			for _, meta := range [][]byte{
+				fastTrieProgressKey, persistentStateIDKey, trieJournalKey} {
+				if bytes.Equal(key, meta) {
+					metadata.Add(size)
+					break
+				}
+			}
 		}
 	}
 	// Display the database statistic of key-value store.
@@ -782,6 +814,23 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			})
 		}
 		total += ancient.size()
+	}
+	if separateIter != nil {
+		stateAncients, err := inspectFreezers(separateDB)
+		if err != nil {
+			return err
+		}
+		for _, ancient := range stateAncients {
+			for _, table := range ancient.sizes {
+				stats = append(stats, []string{
+					fmt.Sprintf("Ancient store (%s)", strings.Title(ancient.name)),
+					strings.Title(table.name),
+					table.size.String(),
+					fmt.Sprintf("%d", ancient.count()),
+				})
+			}
+			total += ancient.size()
+		}
 	}
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"Database", "Category", "Size", "Items"})
