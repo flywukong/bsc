@@ -843,7 +843,7 @@ func (n *Node) OpenTrieDataBase(name string, cache, handles int, namespace strin
 	}
 	var db ethdb.Database
 	var err error
-	separateDir := filepath.Join(n.ResolvePath(name), "trie-state")
+	separateDir := filepath.Join(n.ResolvePath(name), "state")
 	db, err = rawdb.Open(rawdb.OpenOptions{
 		Type:              n.config.DBEngine,
 		Directory:         separateDir,
@@ -863,9 +863,9 @@ func (n *Node) OpenTrieDataBase(name string, cache, handles int, namespace strin
 	return db, err
 }
 
-// HasSeparateTrieDir check the trie-state subdirectory of db, if subdirectory exists, return true
+// HasSeparateTrieDir check the state subdirectory of db, if subdirectory exists, return true
 func (n *Node) HasSeparateTrieDir() bool {
-	separateDir := filepath.Join(n.ResolvePath("chaindata"), "trie-state")
+	separateDir := filepath.Join(n.ResolvePath("chaindata"), "state")
 	fileInfo, err := os.Stat(separateDir)
 	if os.IsNotExist(err) {
 		return false

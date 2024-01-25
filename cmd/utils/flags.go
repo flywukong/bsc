@@ -96,8 +96,9 @@ var (
 		Category: flags.EthCategory,
 	}
 	SeparateDBFlag = &cli.BoolFlag{
-		Name:     "separatetrie",
-		Usage:    "Enable a separated trie database, it will be created within a subdirectory called trie-state",
+		Name: "separatetrie",
+		Usage: "Enable a separated trie database, it will be created within a subdirectory called state, " +
+			"Users can copy this state directory to another directory or disk, and then create a symbolic link to the state directory under the chaindata",
 		Category: flags.EthCategory,
 	}
 	DirectBroadcastFlag = &cli.BoolFlag{

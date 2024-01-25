@@ -412,7 +412,7 @@ func inspectTrie(ctx *cli.Context) error {
 		if err != nil {
 			return err
 		}
-		theInspect.Run()
+		theInspect.Ru	n()
 		theInspect.DisplayResult()
 	}
 	return nil
@@ -445,6 +445,7 @@ func inspect(ctx *cli.Context) error {
 
 	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
+
 
 	return rawdb.InspectDatabase(db, prefix, start)
 }

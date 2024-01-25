@@ -291,7 +291,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			ancientDir = "ancient"
 		}
 		// Allocate partial handles and cache to this separated database.
-		separateDir := filepath.Join(stack.ResolvePath("chaindata"), "trie-state")
+		separateDir := filepath.Join(stack.ResolvePath("chaindata"), "state")
 		separatedDBConfig := &core.SeparateTrieConfig{
 			SeparateDBHandles: int(float64(config.DatabaseHandles) * 0.5),
 			SeparateDBCache:   int(float64(config.DatabaseCache) * 0.5),
