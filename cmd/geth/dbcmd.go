@@ -448,6 +448,7 @@ func inspect(ctx *cli.Context) error {
 
 	var seprateDB ethdb.Database
 	if stack.HasSeparateTrieDir() {
+		fmt.Println("separate db set in cmd")
 		seprateDB = utils.MakeSeparateTrieDB(ctx, stack, true, false)
 		defer seprateDB.Close()
 	}
