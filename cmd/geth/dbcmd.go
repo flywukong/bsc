@@ -551,6 +551,7 @@ func dbStats(ctx *cli.Context) error {
 	if stack.HasSeparateTrieDir() {
 		seprateTrieDB := utils.MakeSeparateTrieDB(ctx, stack, true, false)
 		defer seprateTrieDB.Close()
+		fmt.Println("show stats of separated db")
 		showLeveldbStats(seprateTrieDB)
 	}
 
