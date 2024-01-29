@@ -642,8 +642,8 @@ func InspectDatabase(db ethdb.Database, separateDB ethdb.Database, keyPrefix, ke
 
 	var separateIter ethdb.Iterator
 	if separateDB != nil {
-		fmt.Println("new separate db iterator")
 		separateIter = separateDB.NewIterator(keyPrefix, nil)
+		defer separateIter.Release()
 	}
 	var (
 		count  int64

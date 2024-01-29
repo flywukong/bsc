@@ -345,11 +345,11 @@ func inspectTrie(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
-	var db ethdb.Database
+	db := utils.MakeChainDatabase(ctx, stack, true, false)
+	var triedb ethdb.Database
 	if stack.HasSeparateTrieDir() {
-		db = utils.MakeSeparateTrieDB(ctx, stack, true, false)
-	} else {
-		db = utils.MakeChainDatabase(ctx, stack, true, false)
+		triedb = utils.MakeSeparateTrieDB(ctx, stack, true, false)
+		defer triedb.Close()
 	}
 	defer db.Close()
 
@@ -402,7 +402,7 @@ func inspectTrie(ctx *cli.Context) error {
 			config = trie.HashDefaults
 		}
 
-		triedb := trie.NewDatabase(db, config)
+		triedb := trie.NewDatabase(triedb, config)
 		theTrie, err := trie.New(trie.TrieID(trieRootHash), triedb)
 		if err != nil {
 			fmt.Printf("fail to new trie tree, err: %v, rootHash: %v\n", err, trieRootHash.String())
