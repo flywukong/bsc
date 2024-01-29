@@ -547,6 +547,12 @@ func dbStats(ctx *cli.Context) error {
 	defer db.Close()
 
 	showLeveldbStats(db)
+	if stack.HasSeparateTrieDir() {
+		seprateTrieDB := utils.MakeSeparateTrieDB(ctx, stack, true, false)
+		defer seprateTrieDB.Close()
+		showLeveldbStats(seprateTrieDB)
+	}
+
 	return nil
 }
 
