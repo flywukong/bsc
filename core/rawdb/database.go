@@ -642,6 +642,7 @@ func InspectDatabase(db ethdb.Database, separateDB ethdb.Database, keyPrefix, ke
 
 	var separateIter ethdb.Iterator
 	if separateDB != nil {
+		fmt.Println("new separate db iterator")
 		separateIter = separateDB.NewIterator(keyPrefix, nil)
 	}
 	var (
@@ -759,6 +760,7 @@ func InspectDatabase(db ethdb.Database, separateDB ethdb.Database, keyPrefix, ke
 	}
 
 	if separateIter != nil {
+		count = 0
 		for separateIter.Next() {
 			var (
 				key   = it.Key()
@@ -772,6 +774,11 @@ func InspectDatabase(db ethdb.Database, separateDB ethdb.Database, keyPrefix, ke
 					metadata.Add(size)
 					break
 				}
+			}
+			count++
+			if count%1000 == 0 && time.Since(logged) > 8*time.Second {
+				log.Info("Inspecting separate database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
+				logged = time.Now()
 			}
 		}
 	}
