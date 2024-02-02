@@ -519,9 +519,9 @@ func verifyState(ctx *cli.Context) error {
 	}
 	var triedb *trie.Database
 	if stack.HasSeparateTrieDir() {
-		separateTrie := utils.MakeSeparateTrieDB(ctx, stack, true, false)
-		defer separateTrie.Close()
-		triedb = utils.MakeTrieDatabase(ctx, separateTrie, false, true)
+		statediskdb := utils.MakeStateDataBase(ctx, stack, true, false)
+		defer statediskdb.Close()
+		triedb = utils.MakeTrieDatabase(ctx, statediskdb, false, true)
 	} else {
 		triedb = utils.MakeTrieDatabase(ctx, chaindb, false, true)
 	}
@@ -683,9 +683,9 @@ func traverseRawState(ctx *cli.Context) error {
 
 	var triedb *trie.Database
 	if stack.HasSeparateTrieDir() {
-		separateTrie := utils.MakeSeparateTrieDB(ctx, stack, true, false)
-		defer separateTrie.Close()
-		triedb = utils.MakeTrieDatabase(ctx, separateTrie, false, true)
+		statediskdb := utils.MakeStateDataBase(ctx, stack, true, false)
+		defer statediskdb.Close()
+		triedb = utils.MakeTrieDatabase(ctx, statediskdb, false, true)
 	} else {
 		triedb = utils.MakeTrieDatabase(ctx, chaindb, false, true)
 	}
@@ -849,10 +849,10 @@ func dumpState(ctx *cli.Context) error {
 		return err
 	}
 
-	var separateTrie ethdb.Database
+	var statediskdb ethdb.Database
 	if stack.HasSeparateTrieDir() {
-		separateTrie = utils.MakeSeparateTrieDB(ctx, stack, true, false)
-		defer separateTrie.Close()
+		statediskdb = utils.MakeStateDataBase(ctx, stack, true, false)
+		defer statediskdb.Close()
 	}
 
 	triedb := utils.MakeTrieDatabase(ctx, db, false, true)
@@ -867,8 +867,8 @@ func dumpState(ctx *cli.Context) error {
 	triesInMemory := ctx.Uint64(utils.TriesInMemoryFlag.Name)
 
 	var snaptree *snapshot.Tree
-	if separateTrie != nil {
-		snaptree, err = snapshot.New(snapConfig, db, trie.NewDatabase(separateTrie, nil), root, int(triesInMemory), false)
+	if statediskdb != nil {
+		snaptree, err = snapshot.New(snapConfig, db, trie.NewDatabase(statediskdb, nil), root, int(triesInMemory), false)
 	} else {
 		snaptree, err = snapshot.New(snapConfig, db, trie.NewDatabase(db, nil), root, int(triesInMemory), false)
 	}
