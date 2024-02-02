@@ -347,10 +347,10 @@ func inspectTrie(ctx *cli.Context) error {
 
 	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
-	var separateTrie ethdb.Database
+	var statediskdb ethdb.Database
 	if stack.HasSeparateTrieDir() {
-		separateTrie = utils.MakeSeparateTrieDB(ctx, stack, true, false)
-		defer separateTrie.Close()
+		statediskdb = utils.MakeStateDataBase(ctx, stack, true, false)
+		defer statediskdb.Close()
 	}
 	var headerBlockHash common.Hash
 	if ctx.NArg() >= 1 {
@@ -402,8 +402,8 @@ func inspectTrie(ctx *cli.Context) error {
 		}
 
 		var triedb *trie.Database
-		if separateTrie != nil {
-			triedb = trie.NewDatabase(separateTrie, config)
+		if statediskdb != nil {
+			triedb = trie.NewDatabase(statediskdb, config)
 		} else {
 			triedb = trie.NewDatabase(db, config)
 		}
@@ -450,12 +450,12 @@ func inspect(ctx *cli.Context) error {
 	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
 
-	var seprateDB ethdb.Database
+	var statediskdb ethdb.Database
 	if stack.HasSeparateTrieDir() {
-		seprateDB = utils.MakeSeparateTrieDB(ctx, stack, true, false)
-		defer seprateDB.Close()
+		statediskdb = utils.MakeStateDataBase(ctx, stack, true, false)
+		defer statediskdb.Close()
 	}
-	return rawdb.InspectDatabase(db, seprateDB, prefix, start)
+	return rawdb.InspectDatabase(db, statediskdb, prefix, start)
 }
 
 func ancientInspect(ctx *cli.Context) error {
@@ -543,10 +543,10 @@ func dbStats(ctx *cli.Context) error {
 
 	showLeveldbStats(db)
 	if stack.HasSeparateTrieDir() {
-		seprateTrieDB := utils.MakeSeparateTrieDB(ctx, stack, true, false)
-		defer seprateTrieDB.Close()
+		statediskdb := utils.MakeStateDataBase(ctx, stack, true, false)
+		defer statediskdb.Close()
 		fmt.Println("show stats of separated db")
-		showLeveldbStats(seprateTrieDB)
+		showLeveldbStats(statediskdb)
 	}
 
 	return nil
@@ -562,11 +562,11 @@ func dbCompact(ctx *cli.Context) error {
 	log.Info("Stats before compaction")
 	showLeveldbStats(db)
 
-	var separateTrieDB ethdb.Database
+	var statediskdb ethdb.Database
 	if stack.HasSeparateTrieDir() {
-		separateTrieDB = utils.MakeSeparateTrieDB(ctx, stack, false, false)
-		defer separateTrieDB.Close()
-		showLeveldbStats(separateTrieDB)
+		statediskdb = utils.MakeStateDataBase(ctx, stack, false, false)
+		defer statediskdb.Close()
+		showLeveldbStats(statediskdb)
 	}
 
 	log.Info("Triggering compaction")
@@ -575,8 +575,8 @@ func dbCompact(ctx *cli.Context) error {
 		return err
 	}
 
-	if separateTrieDB != nil {
-		if err := separateTrieDB.Compact(nil, nil); err != nil {
+	if statediskdb != nil {
+		if err := statediskdb.Compact(nil, nil); err != nil {
 			log.Error("Compact err", "error", err)
 			return err
 		}
@@ -584,8 +584,8 @@ func dbCompact(ctx *cli.Context) error {
 
 	log.Info("Stats after compaction")
 	showLeveldbStats(db)
-	if separateTrieDB != nil {
-		showLeveldbStats(separateTrieDB)
+	if statediskdb != nil {
+		showLeveldbStats(statediskdb)
 	}
 	return nil
 }
@@ -611,11 +611,11 @@ func dbGet(ctx *cli.Context) error {
 	if err != nil {
 		// if separate trie db exist, try to get it from separate db
 		if stack.HasSeparateTrieDir() {
-			trieDB := utils.MakeSeparateTrieDB(ctx, stack, true, false)
-			defer trieDB.Close()
-			triedata, dberr := trieDB.Get(key)
+			statediskdb := utils.MakeStateDataBase(ctx, stack, true, false)
+			defer statediskdb.Close()
+			statedata, dberr := statediskdb.Get(key)
 			if dberr == nil {
-				fmt.Printf("key %#x: %#x\n", key, triedata)
+				fmt.Printf("key %#x: %#x\n", key, statedata)
 				return nil
 			}
 		}
@@ -636,7 +636,7 @@ func dbTrieGet(ctx *cli.Context) error {
 
 	var db ethdb.Database
 	if stack.HasSeparateTrieDir() {
-		db = utils.MakeSeparateTrieDB(ctx, stack, true, false)
+		db = utils.MakeStateDataBase(ctx, stack, true, false)
 	} else {
 		db = utils.MakeChainDatabase(ctx, stack, true, false)
 	}
@@ -707,7 +707,7 @@ func dbTrieDelete(ctx *cli.Context) error {
 
 	var db ethdb.Database
 	if stack.HasSeparateTrieDir() {
-		db = utils.MakeSeparateTrieDB(ctx, stack, true, false)
+		db = utils.MakeStateDataBase(ctx, stack, true, false)
 	} else {
 		db = utils.MakeChainDatabase(ctx, stack, true, false)
 	}
@@ -834,7 +834,7 @@ func dbDumpTrie(ctx *cli.Context) error {
 
 	var db ethdb.Database
 	if stack.HasSeparateTrieDir() {
-		db = utils.MakeSeparateTrieDB(ctx, stack, true, false)
+		db = utils.MakeStateDataBase(ctx, stack, true, false)
 	} else {
 		db = utils.MakeChainDatabase(ctx, stack, true, false)
 	}
