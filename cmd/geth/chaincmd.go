@@ -705,16 +705,9 @@ func dump(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	defer db.Close()
 
-	var triedb *trie.Database
-	if stack.HasSeparateTrieDir() {
-		statediskdb := utils.MakeStateDataBase(ctx, stack, true, false)
-		defer statediskdb.Close()
-		triedb = utils.MakeTrieDatabase(ctx, statediskdb, true, true) // always enable preimage lookup
-	} else {
-		triedb = utils.MakeTrieDatabase(ctx, db, true, true) // always enable preimage lookup
-	}
-
+	triedb := utils.MakeTrieDatabase(ctx, db, true, true) // always enable preimage lookup
 	defer triedb.Close()
 
 	state, err := state.New(root, state.NewDatabaseWithNodeDB(db, triedb), nil)
@@ -739,6 +732,7 @@ func dumpAllRootHashInPath(ctx *cli.Context) error {
 	defer stack.Close()
 	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
+
 	triedb := trie.NewDatabase(db, &trie.Config{PathDB: pathdb.ReadOnly})
 	defer triedb.Close()
 
