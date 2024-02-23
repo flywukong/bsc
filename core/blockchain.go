@@ -164,20 +164,8 @@ type CacheConfig struct {
 	StateScheme         string        // Scheme used to store ethereum states and merkle tree nodes on top
 	PathSyncFlush       bool          // Whether sync flush the trienodebuffer of pathdb to disk.
 
-	SnapshotNoBuild   bool                 // Whether the background generation is allowed
-	SnapshotWait      bool                 // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
-	StateDiskDBConfig *StateDatabaseConfig // The configuration of the separated single trie database
-}
-
-// StateDatabaseConfig contains the configuration values of the separated single state database
-type StateDatabaseConfig struct {
-	StateHandles     int    // The handler num used by the separated state db
-	StateCache       int    // The cache size used by the separated state db
-	StateEngine      string // The db engine (pebble or leveldb) used by the separated state db
-	StateDataDir     string // The directory of the separated state db
-	NameSpace        string // The namespace of the separated state db
-	StateAncient     string // The ancient directory of the separated state db
-	PruneAncientData bool
+	SnapshotNoBuild bool // Whether the background generation is allowed
+	SnapshotWait    bool // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
 }
 
 // triedbConfig derives the configures for trie database.
@@ -333,6 +321,17 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	diffLayerCache, _ := exlru.New(diffLayerCacheLimit)
 	diffLayerChanCache, _ := exlru.New(diffLayerCacheLimit)
 
+	// Open trie database with provided config
+	triedb := trie.NewDatabase(db, cacheConfig.triedbConfig())
+	// Setup the genesis block, commit the provided genesis specification
+	// to database if the genesis block is not present yet, or load the
+	// stored one from database.
+	chainConfig, genesisHash, genesisErr := SetupGenesisBlockWithOverride(db, triedb, genesis, overrides)
+	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
+		return nil, genesisErr
+	}
+	systemcontracts.GenesisHash = genesisHash
+	log.Info("Initialised chain configuration", "config", chainConfig)
 	// Description of chainConfig is empty now
 	/*
 		log.Info("")
@@ -345,8 +344,10 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	*/
 
 	bc := &BlockChain{
+		chainConfig:        chainConfig,
 		cacheConfig:        cacheConfig,
 		db:                 db,
+		triedb:             triedb,
 		triegc:             prque.New[int64, common.Hash](nil),
 		quit:               make(chan struct{}),
 		triesInMemory:      cacheConfig.TriesInMemory,
@@ -366,20 +367,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		diffQueueBuffer:    make(chan *types.DiffLayer),
 	}
 	var err error
-
-	// Open trie database with provided config
-	triedb := trie.NewDatabase(db, cacheConfig.triedbConfig())
-	bc.triedb = triedb
-	// Setup the genesis block, commit the provided genesis specification
-	// to database if the genesis block is not present yet, or load the
-	// stored one from database.
-	chainConfig, genesisHash, genesisErr := SetupGenesisBlockWithOverride(db, triedb, genesis, overrides)
-	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
-		return nil, genesisErr
-	}
-	bc.chainConfig = chainConfig
-	systemcontracts.GenesisHash = genesisHash
-	log.Info("Initialised chain configuration", "config", chainConfig)
 
 	bc.flushInterval.Store(int64(cacheConfig.TrieTimeLimit))
 	bc.forker = NewForkChoice(bc, shouldPreserve)

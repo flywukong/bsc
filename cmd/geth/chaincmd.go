@@ -732,7 +732,6 @@ func dumpAllRootHashInPath(ctx *cli.Context) error {
 	defer stack.Close()
 	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
-
 	triedb := trie.NewDatabase(db, &trie.Config{PathDB: pathdb.ReadOnly})
 	defer triedb.Close()
 
