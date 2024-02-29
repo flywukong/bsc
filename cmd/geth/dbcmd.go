@@ -663,10 +663,6 @@ func dbBlockSplit(ctx *cli.Context) error {
 	db := utils.MakeChainDatabase(ctx, stack, false, false)
 	defer db.Close()
 
-	//if stack.Config().BlockDir == "" {
-	//	return fmt.Errorf("block dir must be set")
-	//}
-
 	blockStore := utils.SplitBlockDatabase(ctx, stack, false, false)
 	defer blockStore.Close()
 

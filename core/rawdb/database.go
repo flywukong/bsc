@@ -863,6 +863,16 @@ func isBlockKey(key, value []byte) bool {
 	// hash->number
 	case bytes.HasPrefix(key, headerNumberPrefix) && len(key) == (len(headerNumberPrefix)+common.HashLength):
 		return true
+	// number -> hash
+	case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerHashSuffix):
+		return true
+	case bytes.Equal(key, headFinalizedBlockKey):
+		return true
+	// HeadHeaderHash
+	case bytes.Equal(key, headHeaderKey):
+		return true
+	case bytes.Equal(key, headBlockKey):
+		return true
 	default:
 		return false
 	}

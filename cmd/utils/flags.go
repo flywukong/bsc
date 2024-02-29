@@ -2378,13 +2378,15 @@ func SplitTrieDatabase(ctx *cli.Context, stack *node.Node, readonly, disableFree
 	return trieDB
 }
 
-func SplitBlockDatabase(ctx *cli.Context, stack *node.Node, readonly, disableFreeze bool) ethdb.KeyValueStore {
+func SplitBlockDatabase(ctx *cli.Context, stack *node.Node, readonly, disableFreeze bool) ethdb.Database {
 	var (
-		//cache   = ctx.Int(CacheFlag.Name) * ctx.Int(CacheDatabaseFlag.Name) / 100
 		handles = MakeDatabaseHandles(ctx.Int(FDLimitFlag.Name))
+		cache   = ctx.Int(CacheFlag.Name) * ctx.Int(CacheDatabaseFlag.Name) / 100
+		err     error
 	)
 
-	blockDB, err := stack.OpenBlockDatabase("chaindata", handles/2, "", "eth/db/chaindata/", false)
+	// chainDB, err := n.OpenDatabaseWithFreezer(name, cache, chainDataHandles, freezer, namespace, readonly, false, false, pruneAncientData)
+	blockDB, err := stack.OpenDatabaseWithFreezer("chaindata/block", cache, handles/2, "", "eth/db/chaindata/", false, false, false, false)
 	if err != nil {
 		Fatalf("Could not open trie database: %v", err)
 	}
