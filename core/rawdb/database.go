@@ -307,12 +307,14 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 		offset = prunedFrozen
 	}
 
+	fmt.Println("create idle freezer begin")
 	// Create the idle freezer instance
 	frdb, err := newChainFreezer(resolveChainFreezerDir(ancient), namespace, readonly, offset)
 	if err != nil {
 		printChainMetadata(db)
 		return nil, err
 	}
+	fmt.Println("create idle freezer finish")
 
 	// Since the freezer can be stored separately from the user's key-value database,
 	// there's a fairly high probability that the user requests invalid combinations

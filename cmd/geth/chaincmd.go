@@ -254,9 +254,11 @@ func initGenesis(ctx *cli.Context) error {
 			chaindb.SetStateStore(statediskdb)
 		}
 
+		fmt.Println("begin new trie db")
 		triedb := utils.MakeTrieDatabase(ctx, chaindb, ctx.Bool(utils.CachePreimagesFlag.Name), false)
 		defer triedb.Close()
 
+		fmt.Println("finish new trie db ")
 		_, hash, err := core.SetupGenesisBlock(chaindb, triedb, genesis)
 		if err != nil {
 			utils.Fatalf("Failed to write genesis block: %v", err)
