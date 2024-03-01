@@ -871,8 +871,8 @@ func isBlockKey(key, value []byte) bool {
 	// HeadHeaderHash
 	case bytes.Equal(key, headHeaderKey):
 		return true
-	case bytes.Equal(key, headBlockKey):
-		return true
+	//case bytes.Equal(key, headBlockKey):
+	//	return true
 	default:
 		return false
 	}
