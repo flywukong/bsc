@@ -198,6 +198,11 @@ func makeFullNode(ctx *cli.Context) (*node.Node, ethapi.Backend) {
 		v := ctx.Uint64(utils.OverrideVerkle.Name)
 		cfg.Eth.OverrideVerkle = &v
 	}
+
+	if ctx.IsSet(utils.SeparateDBFlag.Name) && !stack.HasSeparateTrieDir() {
+		utils.Fatalf("Failed to locate separate database subdirectory when separatedb parameter has been set")
+	}
+
 	backend, _ := utils.RegisterEthService(stack, &cfg.Eth)
 
 	// Configure log filter RPC API.
