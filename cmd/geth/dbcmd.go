@@ -674,9 +674,6 @@ func dbDeleteSnapData(ctx *cli.Context) error {
 	db := utils.MakeChainDatabase(ctx, stack, false, false)
 	defer db.Close()
 
-	if stack.Config().TrieDir == "" {
-		return fmt.Errorf("trie dir must be set")
-	}
 	err := rawdb.DeleteDatabase(db)
 	if err != nil {
 		return err
