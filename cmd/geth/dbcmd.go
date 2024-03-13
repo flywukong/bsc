@@ -78,6 +78,7 @@ Remove blockchain and state databases`,
 			dbTrieDeleteCmd,
 			dbTrieSplitCmd,
 			dbBlockSplitCmd,
+			dbDelSnapCmd,
 		},
 	}
 	dbInspectCmd = &cli.Command{
@@ -146,6 +147,18 @@ a data corruption.`,
 		Flags: []cli.Flag{
 			utils.DataDirFlag,
 			utils.TrieDirFlag,
+		},
+		Usage: "Migrate data in the database," +
+			"./geth db split-trie --datadir ./node --triedir ./node2",
+		Description: `This commands iterates the entire database. If the optional 'prefix' and 'start' arguments are provided, then the iteration is limited to the given subset of data.`,
+	}
+
+	dbDelSnapCmd = &cli.Command{
+		Action:    dbDeleteSnapData,
+		Name:      "delete-snap",
+		ArgsUsage: "",
+		Flags: []cli.Flag{
+			utils.DataDirFlag,
 		},
 		Usage: "Migrate data in the database," +
 			"./geth db split-trie --datadir ./node --triedir ./node2",
@@ -647,6 +660,24 @@ func dbTrieSplit(ctx *cli.Context) error {
 	defer seprateDB.Close()
 
 	err := rawdb.SplitDatabase(db, seprateDB)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func dbDeleteSnapData(ctx *cli.Context) error {
+	stack, _ := makeConfigNode(ctx)
+	defer stack.Close()
+
+	db := utils.MakeChainDatabase(ctx, stack, false, false)
+	defer db.Close()
+
+	if stack.Config().TrieDir == "" {
+		return fmt.Errorf("trie dir must be set")
+	}
+	err := rawdb.DeleteDatabase(db)
 	if err != nil {
 		return err
 	}

@@ -27,6 +27,10 @@ func InitDb(db ethdb.Database, trieDB ethdb.Database) {
 	triedbInstance = trieDB
 }
 
+func InitDb2(db ethdb.Database) {
+	pebbleDB = db
+}
+
 func (job *Job) UploadToKvRocks() error {
 	if len(job.Kvbuffer) > 0 {
 		kvBatch := triedbInstance.NewBatch()
@@ -51,6 +55,25 @@ func (job *Job) UploadToKvRocks() error {
 					return delErr
 				}
 			}
+		}
+	}
+
+	return nil
+}
+
+func (job *Job) DeleteKvRocks() error {
+	if len(job.Kvbuffer) > 0 {
+		kvBatch := pebbleDB.NewBatch()
+		for key, _ := range job.Kvbuffer {
+			batchErr := kvBatch.Delete([]byte(key))
+			if batchErr != nil {
+				return batchErr
+			}
+		}
+
+		if err := kvBatch.Write(); err != nil {
+			fmt.Println("send kv rocks error", err.Error())
+			return err
 		}
 	}
 
@@ -93,7 +116,7 @@ func (w *Worker) Start() {
 			select {
 			case job := <-w.JobChannel:
 				// send batch to kvrocks
-				if err := job.UploadToKvRocks(); err != nil {
+				if err := job.DeleteKvRocks(); err != nil {
 					fmt.Println("send kv rocks error", err.Error())
 					if job.isAncient {
 						MarkAncientTaskFail()
