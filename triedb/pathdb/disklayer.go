@@ -17,16 +17,21 @@
 package pathdb
 
 import (
+	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/ethereum/go-ethereum/trie/triestate"
 	"golang.org/x/crypto/sha3"
@@ -43,20 +48,20 @@ type trienodebuffer interface {
 	// the ownership of the nodes map which belongs to the bottom-most diff layer.
 	// It will just hold the node references from the given map which are safe to
 	// copy.
-	commit(nodes map[common.Hash]map[string]*trienode.Node) trienodebuffer
+	commit(nodes map[common.Hash]map[string]*trienode.Node, set *triestate.Set) trienodebuffer
 
 	// revert is the reverse operation of commit. It also merges the provided nodes
 	// into the trienodebuffer, the difference is that the provided node set should
 	// revert the changes made by the last state transition.
-	revert(db ethdb.KeyValueReader, nodes map[common.Hash]map[string]*trienode.Node) error
+	revert(db ethdb.KeyValueReader, nodes map[common.Hash]map[string]*trienode.Node, accounts map[common.Hash][]byte, storages map[common.Hash]map[common.Hash][]byte) error
 
 	// flush persists the in-memory dirty trie node into the disk if the configured
 	// memory threshold is reached. Note, all data must be written atomically.
-	flush(db ethdb.KeyValueStore, clean *fastcache.Cache, id uint64, force bool) error
+	flush(db ethdb.KeyValueStore, clean *cleanCache, id uint64, force bool) error
 
 	// setSize sets the buffer size to the provided number, and invokes a flush
 	// operation if the current memory usage exceeds the new limit.
-	setSize(size int, db ethdb.KeyValueStore, clean *fastcache.Cache, id uint64) error
+	setSize(size int, db ethdb.KeyValueStore, clean *cleanCache, id uint64) error
 
 	// reset cleans up the disk cache.
 	reset()
@@ -70,40 +75,64 @@ type trienodebuffer interface {
 	// getAllNodes return all the trie nodes are cached in trienodebuffer.
 	getAllNodes() map[common.Hash]map[string]*trienode.Node
 
+	// getLatestStates return all the latest states(account, storage, destructSet) are cached in trienodebuffer.
+	getLatestStates() *triestate.Set
+
 	// getLayers return the size of cached difflayers.
 	getLayers() uint64
+
+	// account return the value of the specify account
+	account(hash common.Hash) ([]byte, bool)
+
+	// storage return the value of the specify account and storage key
+	storage(accountHash, storageHash common.Hash) ([]byte, bool)
 
 	// waitAndStopFlushing will block unit writing the trie nodes of trienodebuffer to disk.
 	waitAndStopFlushing()
 }
 
-func NewTrieNodeBuffer(sync bool, limit int, nodes map[common.Hash]map[string]*trienode.Node, layers uint64) trienodebuffer {
+type cleanCache struct {
+	nodes       *fastcache.Cache
+	plainStates *fastcache.Cache
+}
+
+func NewTrieNodeBuffer(sync bool, limit int,
+	nodes map[common.Hash]map[string]*trienode.Node,
+	latestAccounts map[common.Hash][]byte,
+	latestStorages map[common.Hash]map[common.Hash][]byte,
+	destructSet map[common.Hash]struct{}, layers uint64) trienodebuffer {
 	if sync {
 		log.Info("New sync node buffer", "limit", common.StorageSize(limit), "layers", layers)
 		return newNodeBuffer(limit, nodes, layers)
 	}
-	log.Info("New async node buffer", "limit", common.StorageSize(limit), "layers", layers)
-	return newAsyncNodeBuffer(limit, nodes, layers)
+	log.Info("new async node buffer", "limit", common.StorageSize(limit), "layers", layers)
+	return newAsyncNodeBuffer(limit, nodes, latestAccounts, latestStorages, destructSet, layers)
 }
 
 // diskLayer is a low level persistent layer built on top of a key-value store.
 type diskLayer struct {
-	root   common.Hash      // Immutable, root hash to which this layer was made for
-	id     uint64           // Immutable, corresponding state id
-	db     *Database        // Path-based trie database
-	cleans *fastcache.Cache // GC friendly memory cache of clean node RLPs
-	buffer trienodebuffer   // Node buffer to aggregate writes
-	stale  bool             // Signals that the layer became stale (state progressed)
-	lock   sync.RWMutex     // Lock used to protect stale flag
+	root   common.Hash    // Immutable, root hash to which this layer was made for
+	id     uint64         // Immutable, corresponding state id
+	db     *Database      // Path-based trie database
+	cleans *cleanCache    // GC friendly memory cache of clean node RLPs
+	buffer trienodebuffer // Node buffer to aggregate writes
+	stale  bool           // Signals that the layer became stale (state progressed)
+	lock   sync.RWMutex   // Lock used to protect stale flag
 }
 
 // newDiskLayer creates a new disk layer based on the passing arguments.
-func newDiskLayer(root common.Hash, id uint64, db *Database, cleans *fastcache.Cache, buffer trienodebuffer) *diskLayer {
+func newDiskLayer(root common.Hash, id uint64, db *Database, cleans *cleanCache, buffer trienodebuffer) *diskLayer {
 	// Initialize a clean cache if the memory allowance is not zero
 	// or reuse the provided cache if it is not nil (inherited from
 	// the original disk layer).
 	if cleans == nil && db.config.CleanCacheSize != 0 {
-		cleans = fastcache.New(db.config.CleanCacheSize)
+		cleans = &cleanCache{}
+		nodeCacheSize := db.config.CleanCacheSize * 43 / 100
+		plainStatesCacheSize := db.config.CleanCacheSize * 57 / 100
+		cleans.nodes = fastcache.New(nodeCacheSize)
+		cleans.plainStates = fastcache.New(plainStatesCacheSize)
+		log.Info("Allocate clean cache in disklayer", "nodes", common.StorageSize(nodeCacheSize),
+			"plainStates", common.StorageSize(plainStatesCacheSize))
 	}
 	return &diskLayer{
 		root:   root,
@@ -150,6 +179,64 @@ func (dl *diskLayer) markStale() {
 	dl.stale = true
 }
 
+func (dl *diskLayer) Account(hash common.Hash) ([]byte, error) {
+	// Hold the lock, ensure the parent won't be changed during the
+	// state accessing.
+	dl.lock.RLock()
+	defer dl.lock.RUnlock()
+	if dl.stale {
+		return nil, errSnapshotStale
+	}
+
+	trieDiffLayerAccountMissMeter.Mark(1)
+	if data, exist := dl.buffer.account(hash); exist {
+		trieDirtyAccountHitMeter.Mark(1)
+		trieDiskLayerAccountHitMeter.Mark(1)
+		return data, nil
+	}
+	trieDirtyAccountMissMeter.Mark(1)
+	if data, ok := dl.cleans.plainStates.HasGet(nil, hash.Bytes()); ok {
+		trieCleanAccountHitMeter.Mark(1)
+		trieDiskLayerAccountHitMeter.Mark(1)
+		return types.MustFullAccountRLP(data), nil
+	}
+
+	trieCleanAccountMissMeter.Mark(1)
+	blob := dl.readAccountTrie(hash)
+	dl.cleans.plainStates.Set(hash.Bytes(), types.FullToSlimAccountRLP(blob))
+	return blob, nil
+}
+
+func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, error) {
+	// Hold the lock, ensure the parent won't be changed during the
+	// state accessing.
+	dl.lock.RLock()
+	defer dl.lock.RUnlock()
+
+	if dl.stale {
+		return nil, errSnapshotStale
+	}
+
+	trieDiffLayerStorageMissMeter.Mark(1)
+	if data, exist := dl.buffer.storage(accountHash, storageHash); exist {
+		trieDiskLayerStorageHitMeter.Mark(1)
+		trieDirtyStorageHitMeter.Mark(1)
+		return data, nil
+	}
+
+	trieDirtyStorageMissMeter.Mark(1)
+	if data, ok := dl.cleans.plainStates.HasGet(nil, append(accountHash.Bytes(), storageHash.Bytes()...)); ok {
+		trieDiskLayerStorageHitMeter.Mark(1)
+		trieCleanStorageHitMeter.Mark(1)
+		return data, nil
+	}
+
+	trieCleanStorageMissMeter.Mark(1)
+	blob := dl.readStorageTrie(accountHash, storageHash)
+	dl.cleans.plainStates.Set(append(accountHash.Bytes(), storageHash.Bytes()...), blob)
+	return blob, nil
+}
+
 // Node implements the layer interface, retrieving the trie node with the
 // provided node info. No error will be returned if the node is not found.
 func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]byte, error) {
@@ -163,6 +250,7 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 	// node buffer first. Note the buffer is lock free since
 	// it's impossible to mutate the buffer before tagging the
 	// layer as stale.
+	bufferNodeStart := time.Now()
 	n, err := dl.buffer.node(owner, path, hash)
 	if err != nil {
 		return nil, err
@@ -170,6 +258,7 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 	if n != nil {
 		dirtyHitMeter.Mark(1)
 		dirtyReadMeter.Mark(int64(len(n.Blob)))
+		diskBufferNodeTimer.UpdateSince(bufferNodeStart)
 		return n.Blob, nil
 	}
 	dirtyMissMeter.Mark(1)
@@ -177,11 +266,15 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 	// Try to retrieve the trie node from the clean memory cache
 	key := cacheKey(owner, path)
 	if dl.cleans != nil {
-		if blob := dl.cleans.Get(nil, key); len(blob) > 0 {
+		cleanNodeStart := time.Now()
+		if blob := dl.cleans.nodes.Get(nil, key); len(blob) > 0 {
 			h := newHasher()
 			defer h.release()
 
 			got := h.hash(blob)
+
+			diskCleanNodeTimer.UpdateSince(cleanNodeStart)
+
 			if got == hash {
 				cleanHitMeter.Mark(1)
 				cleanReadMeter.Mark(int64(len(blob)))
@@ -194,24 +287,72 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 	}
 	// Try to retrieve the trie node from the disk.
 	var (
-		nBlob []byte
-		nHash common.Hash
+		nBlob         []byte
+		nHash         common.Hash
+		diskNodeStart = time.Now()
 	)
 	if owner == (common.Hash{}) {
 		nBlob, nHash = rawdb.ReadAccountTrieNode(dl.db.diskdb, path)
 	} else {
 		nBlob, nHash = rawdb.ReadStorageTrieNode(dl.db.diskdb, owner, path)
 	}
+	diskDBNodeTimer.UpdateSince(diskNodeStart)
 	if nHash != hash {
 		diskFalseMeter.Mark(1)
 		log.Error("Unexpected trie node in disk", "owner", owner, "path", path, "expect", hash, "got", nHash)
 		return nil, newUnexpectedNodeError("disk", hash, nHash, owner, path, nBlob)
 	}
 	if dl.cleans != nil && len(nBlob) > 0 {
-		dl.cleans.Set(key, nBlob)
+		dl.cleans.nodes.Set(key, nBlob)
 		cleanWriteMeter.Mark(int64(len(nBlob)))
 	}
 	return nBlob, nil
+}
+
+// readAccountTrie return value of the account leaf node directly from the db
+func (dl *diskLayer) readAccountTrie(hash common.Hash) []byte {
+	start := time.Now()
+	defer func() {
+		readAndDecodeAccountTimer.UpdateSince(start)
+	}()
+	nBlob, path, nHash := rawdb.ReadAccountFromTrieDirectly(dl.db.diskdb, hash.Bytes())
+	diskReadAccountTimer.UpdateSince(start)
+	if nBlob == nil {
+		return nil
+	}
+	dl.cleans.nodes.Set(cacheKey(common.Hash{}, path[:]), nBlob)
+	diskTotalAccountCounter.Inc(1)
+	val, key := trie.DecodeLeafNode(nHash.Bytes(), path, nBlob)
+	if bytes.Compare(key, hash.Bytes()) == 0 {
+		return val
+	} else {
+		log.Debug("account short node info ", "account hash", hash.String(), "gotten key", hex.EncodeToString(key), "path", common.Bytes2Hex(path))
+	}
+	diskTotalMissAccoutCounter.Inc(1)
+	return nil
+}
+
+// readStorageTrie return value of the storage leaf node directly from the db
+func (dl *diskLayer) readStorageTrie(accountHash, storageHash common.Hash) []byte {
+	start := time.Now()
+	defer func() {
+		readAndDecodeStorageTimer.UpdateSince(start)
+	}()
+	key := storageHash.Bytes()
+	nBlob, path, nHash := rawdb.ReadStorageFromTrieDirectly(dl.db.diskdb, accountHash, key)
+	diskReadStorageTimer.UpdateSince(start)
+	if nBlob == nil {
+		return nil
+	}
+	dl.cleans.nodes.Set(cacheKey(accountHash, path[common.HashLength:]), nBlob)
+
+	diskTotalStorageCounter.Inc(1)
+	val, key := trie.DecodeLeafNode(nHash.Bytes(), path[common.HashLength:], nBlob)
+	if bytes.Compare(storageHash.Bytes(), key) == 0 {
+		return val
+	}
+	diskTotalMissStorageCounter.Inc(1)
+	return nil
 }
 
 // update implements the layer interface, returning a new diff layer on top
@@ -265,7 +406,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 	// Construct a new disk layer by merging the nodes from the provided diff
 	// layer, and flush the content in disk layer if there are too many nodes
 	// cached. The clean cache is inherited from the original disk layer.
-	ndl := newDiskLayer(bottom.root, bottom.stateID(), dl.db, dl.cleans, dl.buffer.commit(bottom.nodes))
+	ndl := newDiskLayer(bottom.root, bottom.stateID(), dl.db, dl.cleans, dl.buffer.commit(bottom.nodes, bottom.states))
 
 	// In a unique scenario where the ID of the oldest history object (after tail
 	// truncation) surpasses the persisted state ID, we take the necessary action
@@ -309,7 +450,7 @@ func (dl *diskLayer) revert(h *history, loader triestate.TrieLoader) (*diskLayer
 	// Apply the reverse state changes upon the current state. This must
 	// be done before holding the lock in order to access state in "this"
 	// layer.
-	nodes, err := triestate.Apply(h.meta.parent, h.meta.root, h.accounts, h.storages, loader)
+	nodes, latestAccounts, latestStorages, err := triestate.Apply(h.meta.parent, h.meta.root, h.accounts, h.storages, loader)
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +466,7 @@ func (dl *diskLayer) revert(h *history, loader triestate.TrieLoader) (*diskLayer
 	// needs to be reverted is not yet flushed and cached in node
 	// buffer, otherwise, manipulate persistent state directly.
 	if !dl.buffer.empty() {
-		err := dl.buffer.revert(dl.db.diskdb, nodes)
+		err := dl.buffer.revert(dl.db.diskdb, nodes, latestAccounts, latestStorages)
 		if err != nil {
 			return nil, err
 		}
@@ -373,7 +514,7 @@ func (dl *diskLayer) resetCache() {
 		return
 	}
 	if dl.cleans != nil {
-		dl.cleans.Reset()
+		dl.cleans.nodes.Reset()
 	}
 }
 

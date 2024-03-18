@@ -100,6 +100,13 @@ type layer interface {
 	// This is meant to be used during shutdown to persist the layer without
 	// flattening everything down (bad for reorgs).
 	journal(w io.Writer, journalType JournalType) error
+
+	// Account directly retrieves the account data associated with a particular hash
+	Account(hash common.Hash) ([]byte, error)
+
+	// Storage directly retrieves the storage data associated with a particular hash,
+	// within a particular account.
+	Storage(accountHash, storageHash common.Hash) ([]byte, error)
 }
 
 // Config contains the settings for database.
@@ -342,7 +349,7 @@ func (db *Database) Enable(root common.Hash) error {
 	}
 	// Re-construct a new disk layer backed by persistent state
 	// with **empty clean cache and node buffer**.
-	dl := newDiskLayer(root, 0, db, nil, NewTrieNodeBuffer(db.config.SyncFlush, db.bufferSize, nil, 0))
+	dl := newDiskLayer(root, 0, db, nil, NewTrieNodeBuffer(db.config.SyncFlush, db.bufferSize, nil, nil, nil, nil, 0))
 	db.tree.reset(dl)
 
 	// Re-enable the database as the final step.

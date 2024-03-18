@@ -58,6 +58,9 @@ var (
 	snapshotDirtyStorageReadMeter  = metrics.NewRegisteredMeter("state/snapshot/dirty/storage/read", nil)
 	snapshotDirtyStorageWriteMeter = metrics.NewRegisteredMeter("state/snapshot/dirty/storage/write", nil)
 
+	snapshotStorageDiskTimer = metrics.NewRegisteredTimer("state/snapshot/disk/storage/timer", nil)
+	snapshotAccountDiskTimer = metrics.NewRegisteredTimer("state/snapshot/disk/account/timer", nil)
+
 	snapshotDirtyAccountHitDepthHist = metrics.NewRegisteredHistogram("state/snapshot/dirty/account/hit/depth", nil, metrics.NewExpDecaySample(1028, 0.015))
 
 	snapshotFlushAccountItemMeter = metrics.NewRegisteredMeter("state/snapshot/flush/account/item", nil)
@@ -224,7 +227,7 @@ func New(config Config, diskdb ethdb.KeyValueStore, triedb *triedb.Database, roo
 		snap.layers[head.Root()] = head
 		head = head.Parent()
 	}
-	log.Info("Snapshot loaded", "diskRoot", snap.diskRoot(), "root", root)
+	log.Info("Snapshot loaded", "diskRoot", snap.diskRoot(), "root", root, "cache size", common.StorageSize(config.CacheSize*1024*1024))
 	return snap, nil
 }
 

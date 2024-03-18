@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -190,6 +191,7 @@ func (tree *layerTree) cap(root common.Hash, layers int) error {
 		}
 		tree.layers[base.rootHash()] = base
 		diff.parent = base
+		persisted = base.(*diskLayer)
 
 		diff.lock.Unlock()
 		persisted = base.(*diskLayer)
@@ -242,6 +244,21 @@ func (tree *layerTree) cap(root common.Hash, layers int) error {
 		updateOriginFunc(persisted.root)
 	}
 
+	// If the disk layer was modified, regenerate all the cumulative blooms
+	start := time.Now()
+	if persisted != nil {
+		var rebloom func(root common.Hash)
+		rebloom = func(root common.Hash) {
+			if diff, ok := tree.layers[root].(*diffLayer); ok {
+				diff.rebloom(persisted)
+			}
+			for _, child := range children[root] {
+				rebloom(child)
+			}
+		}
+		rebloom(persisted.root)
+	}
+	capBloomIndexTimer.UpdateSince(start)
 	return nil
 }
 

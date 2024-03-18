@@ -18,6 +18,7 @@
 package memorydb
 
 import (
+	"bytes"
 	"errors"
 	"sort"
 	"strings"
@@ -130,6 +131,10 @@ func (db *Database) ReadAncients(fn func(ethdb.AncientReaderOp) error) (err erro
 	panic("implement me")
 }
 
+func (db *Database) NewSeekIterator(prefix, key []byte) ethdb.Iterator {
+	panic("not supported!")
+}
+
 // New returns a wrapped map with all the required database interface methods
 // implemented.
 func New() *Database {
@@ -204,6 +209,10 @@ func (db *Database) Delete(key []byte) error {
 	}
 	delete(db.db, string(key))
 	return nil
+}
+
+func (db *Database) DeleteRange(start, end []byte) error {
+	panic("not supported")
 }
 
 // NewBatch creates a write-only key-value store that buffers changes to its host
@@ -346,6 +355,10 @@ func (b *batch) Delete(key []byte) error {
 	return nil
 }
 
+func (b *batch) DeleteRange(start, end []byte) error {
+	panic("not supported")
+}
+
 // ValueSize retrieves the amount of data queued up for writing.
 func (b *batch) ValueSize() int {
 	return b.size
@@ -398,6 +411,28 @@ type iterator struct {
 	index  int
 	keys   []string
 	values [][]byte
+}
+
+func (it *iterator) Seek(key []byte) bool {
+	if it.index <= 0 {
+		return false
+	}
+	for {
+		if it.index >= len(it.keys) {
+			return false
+		}
+		if bytes.Compare([]byte(it.keys[it.index]), key) < 0 {
+			it.index++
+			continue
+		} else {
+			if it.index == 0 {
+				return false
+			}
+			it.index--
+			return true
+		}
+	}
+
 }
 
 // Next moves the iterator to the next key/value pair. It returns whether the

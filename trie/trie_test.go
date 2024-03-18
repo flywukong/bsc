@@ -26,6 +26,7 @@ import (
 	"math/rand"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"testing/quick"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -817,6 +819,7 @@ type spongeDb struct {
 func (s *spongeDb) Has(key []byte) (bool, error)             { panic("implement me") }
 func (s *spongeDb) Get(key []byte) ([]byte, error)           { return nil, errors.New("no such elem") }
 func (s *spongeDb) Delete(key []byte) error                  { panic("implement me") }
+func (s *spongeDb) DeleteRange(start, end []byte) error      { panic("not supported") }
 func (s *spongeDb) NewBatch() ethdb.Batch                    { return &spongeBatch{s} }
 func (s *spongeDb) NewBatchWithSize(size int) ethdb.Batch    { return &spongeBatch{s} }
 func (s *spongeDb) NewSnapshot() (ethdb.Snapshot, error)     { panic("implement me") }
@@ -847,6 +850,10 @@ func (s *spongeDb) Put(key []byte, value []byte) error {
 }
 func (s *spongeDb) NewIterator(prefix []byte, start []byte) ethdb.Iterator { panic("implement me") }
 
+func (s *spongeDb) NewReverseIterator(prefix, start, key []byte) ethdb.Iterator {
+	panic("implement me")
+}
+
 func (s *spongeDb) Flush() {
 	// Bottom-up, the longest path first
 	sort.Sort(sort.Reverse(sort.StringSlice(s.keys)))
@@ -866,6 +873,7 @@ func (b *spongeBatch) Put(key, value []byte) error {
 	return nil
 }
 func (b *spongeBatch) Delete(key []byte) error             { panic("implement me") }
+func (b *spongeBatch) DeleteRange(start, end []byte) error { panic("not supported") }
 func (b *spongeBatch) ValueSize() int                      { return 100 }
 func (b *spongeBatch) Write() error                        { return nil }
 func (b *spongeBatch) Reset()                              {}
@@ -1211,4 +1219,73 @@ func FuzzTrie(f *testing.F) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestEmbeddedNodes(t *testing.T) {
+	db := newTestDatabase(rawdb.NewMemoryDatabase(), rawdb.PathScheme)
+	trie := NewEmpty(db)
+
+	trie.MustUpdate(common.Hex2Bytes("01234567890123456789012345678900"), common.Hex2Bytes("00"))
+	trie.MustUpdate(common.Hex2Bytes("01234567890123456789012345678901"), common.Hex2Bytes("01"))
+	trie.MustUpdate(common.Hex2Bytes("01234567890123456789012345678900"), common.Hex2Bytes("01"))
+	trie.MustUpdate(common.Hex2Bytes("01234567890123456789012345678900"), common.Hex2Bytes("00"))
+
+	root := trie.Hash()
+	var set *trienode.NodeSet
+	root, set, _ = trie.Commit(false)
+	fmt.Println("root is", "root=%v", root, Summary(set))
+	assert.Equal(t, len(set.Nodes), 3)
+
+	db.Update(root, types.EmptyRootHash, trienode.NewWithNodeSet(set))
+	trie, _ = New(TrieID(root), db)
+
+	trie.MustUpdate(common.Hex2Bytes("01234567890123456789012345678900"), common.Hex2Bytes("00000000000000000000000000000000000000000000000000000111111111111111111111111111111111111111111111111111111111111111111111122222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222"))
+	root = trie.Hash()
+	var set1 *trienode.NodeSet
+	root, set1, _ = trie.Commit(false)
+
+	fmt.Println("root is", "root=%v", root, Summary(set1))
+	assert.Equal(t, len(set1.Nodes), 4)
+
+	db.Update(root, types.EmptyRootHash, trienode.NewWithNodeSet(set1))
+	trie, _ = New(TrieID(root), db)
+
+	trie.MustUpdate(common.Hex2Bytes("01234567890123456789012345678900"), common.Hex2Bytes("00"))
+	root = trie.Hash()
+	var set2 *trienode.NodeSet
+	root, set2, _ = trie.Commit(false)
+
+	fmt.Println("root is", "root=%v", root, Summary(set2))
+	assert.Equal(t, len(set2.Nodes), 4)
+	deleted := 0
+	updated := 0
+	for _, n := range set2.Nodes {
+		if n.IsDeleted() {
+			deleted++
+		} else {
+			updated++
+		}
+	}
+	assert.Equal(t, deleted, 1)
+	assert.Equal(t, updated, 3)
+}
+
+func Summary(set *trienode.NodeSet) string {
+	var out = new(strings.Builder)
+	fmt.Fprintf(out, "nodeset owner: %v\n", set.Owner)
+	if set.Nodes != nil {
+		for path, n := range set.Nodes {
+			// Deletion
+			if n.IsDeleted() {
+				fmt.Fprintf(out, "  [-]: %x\n", path)
+				continue
+			}
+			// Insertion or update
+			fmt.Fprintf(out, "  [+/*]: %x -> %v -> %v \n", path, n.Hash, NodeString(n.Hash.Bytes(), n.Blob))
+		}
+	}
+	for _, n := range set.Leaves {
+		fmt.Fprintf(out, "[leaf]: %v\n", n)
+	}
+	return out.String()
 }

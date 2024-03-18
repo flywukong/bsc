@@ -7,14 +7,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VictoriaMetrics/fastcache"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/trie/trienode"
+	"github.com/ethereum/go-ethereum/trie/triestate"
 )
 
 var _ trienodebuffer = &asyncnodebuffer{}
@@ -29,8 +30,33 @@ type asyncnodebuffer struct {
 	stopFlushing atomic.Bool
 }
 
+func (a *asyncnodebuffer) account(hash common.Hash) ([]byte, bool) {
+	a.mux.RLock()
+	defer a.mux.RUnlock()
+
+	if node, exist := a.current.account(hash); exist {
+		return node, exist
+	}
+	return a.background.account(hash)
+}
+
+func (a *asyncnodebuffer) storage(accountHash, storageHash common.Hash) ([]byte, bool) {
+	a.mux.RLock()
+	defer a.mux.RUnlock()
+
+	if node, exist := a.current.storage(accountHash, storageHash); exist {
+		return node, exist
+	}
+	return a.background.storage(accountHash, storageHash)
+}
+
 // newAsyncNodeBuffer initializes the async node buffer with the provided nodes.
-func newAsyncNodeBuffer(limit int, nodes map[common.Hash]map[string]*trienode.Node, layers uint64) *asyncnodebuffer {
+func newAsyncNodeBuffer(limit int,
+	nodes map[common.Hash]map[string]*trienode.Node,
+	latestAccounts map[common.Hash][]byte,
+	latestStorages map[common.Hash]map[common.Hash][]byte,
+	destructSet map[common.Hash]struct{},
+	layers uint64) *asyncnodebuffer {
 	if nodes == nil {
 		nodes = make(map[common.Hash]map[string]*trienode.Node)
 	}
@@ -42,8 +68,8 @@ func newAsyncNodeBuffer(limit int, nodes map[common.Hash]map[string]*trienode.No
 	}
 
 	return &asyncnodebuffer{
-		current:    newNodeCache(uint64(limit), size, nodes, layers),
-		background: newNodeCache(uint64(limit), 0, make(map[common.Hash]map[string]*trienode.Node), 0),
+		current:    newNodeCache(uint64(limit), size, nodes, latestAccounts, latestStorages, destructSet, layers),
+		background: newNodeCache(uint64(limit), 0, make(map[common.Hash]map[string]*trienode.Node), nil, nil, nil, 0),
 	}
 }
 
@@ -66,11 +92,11 @@ func (a *asyncnodebuffer) node(owner common.Hash, path []byte, hash common.Hash)
 // the ownership of the nodes map which belongs to the bottom-most diff layer.
 // It will just hold the node references from the given map which are safe to
 // copy.
-func (a *asyncnodebuffer) commit(nodes map[common.Hash]map[string]*trienode.Node) trienodebuffer {
+func (a *asyncnodebuffer) commit(nodes map[common.Hash]map[string]*trienode.Node, set *triestate.Set) trienodebuffer {
 	a.mux.Lock()
 	defer a.mux.Unlock()
 
-	err := a.current.commit(nodes)
+	err := a.current.commit(nodes, set)
 	if err != nil {
 		log.Crit("[BUG] Failed to commit nodes to asyncnodebuffer", "error", err)
 	}
@@ -80,7 +106,8 @@ func (a *asyncnodebuffer) commit(nodes map[common.Hash]map[string]*trienode.Node
 // revert is the reverse operation of commit. It also merges the provided nodes
 // into the nodebuffer, the difference is that the provided node set should
 // revert the changes made by the last state transition.
-func (a *asyncnodebuffer) revert(db ethdb.KeyValueReader, nodes map[common.Hash]map[string]*trienode.Node) error {
+func (a *asyncnodebuffer) revert(db ethdb.KeyValueReader, nodes map[common.Hash]map[string]*trienode.Node,
+	accounts map[common.Hash][]byte, storages map[common.Hash]map[common.Hash][]byte) error {
 	a.mux.Lock()
 	defer a.mux.Unlock()
 
@@ -90,11 +117,11 @@ func (a *asyncnodebuffer) revert(db ethdb.KeyValueReader, nodes map[common.Hash]
 		log.Crit("[BUG] Failed to merge node cache under revert async node buffer", "error", err)
 	}
 	a.background.reset()
-	return a.current.revert(db, nodes)
+	return a.current.revert(db, nodes, accounts, storages)
 }
 
 // setSize is unsupported in asyncnodebuffer, due to the double buffer, blocking will occur.
-func (a *asyncnodebuffer) setSize(size int, db ethdb.KeyValueStore, clean *fastcache.Cache, id uint64) error {
+func (a *asyncnodebuffer) setSize(size int, db ethdb.KeyValueStore, clean *cleanCache, id uint64) error {
 	return errors.New("not supported")
 }
 
@@ -117,7 +144,7 @@ func (a *asyncnodebuffer) empty() bool {
 
 // flush persists the in-memory dirty trie node into the disk if the configured
 // memory threshold is reached. Note, all data must be written atomically.
-func (a *asyncnodebuffer) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, id uint64, force bool) error {
+func (a *asyncnodebuffer) flush(db ethdb.KeyValueStore, clean *cleanCache, id uint64, force bool) error {
 	a.mux.Lock()
 	defer a.mux.Unlock()
 
@@ -183,6 +210,33 @@ func (a *asyncnodebuffer) getAllNodes() map[common.Hash]map[string]*trienode.Nod
 	return cached.nodes
 }
 
+func (a *asyncnodebuffer) getLatestStates() *triestate.Set {
+	a.mux.Lock()
+	defer a.mux.Unlock()
+
+	res := triestate.New(nil, nil, nil, a.background.LatestAccounts, a.background.LatestStorages, a.background.DestructSet)
+
+	for accHash, _ := range a.current.DestructSet {
+		delete(res.LatestAccounts, accHash)
+		delete(res.LatestStorages, accHash)
+		res.DestructSet[accHash] = struct{}{}
+	}
+
+	for accHash, v := range a.current.LatestAccounts {
+		res.LatestAccounts[accHash] = v
+	}
+	for accHash, storages := range a.current.LatestStorages {
+		if _, ok := res.LatestStorages[accHash]; !ok {
+			res.LatestStorages[accHash] = storages
+		} else {
+			for h, v := range storages {
+				res.LatestStorages[accHash][h] = v
+			}
+		}
+	}
+	return res
+}
+
 func (a *asyncnodebuffer) getLayers() uint64 {
 	a.mux.RLock()
 	defer a.mux.RUnlock()
@@ -198,21 +252,69 @@ func (a *asyncnodebuffer) getSize() (uint64, uint64) {
 }
 
 type nodecache struct {
-	layers    uint64                                    // The number of diff layers aggregated inside
-	size      uint64                                    // The size of aggregated writes
-	limit     uint64                                    // The maximum memory allowance in bytes
-	nodes     map[common.Hash]map[string]*trienode.Node // The dirty node set, mapped by owner and path
-	immutable uint64                                    // The flag equal 1, flush nodes to disk background
+	layers uint64                                    // The number of diff layers aggregated inside
+	size   uint64                                    // The size of aggregated writes
+	limit  uint64                                    // The maximum memory allowance in bytes
+	nodes  map[common.Hash]map[string]*trienode.Node // The dirty node set, mapped by owner and path
+
+	// latest account and storage
+	LatestAccounts map[common.Hash][]byte
+	LatestStorages map[common.Hash]map[common.Hash][]byte
+	DestructSet    map[common.Hash]struct{}
+
+	immutable uint64 // The flag equal 1, flush nodes to disk background
 }
 
-func newNodeCache(limit, size uint64, nodes map[common.Hash]map[string]*trienode.Node, layers uint64) *nodecache {
-	return &nodecache{
-		layers:    layers,
-		size:      size,
-		limit:     limit,
-		nodes:     nodes,
-		immutable: 0,
+func newNodeCache(limit, size uint64,
+	nodes map[common.Hash]map[string]*trienode.Node,
+	latestAccounts map[common.Hash][]byte,
+	latestStorages map[common.Hash]map[common.Hash][]byte,
+	destructSet map[common.Hash]struct{},
+	layers uint64) *nodecache {
+	if latestStorages == nil {
+		latestStorages = make(map[common.Hash]map[common.Hash][]byte)
 	}
+	if latestAccounts == nil {
+		latestAccounts = make(map[common.Hash][]byte)
+	}
+	if destructSet == nil {
+		destructSet = make(map[common.Hash]struct{})
+	}
+	return &nodecache{
+		layers: layers,
+		size:   size,
+		limit:  limit,
+		nodes:  nodes,
+
+		LatestAccounts: latestAccounts,
+		LatestStorages: latestStorages,
+		DestructSet:    destructSet,
+		immutable:      0,
+	}
+}
+
+func (nc *nodecache) account(hash common.Hash) ([]byte, bool) {
+	if data, ok := nc.LatestAccounts[hash]; ok {
+		return data, true
+	}
+
+	if _, ok := nc.DestructSet[hash]; ok {
+		return nil, true
+	}
+	return nil, false
+}
+
+func (nc *nodecache) storage(accountHash, storageHash common.Hash) ([]byte, bool) {
+	if storage, ok := nc.LatestStorages[accountHash]; ok {
+		if data, ok := storage[storageHash]; ok {
+			return data, true
+		}
+	}
+
+	if _, ok := nc.DestructSet[accountHash]; ok {
+		return nil, true
+	}
+	return nil, false
 }
 
 func (nc *nodecache) node(owner common.Hash, path []byte, hash common.Hash) (*trienode.Node, error) {
@@ -232,7 +334,7 @@ func (nc *nodecache) node(owner common.Hash, path []byte, hash common.Hash) (*tr
 	return n, nil
 }
 
-func (nc *nodecache) commit(nodes map[common.Hash]map[string]*trienode.Node) error {
+func (nc *nodecache) commit(nodes map[common.Hash]map[string]*trienode.Node, set *triestate.Set) error {
 	if atomic.LoadUint64(&nc.immutable) == 1 {
 		return errWriteImmutable
 	}
@@ -242,6 +344,27 @@ func (nc *nodecache) commit(nodes map[common.Hash]map[string]*trienode.Node) err
 		overwrite     int64
 		overwriteSize int64
 	)
+	// Delete the whole deleted account
+	for h := range set.DestructSet {
+		delete(nc.LatestStorages, h)
+		delete(nc.LatestAccounts, h)
+		delete(nc.nodes, h)
+		nc.DestructSet[h] = struct{}{}
+	}
+	for h, acc := range set.LatestAccounts {
+		nc.LatestAccounts[h] = acc
+	}
+	for h, storages := range set.LatestStorages {
+		currents, ok := nc.LatestStorages[h]
+		if !ok {
+			currents = make(map[common.Hash][]byte)
+		}
+		for k, v := range storages {
+			currents[k] = v
+		}
+		nc.LatestStorages[h] = currents
+	}
+
 	for owner, subset := range nodes {
 		current, exist := nc.nodes[owner]
 		if !exist {
@@ -270,6 +393,7 @@ func (nc *nodecache) commit(nodes map[common.Hash]map[string]*trienode.Node) err
 		}
 		nc.nodes[owner] = current
 	}
+
 	nc.updateSize(delta)
 	nc.layers++
 	gcNodesMeter.Mark(overwrite)
@@ -293,13 +417,16 @@ func (nc *nodecache) reset() {
 	nc.layers = 0
 	nc.size = 0
 	nc.nodes = make(map[common.Hash]map[string]*trienode.Node)
+	nc.LatestAccounts = make(map[common.Hash][]byte)
+	nc.LatestStorages = make(map[common.Hash]map[common.Hash][]byte)
+	nc.DestructSet = make(map[common.Hash]struct{})
 }
 
 func (nc *nodecache) empty() bool {
 	return nc.layers == 0
 }
 
-func (nc *nodecache) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, id uint64) error {
+func (nc *nodecache) flush(db ethdb.KeyValueStore, clean *cleanCache, id uint64) error {
 	if atomic.LoadUint64(&nc.immutable) != 1 {
 		return errFlushMutable
 	}
@@ -313,6 +440,47 @@ func (nc *nodecache) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, id ui
 		start = time.Now()
 		batch = db.NewBatchWithSize(int(float64(nc.size) * DefaultBatchRedundancyRate))
 	)
+	// delete all kv for destructSet first to keep latest for disk nodes
+	for h, _ := range nc.DestructSet {
+		rawdb.DeleteStorageTrie(batch, h)
+		clean.plainStates.Set(h.Bytes(), nil)
+	}
+	var wg sync.WaitGroup
+	if len(nc.DestructSet) != 0 {
+		wg.Add(1)
+		go func() {
+			st := time.Now()
+			nums := 0
+			for h := range nc.DestructSet {
+				// delete from the clean cache
+				it := rawdb.IterateStorageTrieNodes(db, h)
+				for it.Next() {
+					if it.Value() != nil {
+						h := newHasher()
+						defer h.release()
+						_, key := trie.DecodeLeafNode(h.hash(it.Value()).Bytes(), it.Key()[1+common.HashLength:], it.Value())
+						if key != nil {
+							nums++
+							clean.plainStates.Del(key)
+						}
+					}
+				}
+				it.Release()
+			}
+			log.Info("handle deletion of plain storage", "elapsed", time.Since(st).String(), "deleted nums", nums)
+			for h, acc := range nc.LatestAccounts {
+				clean.plainStates.Set(h.Bytes(), types.FullToSlimAccountRLP(acc))
+			}
+			for h, storages := range nc.LatestStorages {
+				for k, v := range storages {
+					clean.plainStates.Set(append(h.Bytes(), k.Bytes()...), v)
+				}
+			}
+			wg.Done()
+		}()
+	}
+
+	// write all the nodes
 	nodes := writeNodes(batch, nc.nodes, clean)
 	rawdb.WritePersistentStateID(batch, id)
 
@@ -321,6 +489,8 @@ func (nc *nodecache) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, id ui
 	if err := batch.Write(); err != nil {
 		return err
 	}
+
+	wg.Wait()
 	commitBytesMeter.Mark(int64(size))
 	commitNodesMeter.Mark(int64(nodes))
 	commitTimeTimer.UpdateSince(start)
@@ -363,6 +533,10 @@ func (nc *nodecache) merge(nc1 *nodecache) (*nodecache, error) {
 	res.layers = immutable.layers + mutable.layers
 	res.limit = immutable.limit
 	res.nodes = make(map[common.Hash]map[string]*trienode.Node)
+	res.LatestAccounts = make(map[common.Hash][]byte)
+	res.LatestStorages = make(map[common.Hash]map[common.Hash][]byte)
+	res.DestructSet = make(map[common.Hash]struct{})
+	// merge nodes
 	for acc, subTree := range immutable.nodes {
 		if _, ok := res.nodes[acc]; !ok {
 			res.nodes[acc] = make(map[string]*trienode.Node)
@@ -380,10 +554,45 @@ func (nc *nodecache) merge(nc1 *nodecache) (*nodecache, error) {
 			res.nodes[acc][path] = node
 		}
 	}
+	// merge plain account and storage
+	for acc, _ := range immutable.DestructSet {
+		res.DestructSet[acc] = struct{}{}
+	}
+	for acc, val := range immutable.LatestAccounts {
+		res.LatestAccounts[acc] = val
+	}
+	for acc, storages := range immutable.LatestStorages {
+		if _, ok := res.LatestStorages[acc]; !ok {
+			res.LatestStorages[acc] = make(map[common.Hash][]byte)
+		}
+		for k, v := range storages {
+			res.LatestStorages[acc][k] = v
+		}
+	}
+
+	for acc, _ := range mutable.DestructSet {
+		delete(res.LatestAccounts, acc)
+		delete(res.LatestStorages, acc)
+		delete(res.nodes, acc)
+		res.DestructSet[acc] = struct{}{}
+	}
+	for acc, val := range mutable.LatestAccounts {
+		res.LatestAccounts[acc] = val
+	}
+	for acc, storages := range mutable.LatestStorages {
+		if _, ok := res.LatestStorages[acc]; !ok {
+			res.LatestStorages[acc] = make(map[common.Hash][]byte)
+		}
+		for k, v := range storages {
+			res.LatestStorages[acc][k] = v
+		}
+	}
+
 	return res, nil
 }
 
-func (nc *nodecache) revert(db ethdb.KeyValueReader, nodes map[common.Hash]map[string]*trienode.Node) error {
+func (nc *nodecache) revert(db ethdb.KeyValueReader, nodes map[common.Hash]map[string]*trienode.Node,
+	accounts map[common.Hash][]byte, storages map[common.Hash]map[common.Hash][]byte) error {
 	if atomic.LoadUint64(&nc.immutable) == 1 {
 		return errRevertImmutable
 	}
@@ -432,6 +641,17 @@ func (nc *nodecache) revert(db ethdb.KeyValueReader, nodes map[common.Hash]map[s
 			delta += int64(len(n.Blob)) - int64(len(orig.Blob))
 		}
 	}
+	for acc, val := range accounts {
+		nc.LatestAccounts[acc] = val
+	}
+	for acc, set := range storages {
+		if _, ok := nc.LatestStorages[acc]; !ok {
+			nc.LatestStorages[acc] = make(map[common.Hash][]byte)
+		}
+		for k, v := range set {
+			nc.LatestStorages[acc][k] = v
+		}
+	}
 	nc.updateSize(delta)
 	return nil
 }
@@ -441,11 +661,14 @@ func copyNodeCache(n *nodecache) *nodecache {
 		return nil
 	}
 	nc := &nodecache{
-		layers:    n.layers,
-		size:      n.size,
-		limit:     n.limit,
-		immutable: atomic.LoadUint64(&n.immutable),
-		nodes:     make(map[common.Hash]map[string]*trienode.Node),
+		layers:         n.layers,
+		size:           n.size,
+		limit:          n.limit,
+		immutable:      atomic.LoadUint64(&n.immutable),
+		nodes:          make(map[common.Hash]map[string]*trienode.Node),
+		LatestAccounts: make(map[common.Hash][]byte),
+		LatestStorages: make(map[common.Hash]map[common.Hash][]byte),
+		DestructSet:    make(map[common.Hash]struct{}),
 	}
 	for acc, subTree := range n.nodes {
 		if _, ok := nc.nodes[acc]; !ok {
@@ -454,6 +677,22 @@ func copyNodeCache(n *nodecache) *nodecache {
 		for path, node := range subTree {
 			nc.nodes[acc][path] = node
 		}
+	}
+	for acc, _ := range n.DestructSet {
+		nc.DestructSet[acc] = struct{}{}
+	}
+	for acc, val := range n.LatestAccounts {
+		nc.LatestAccounts[acc] = val
+	}
+	for acc, sets := range n.LatestStorages {
+		current, ok := n.LatestStorages[acc]
+		if !ok {
+			current = make(map[common.Hash][]byte)
+		}
+		for k, v := range sets {
+			current[k] = v
+		}
+		nc.LatestStorages[acc] = current
 	}
 	return nc
 }

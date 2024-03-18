@@ -19,6 +19,8 @@ package trie
 import (
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/log"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 )
@@ -122,7 +124,6 @@ func (c *committer) commitChildren(path []byte, n *fullNode) [17]node {
 func (c *committer) store(path []byte, n node) node {
 	// Larger nodes are replaced by their hash and stored in the database.
 	var hash, _ = n.cache()
-
 	// This was not generated - must be a small node stored in the parent.
 	// In theory, we should check if the node is leaf here (embedded node
 	// usually is leaf node). But small value (less than 32bytes) is not
@@ -135,6 +136,15 @@ func (c *committer) store(path []byte, n node) node {
 		if ok {
 			c.nodes.AddNode(path, trienode.NewDeleted())
 		}
+
+		// redundancy store for get Account/Storage from trie database directly
+		nhash := common.BytesToHash(hash)
+		if sn, ok := n.(*shortNode); ok {
+			if _, ok := sn.Val.(valueNode); ok {
+				c.nodes.AddNode(path, trienode.New(nhash, nodeToBytes(n)))
+			}
+		}
+		log.Debug("Store embedded node", "path=", common.Bytes2Hex(path), "node= ", n)
 		return n
 	}
 	// Collect the dirty node to nodeset for return.

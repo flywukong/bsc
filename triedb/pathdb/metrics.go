@@ -24,11 +24,45 @@ var (
 	cleanReadMeter  = metrics.NewRegisteredMeter("pathdb/clean/read", nil)
 	cleanWriteMeter = metrics.NewRegisteredMeter("pathdb/clean/write", nil)
 
+	trieCleanStorageHitMeter  = metrics.NewRegisteredMeter("pathdb/clean/storage/hit", nil)
+	trieCleanStorageMissMeter = metrics.NewRegisteredMeter("path/clean/storage/miss", nil)
+	trieDirtyStorageHitMeter  = metrics.NewRegisteredMeter("pathdb/dirty/storage/hit", nil)
+	trieDirtyStorageMissMeter = metrics.NewRegisteredMeter("path/dirty/storage/miss", nil)
+
+	trieCleanAccountHitMeter  = metrics.NewRegisteredMeter("pathdb/clean/account/hit", nil)
+	trieCleanAccountMissMeter = metrics.NewRegisteredMeter("path/clean/account/miss", nil)
+	trieDirtyAccountHitMeter  = metrics.NewRegisteredMeter("pathdb/dirty/account/hit", nil)
+	trieDirtyAccountMissMeter = metrics.NewRegisteredMeter("path/dirty/account/miss", nil)
+
+	trieDiffLayerStorageHitMeter  = metrics.NewRegisteredMeter("pathdb/difflayer/storage/hit", nil)
+	trieDiffLayerStorageMissMeter = metrics.NewRegisteredMeter("pathdb/difflayer/storage/miss", nil)
+	trieDiffLayerAccountHitMeter  = metrics.NewRegisteredMeter("pathdb/difflayer/account/hit", nil)
+	trieDiffLayerAccountMissMeter = metrics.NewRegisteredMeter("pathdb/difflayer/account/miss", nil)
+
+	trieDiskLayerStorageHitMeter  = metrics.NewRegisteredMeter("pathdb/disklayer/storage/hit", nil)
+	trieDiskLayerStorageMissMeter = metrics.NewRegisteredMeter("pathdb/disklayer/storage/miss", nil)
+	trieDiskLayerAccountHitMeter  = metrics.NewRegisteredMeter("pathdb/disklayer/account/hit", nil)
+	trieDiskLayerAccountMissMeter = metrics.NewRegisteredMeter("pathdb/disklayer/account/miss", nil)
+
 	dirtyHitMeter         = metrics.NewRegisteredMeter("pathdb/dirty/hit", nil)
 	dirtyMissMeter        = metrics.NewRegisteredMeter("pathdb/dirty/miss", nil)
 	dirtyReadMeter        = metrics.NewRegisteredMeter("pathdb/dirty/read", nil)
 	dirtyWriteMeter       = metrics.NewRegisteredMeter("pathdb/dirty/write", nil)
 	dirtyNodeHitDepthHist = metrics.NewRegisteredHistogram("pathdb/dirty/depth", nil, metrics.NewExpDecaySample(1028, 0.015))
+
+	diffNodeTimer             = metrics.NewRegisteredTimer("pathdb/diff/node/timer", nil)
+	diskBufferNodeTimer       = metrics.NewRegisteredTimer("pathdb/disk/buffer/node/timer", nil)
+	diskCleanNodeTimer        = metrics.NewRegisteredTimer("pathdb/disk/clean/node/timer", nil)
+	diskDBNodeTimer           = metrics.NewRegisteredTimer("pathdb/disk/db/node/timer", nil)
+	diskReadAccountTimer      = metrics.NewRegisteredTimer("pathdb/disk/readtrie/account/timer", nil)
+	diskReadStorageTimer      = metrics.NewRegisteredTimer("pathdb/disk/readtrie/storage/timer", nil)
+	readAndDecodeAccountTimer = metrics.NewRegisteredTimer("pathdb/disk/readtrie/account/totaltime", nil)
+	readAndDecodeStorageTimer = metrics.NewRegisteredTimer("pathdb/disk/readtrie/storage/totaltime", nil)
+
+	diskTotalAccountCounter     = metrics.NewRegisteredCounter("pathdb/disk/readtrie/account/counter", nil)
+	diskTotalStorageCounter     = metrics.NewRegisteredCounter("pathdb/disk/readtrie/storage/counter", nil)
+	diskTotalMissAccoutCounter  = metrics.NewRegisteredCounter("pathdb/disk/readtrie/account/misscounter", nil)
+	diskTotalMissStorageCounter = metrics.NewRegisteredCounter("pathdb/disk/readtrie/storage/misscounter", nil)
 
 	cleanFalseMeter = metrics.NewRegisteredMeter("pathdb/clean/false", nil)
 	dirtyFalseMeter = metrics.NewRegisteredMeter("pathdb/dirty/false", nil)
@@ -53,4 +87,15 @@ var (
 	diffHashCacheMissMeter     = metrics.NewRegisteredMeter("pathdb/difflayer/hashcache/miss", nil)
 	diffHashCacheSlowPathMeter = metrics.NewRegisteredMeter("pathdb/difflayer/hashcache/slowpath", nil)
 	diffHashCacheLengthGauge   = metrics.NewRegisteredGauge("pathdb/difflayer/hashcache/size", nil)
+	bloomIndexTimer            = metrics.NewRegisteredResettingTimer("pathdb/bloom/index", nil)
+	bloomErrorGauge            = metrics.NewRegisteredGaugeFloat64("pathdb/bloom/error", nil)
+	capBloomIndexTimer         = metrics.NewRegisteredResettingTimer("pathdb/cap/bloom/index", nil)
+
+	bloomAccountTrueHitMeter  = metrics.NewRegisteredMeter("pathdb/bloom/account/truehit", nil)
+	bloomAccountFalseHitMeter = metrics.NewRegisteredMeter("pathdb/bloom/account/falsehit", nil)
+	bloomAccountMissMeter     = metrics.NewRegisteredMeter("pathdb/bloom/account/miss", nil)
+
+	bloomStorageTrueHitMeter  = metrics.NewRegisteredMeter("pathdb/bloom/storage/truehit", nil)
+	bloomStorageFalseHitMeter = metrics.NewRegisteredMeter("pathdb/bloom/storage/falsehit", nil)
+	bloomStorageMissMeter     = metrics.NewRegisteredMeter("pathdb/bloom/storage/miss", nil)
 )

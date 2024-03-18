@@ -19,6 +19,7 @@ package triestate
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -59,6 +60,10 @@ type TrieLoader interface {
 // The value refers to the original content of state before the transition
 // is made. Nil means that the state was not present previously.
 type Set struct {
+	LatestAccounts map[common.Hash][]byte
+	LatestStorages map[common.Hash]map[common.Hash][]byte
+	DestructSet    map[common.Hash]struct{}
+
 	Accounts   map[common.Address][]byte                 // Mutated account set, nil means the account was not present
 	Storages   map[common.Address]map[common.Hash][]byte // Mutated storage set, nil means the slot was not present
 	Incomplete map[common.Address]struct{}               // Indicator whether the storage is incomplete due to large deletion
@@ -66,12 +71,27 @@ type Set struct {
 }
 
 // New constructs the state set with provided data.
-func New(accounts map[common.Address][]byte, storages map[common.Address]map[common.Hash][]byte, incomplete map[common.Address]struct{}) *Set {
+func New(accounts map[common.Address][]byte, storages map[common.Address]map[common.Hash][]byte, incomplete map[common.Address]struct{},
+	latestAccounts map[common.Hash][]byte, latestStorage map[common.Hash]map[common.Hash][]byte, destructSet map[common.Hash]struct{}) *Set {
 	return &Set{
-		Accounts:   accounts,
-		Storages:   storages,
-		Incomplete: incomplete,
+		Accounts:       accounts,
+		Storages:       storages,
+		Incomplete:     incomplete,
+		LatestAccounts: latestAccounts,
+		LatestStorages: latestStorage,
+		DestructSet:    destructSet,
 	}
+}
+
+func (s *Set) DebugString() string {
+	ss := strings.Builder{}
+	for hash, val := range s.LatestAccounts {
+		ss.WriteString(fmt.Sprintf("{AccountHash: %s, value: %s}", hash.String(), common.Bytes2Hex(val)))
+	}
+	for hash, _ := range s.DestructSet {
+		ss.WriteString(fmt.Sprintf("{DestructAccountHash: %s}", hash.String()))
+	}
+	return ss.String()
 }
 
 // Size returns the approximate memory size occupied by the set.
@@ -94,58 +114,73 @@ func (s *Set) Size() common.StorageSize {
 
 // context wraps all fields for executing state diffs.
 type context struct {
-	prevRoot    common.Hash
-	postRoot    common.Hash
-	accounts    map[common.Address][]byte
-	storages    map[common.Address]map[common.Hash][]byte
-	accountTrie Trie
-	nodes       *trienode.MergedNodeSet
+	prevRoot       common.Hash
+	postRoot       common.Hash
+	accounts       map[common.Address][]byte
+	storages       map[common.Address]map[common.Hash][]byte
+	accountTrie    Trie
+	nodes          *trienode.MergedNodeSet
+	latestAccounts map[common.Hash][]byte
+	latestStorages map[common.Hash]map[common.Hash][]byte
 }
 
 // Apply traverses the provided state diffs, apply them in the associated
 // post-state and return the generated dirty trie nodes. The state can be
 // loaded via the provided trie loader.
-func Apply(prevRoot common.Hash, postRoot common.Hash, accounts map[common.Address][]byte, storages map[common.Address]map[common.Hash][]byte, loader TrieLoader) (map[common.Hash]map[string]*trienode.Node, error) {
+func Apply(prevRoot common.Hash, postRoot common.Hash,
+	accounts map[common.Address][]byte, storages map[common.Address]map[common.Hash][]byte,
+	loader TrieLoader) (map[common.Hash]map[string]*trienode.Node, map[common.Hash][]byte, map[common.Hash]map[common.Hash][]byte, error) {
 	tr, err := loader.OpenTrie(postRoot)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	ctx := &context{
-		prevRoot:    prevRoot,
-		postRoot:    postRoot,
-		accounts:    accounts,
-		storages:    storages,
-		accountTrie: tr,
-		nodes:       trienode.NewMergedNodeSet(),
+		prevRoot:       prevRoot,
+		postRoot:       postRoot,
+		accounts:       accounts,
+		storages:       storages,
+		accountTrie:    tr,
+		nodes:          trienode.NewMergedNodeSet(),
+		latestAccounts: make(map[common.Hash][]byte),
+		latestStorages: make(map[common.Hash]map[common.Hash][]byte),
 	}
 	for addr, account := range accounts {
-		var err error
+		var (
+			err error
+			acc common.Hash
+			val []byte
+		)
 		if len(account) == 0 {
-			err = deleteAccount(ctx, loader, addr)
+			acc, err = deleteAccount(ctx, loader, addr)
+			val = nil
 		} else {
-			err = updateAccount(ctx, loader, addr)
+			acc, val, err = updateAccount(ctx, loader, addr)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to revert state, err: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to revert state, err: %w", err)
+		}
+		ctx.latestAccounts[acc] = val
+		if s, ok := ctx.storages[addr]; ok {
+			ctx.latestStorages[acc] = s
 		}
 	}
 	root, result, err := tr.Commit(false)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	if root != prevRoot {
-		return nil, fmt.Errorf("failed to revert state, want %#x, got %#x", prevRoot, root)
+		return nil, nil, nil, fmt.Errorf("failed to revert state, want %#x, got %#x", prevRoot, root)
 	}
 	if err := ctx.nodes.Merge(result); err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	return ctx.nodes.Flatten(), nil
+	return ctx.nodes.Flatten(), ctx.latestAccounts, ctx.latestStorages, nil
 }
 
 // updateAccount the account was present in prev-state, and may or may not
 // existent in post-state. Apply the reverse diff and verify if the storage
 // root matches the one in prev-state account.
-func updateAccount(ctx *context, loader TrieLoader, addr common.Address) error {
+func updateAccount(ctx *context, loader TrieLoader, addr common.Address) (common.Hash, []byte, error) {
 	// The account was present in prev-state, decode it from the
 	// 'slim-rlp' format bytes.
 	h := newHasher()
@@ -154,24 +189,24 @@ func updateAccount(ctx *context, loader TrieLoader, addr common.Address) error {
 	addrHash := h.hash(addr.Bytes())
 	prev, err := types.FullAccount(ctx.accounts[addr])
 	if err != nil {
-		return err
+		return common.Hash{}, nil, err
 	}
 	// The account may or may not existent in post-state, try to
 	// load it and decode if it's found.
 	blob, err := ctx.accountTrie.Get(addrHash.Bytes())
 	if err != nil {
-		return err
+		return common.Hash{}, nil, err
 	}
 	post := types.NewEmptyStateAccount()
 	if len(blob) != 0 {
 		if err := rlp.DecodeBytes(blob, &post); err != nil {
-			return err
+			return common.Hash{}, nil, err
 		}
 	}
 	// Apply all storage changes into the post-state storage trie.
 	st, err := loader.OpenStorageTrie(ctx.postRoot, addrHash, post.Root)
 	if err != nil {
-		return err
+		return common.Hash{}, nil, err
 	}
 	for key, val := range ctx.storages[addr] {
 		var err error
@@ -181,35 +216,35 @@ func updateAccount(ctx *context, loader TrieLoader, addr common.Address) error {
 			err = st.Update(key.Bytes(), val)
 		}
 		if err != nil {
-			return err
+			return common.Hash{}, nil, err
 		}
 	}
 	root, result, err := st.Commit(false)
 	if err != nil {
-		return err
+		return common.Hash{}, nil, err
 	}
 	if root != prev.Root {
-		return errors.New("failed to reset storage trie")
+		return common.Hash{}, nil, errors.New("failed to reset storage trie")
 	}
 	// The returned set can be nil if storage trie is not changed
 	// at all.
 	if result != nil {
 		if err := ctx.nodes.Merge(result); err != nil {
-			return err
+			return common.Hash{}, nil, err
 		}
 	}
 	// Write the prev-state account into the main trie
 	full, err := rlp.EncodeToBytes(prev)
 	if err != nil {
-		return err
+		return common.Hash{}, nil, err
 	}
-	return ctx.accountTrie.Update(addrHash.Bytes(), full)
+	return addrHash, full, ctx.accountTrie.Update(addrHash.Bytes(), full)
 }
 
 // deleteAccount the account was not present in prev-state, and is expected
 // to be existent in post-state. Apply the reverse diff and verify if the
 // account and storage is wiped out correctly.
-func deleteAccount(ctx *context, loader TrieLoader, addr common.Address) error {
+func deleteAccount(ctx *context, loader TrieLoader, addr common.Address) (common.Hash, error) {
 	// The account must be existent in post-state, load the account.
 	h := newHasher()
 	defer h.release()
@@ -217,43 +252,43 @@ func deleteAccount(ctx *context, loader TrieLoader, addr common.Address) error {
 	addrHash := h.hash(addr.Bytes())
 	blob, err := ctx.accountTrie.Get(addrHash.Bytes())
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	if len(blob) == 0 {
-		return fmt.Errorf("account is non-existent %#x", addrHash)
+		return common.Hash{}, fmt.Errorf("account is non-existent %#x", addrHash)
 	}
 	var post types.StateAccount
 	if err := rlp.DecodeBytes(blob, &post); err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	st, err := loader.OpenStorageTrie(ctx.postRoot, addrHash, post.Root)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	for key, val := range ctx.storages[addr] {
 		if len(val) != 0 {
-			return errors.New("expect storage deletion")
+			return common.Hash{}, errors.New("expect storage deletion")
 		}
 		if err := st.Delete(key.Bytes()); err != nil {
-			return err
+			return common.Hash{}, err
 		}
 	}
 	root, result, err := st.Commit(false)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	if root != types.EmptyRootHash {
-		return errors.New("failed to clear storage trie")
+		return common.Hash{}, errors.New("failed to clear storage trie")
 	}
 	// The returned set can be nil if storage trie is not changed
 	// at all.
 	if result != nil {
 		if err := ctx.nodes.Merge(result); err != nil {
-			return err
+			return common.Hash{}, err
 		}
 	}
 	// Delete the post-state account from the main trie.
-	return ctx.accountTrie.Delete(addrHash.Bytes())
+	return addrHash, ctx.accountTrie.Delete(addrHash.Bytes())
 }
 
 // hasher is used to compute the sha256 hash of the provided data.

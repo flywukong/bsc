@@ -128,6 +128,23 @@ func mustDecodeNode(hash, buf []byte) node {
 	return n
 }
 
+// DecodeLeafNode return the Key and Val part of the shorNode
+func DecodeLeafNode(hash, path, value []byte) ([]byte, []byte) {
+	n := mustDecodeNode(hash, value)
+	switch sn := n.(type) {
+	case *shortNode:
+		if val, ok := sn.Val.(valueNode); ok {
+			// remove the prefix key of path
+			key := append(path, sn.Key...)
+			if hasTerm(key) {
+				key = key[:len(key)-1]
+			}
+			return val, hexToKeybytes(append(path, sn.Key...))
+		}
+	}
+	return nil, nil
+}
+
 // mustDecodeNodeUnsafe is a wrapper of decodeNodeUnsafe and panic if any error is
 // encountered.
 func mustDecodeNodeUnsafe(hash, buf []byte) node {

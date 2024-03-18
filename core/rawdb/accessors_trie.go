@@ -18,12 +18,16 @@ package rawdb
 
 import (
 	"fmt"
+	"math/big"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -45,6 +49,13 @@ const HashScheme = "hash"
 // area of the disk with good data locality property. But this scheme needs to rely
 // on extra state diffs to survive deep reorg.
 const PathScheme = "path"
+
+var (
+	diskGetAccountTimer  = metrics.NewRegisteredTimer("pathdb/disk/account/read/timer", nil)
+	diskGetStorageTimer  = metrics.NewRegisteredTimer("pathdb/disk/storage/read/timer", nil)
+	diskSeekAccountTimer = metrics.NewRegisteredTimer("pathdb/disk/account/seek/timer", nil)
+	diskSeekStorageTimer = metrics.NewRegisteredTimer("pathdb/disk/storage/seek/timer", nil)
+)
 
 // hasher is used to compute the sha256 hash of the provided data.
 type hasher struct{ sha crypto.KeccakState }
@@ -75,6 +86,28 @@ func ReadAccountTrieNode(db ethdb.KeyValueReader, path []byte) ([]byte, common.H
 	h := newHasher()
 	defer h.release()
 	return data, h.hash(data)
+}
+
+func ReadAccountFromTrieDirectly(db ethdb.Database, key []byte) ([]byte, []byte, common.Hash) {
+	it := db.NewSeekIterator(trieNodeAccountPrefix, key)
+	defer it.Release()
+
+	startSeek := time.Now()
+	if it.Seek(accountTrieNodeKey(EncodeNibbles(key))) && it.Error() == nil {
+		diskSeekAccountTimer.Update(time.Since(startSeek))
+		start := time.Now()
+		dbKey := common.CopyBytes(it.Key())
+		if strings.HasPrefix(string(accountTrieNodeKey(EncodeNibbles(key))), string(dbKey)) {
+			data := common.CopyBytes(it.Value())
+			diskGetAccountTimer.Update(time.Since(start))
+			return data, dbKey[1:], common.Hash{}
+		} else {
+			log.Debug("ReadAccountFromTrieDirectly", "dbKey", common.Bytes2Hex(dbKey), "target key", common.Bytes2Hex(accountTrieNodeKey(EncodeNibbles(key))))
+		}
+	} else {
+		log.Error("ReadAccountFromTrieDirectly", "iterater error", it.Error())
+	}
+	return nil, nil, common.Hash{}
 }
 
 // HasAccountTrieNode checks the account trie node presence with the specified
@@ -113,6 +146,13 @@ func DeleteAccountTrieNode(db ethdb.KeyValueWriter, path []byte) {
 	}
 }
 
+func DeleteStorageTrie(db ethdb.KeyValueWriter, accountHash common.Hash) {
+	nextAccountHash := common.BigToHash(accountHash.Big().Add(accountHash.Big(), big.NewInt(1)))
+	if err := db.DeleteRange(storageTrieNodeKey(accountHash, nil), storageTrieNodeKey(nextAccountHash, nil)); err != nil {
+		log.Crit("Failed to delete storage trie", "err", err)
+	}
+}
+
 // ReadStorageTrieNode retrieves the storage trie node and the associated node
 // hash with the specified node path.
 func ReadStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path []byte) ([]byte, common.Hash) {
@@ -125,6 +165,24 @@ func ReadStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path 
 	return data, h.hash(data)
 }
 
+func ReadStorageFromTrieDirectly(db ethdb.Database, accountHash common.Hash, key []byte) ([]byte, []byte, common.Hash) {
+	it := db.NewSeekIterator(storageTrieNodePrefix(accountHash), key)
+	defer it.Release()
+
+	startSeek := time.Now()
+	if it.Seek(storageTrieNodeKey(accountHash, EncodeNibbles(key))) && it.Error() == nil {
+		diskSeekStorageTimer.Update(time.Since(startSeek))
+		dbKey := common.CopyBytes(it.Key())
+		start := time.Now()
+		if strings.HasPrefix(string(storageTrieNodeKey(accountHash, EncodeNibbles(key))), string(dbKey)) {
+			data := common.CopyBytes(it.Value())
+			diskGetStorageTimer.Update(time.Since(start))
+			return data, dbKey[1:], common.Hash{}
+		}
+	}
+	return nil, nil, common.Hash{}
+}
+
 // HasStorageTrieNode checks the storage trie node presence with the provided
 // node path and the associated node hash.
 func HasStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path []byte, hash common.Hash) bool {
@@ -135,6 +193,10 @@ func HasStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path [
 	h := newHasher()
 	defer h.release()
 	return h.hash(data) == hash
+}
+
+func IterateStorageTrieNodes(db ethdb.Iteratee, accoundHash common.Hash) ethdb.Iterator {
+	return db.NewIterator(storageTrieNodeKey(accoundHash, nil), nil)
 }
 
 // ExistsStorageTrieNode checks the presence of the storage trie node with the
@@ -351,4 +413,13 @@ func ParseStateScheme(provided string, disk ethdb.Database) (string, error) {
 		return provided, nil
 	}
 	return "", fmt.Errorf("incompatible state scheme, stored: %s, user provided: %s", stored, provided)
+}
+
+func EncodeNibbles(bytes []byte) []byte {
+	nibbles := make([]byte, len(bytes)*2)
+	for i, b := range bytes {
+		nibbles[i*2] = b >> 4     // 取字节高4位
+		nibbles[i*2+1] = b & 0x0F // 取字节低4位
+	}
+	return nibbles
 }

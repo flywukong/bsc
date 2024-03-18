@@ -344,6 +344,17 @@ func (d *Database) Delete(key []byte) error {
 	return d.db.Delete(key, nil)
 }
 
+// DeleteRange deletes all of the keys (and values) in the range [start,end)
+// (inclusive on start, exclusive on end).
+func (d *Database) DeleteRange(start, end []byte) error {
+	d.quitLock.RLock()
+	defer d.quitLock.RUnlock()
+	if d.closed {
+		return pebble.ErrClosed
+	}
+	return d.db.DeleteRange(start, end, nil)
+}
+
 // NewBatch creates a write-only key-value store that buffers changes to its host
 // database until a final write is called.
 func (d *Database) NewBatch() ethdb.Batch {
@@ -592,6 +603,13 @@ func (b *batch) Delete(key []byte) error {
 	return nil
 }
 
+func (b *batch) DeleteRange(start, end []byte) error {
+	b.b.DeleteRange(start, end, nil)
+	b.size += len(start)
+	b.size += len(end)
+	return nil
+}
+
 // ValueSize retrieves the amount of data queued up for writing.
 func (b *batch) ValueSize() int {
 	return b.size
@@ -644,6 +662,10 @@ type pebbleIterator struct {
 	released bool
 }
 
+func (iter *pebbleIterator) Seek(key []byte) bool {
+	return iter.iter.SeekLT(key)
+}
+
 // NewIterator creates a binary-alphabetical iterator over a subset
 // of database content with a particular key prefix, starting at a particular
 // initial key (or after, if it does not exist).
@@ -651,6 +673,17 @@ func (d *Database) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
 	iter, _ := d.db.NewIter(&pebble.IterOptions{
 		LowerBound: append(prefix, start...),
 		UpperBound: upperBound(prefix),
+	})
+	iter.First()
+	return &pebbleIterator{iter: iter, moved: true, released: false}
+}
+
+// NewSeekIterator create a binary-alphabetical iterator and seek to the
+// last key/value pair whose key is less than or equal of the given key
+func (d *Database) NewSeekIterator(prefix, key []byte) ethdb.Iterator {
+	iter, _ := d.db.NewIter(&pebble.IterOptions{
+		LowerBound: prefix,
+		UpperBound: append(prefix, upperBound(key)...),
 	})
 	iter.First()
 	return &pebbleIterator{iter: iter, moved: true, released: false}

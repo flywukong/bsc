@@ -542,6 +542,10 @@ func (c *cleaner) Delete(key []byte) error {
 	panic("not implemented")
 }
 
+func (c *cleaner) DeleteRange(start, end []byte) error {
+	panic("not supported")
+}
+
 // Initialized returns an indicator if state data is already initialized
 // in hash-based scheme by checking the presence of genesis state.
 func (db *Database) Initialized(genesisRoot common.Hash) bool {
@@ -650,4 +654,12 @@ type reader struct {
 func (reader *reader) Node(owner common.Hash, path []byte, hash common.Hash) ([]byte, error) {
 	blob, _ := reader.db.node(hash)
 	return blob, nil
+}
+
+func (reader *reader) Account(accountHash common.Hash) ([]byte, error) {
+	panic("unimplemented method")
+}
+
+func (reader *reader) Storage(accountHash, storageHash common.Hash) ([]byte, error) {
+	panic("unimplemented method")
 }

@@ -52,6 +52,10 @@ func (db *Database) SetBlockStore(block ethdb.Database) {
 	panic("not supported")
 }
 
+func (db *Database) NewSeekIterator(prefix, key []byte) ethdb.Iterator {
+	panic("not supported!")
+}
+
 func (db *Database) Has(key []byte) (bool, error) {
 	if _, err := db.Get(key); err != nil {
 		return false, nil
@@ -146,6 +150,10 @@ func (db *Database) Delete(key []byte) error {
 	panic("not supported")
 }
 
+func (db *Database) DeleteRange(start, end []byte) error {
+	panic("not supported")
+}
+
 func (db *Database) ModifyAncients(f func(ethdb.AncientWriteOp) error) (int64, error) {
 	panic("not supported")
 }
@@ -189,6 +197,10 @@ func (db *Database) NewBatchWithSize(size int) ethdb.Batch {
 }
 
 func (db *Database) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
+	panic("not supported")
+}
+
+func (db *Database) NewReverseIterator(prefix, start, key []byte) ethdb.Iterator {
 	panic("not supported")
 }
 
