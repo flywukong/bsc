@@ -77,6 +77,18 @@ func ReadAccountTrieNode(db ethdb.KeyValueReader, path []byte) ([]byte, common.H
 	return data, h.hash(data)
 }
 
+func ReadAccountTrieNodeV2(db ethdb.Database, path []byte) ([]byte, common.Hash) {
+	it := db.NewReverseIterator(accountTrieNodeKey(path))
+	defer it.Release()
+	data, err := db.Get(it.Key())
+	if err != nil {
+		return nil, common.Hash{}
+	}
+	h := newHasher()
+	defer h.release()
+	return data, h.hash(data)
+}
+
 // HasAccountTrieNode checks the account trie node presence with the specified
 // node path and the associated node hash.
 func HasAccountTrieNode(db ethdb.KeyValueReader, path []byte, hash common.Hash) bool {
@@ -117,6 +129,19 @@ func DeleteAccountTrieNode(db ethdb.KeyValueWriter, path []byte) {
 // hash with the specified node path.
 func ReadStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path []byte) ([]byte, common.Hash) {
 	data, err := db.Get(storageTrieNodeKey(accountHash, path))
+	if err != nil {
+		return nil, common.Hash{}
+	}
+	h := newHasher()
+	defer h.release()
+	return data, h.hash(data)
+}
+
+func ReadStorageTrieNodeV2(db ethdb.Database, accountHash common.Hash, path []byte) ([]byte, common.Hash) {
+	it := db.NewReverseIterator(storageTrieNodeKey(accountHash, path))
+	defer it.Release()
+
+	data, err := db.Get(it.Key())
 	if err != nil {
 		return nil, common.Hash{}
 	}

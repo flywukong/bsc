@@ -206,9 +206,9 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 		diskNodeStart = time.Now()
 	)
 	if owner == (common.Hash{}) {
-		nBlob, nHash = rawdb.ReadAccountTrieNode(dl.db.diskdb, path)
+		nBlob, nHash = rawdb.ReadAccountTrieNodeV2(dl.db.diskdb, path)
 	} else {
-		nBlob, nHash = rawdb.ReadStorageTrieNode(dl.db.diskdb, owner, path)
+		nBlob, nHash = rawdb.ReadStorageTrieNodeV2(dl.db.diskdb, owner, path)
 	}
 	diskDBNodeTimer.UpdateSince(diskNodeStart)
 	if nHash != hash {

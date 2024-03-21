@@ -154,6 +154,10 @@ func (db *Database) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
 	panic("not supported")
 }
 
+func (db *Database) NewReverseIterator(key []byte) ethdb.Iterator {
+	panic("not supported")
+}
+
 func (db *Database) Stat(property string) (string, error) {
 	panic("not supported")
 }

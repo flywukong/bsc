@@ -639,6 +639,13 @@ func (d *Database) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
 	return &pebbleIterator{iter: iter, moved: true, released: false}
 }
 
+func (d *Database) NewReverseIterator(key []byte) ethdb.Iterator {
+	iter, _ := d.db.NewIter(&pebble.IterOptions{})
+	iter.SeekLT(key)
+
+	return &pebbleIterator{iter: iter, moved: true, released: false}
+}
+
 // Next moves the iterator to the next key/value pair. It returns whether the
 // iterator is exhausted.
 func (iter *pebbleIterator) Next() bool {
