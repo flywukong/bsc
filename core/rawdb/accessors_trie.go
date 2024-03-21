@@ -17,6 +17,7 @@
 package rawdb
 
 import (
+	"encoding/hex"
 	"fmt"
 	"sync"
 
@@ -138,10 +139,14 @@ func ReadStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path 
 }
 
 func ReadStorageTrieNodeV2(db ethdb.Database, accountHash common.Hash, path []byte) ([]byte, common.Hash) {
-	it := db.NewReverseIterator(storageTrieNodeKey(accountHash, path))
+	pathkey := storageTrieNodeKey(accountHash, path)
+	it := db.NewReverseIterator(pathkey)
 	defer it.Release()
 
-	data, err := db.Get(it.Key())
+	targetKey := it.Key()
+	log.Info("print path", "path key:", hex.EncodeToString(pathkey),
+		"the last key less than it:", hex.EncodeToString(targetKey))
+	data, err := db.Get(targetKey)
 	if err != nil {
 		return nil, common.Hash{}
 	}
