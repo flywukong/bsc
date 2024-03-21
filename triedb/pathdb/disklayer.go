@@ -206,8 +206,10 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 		diskNodeStart = time.Now()
 	)
 	if owner == (common.Hash{}) {
+		log.Info("read account trie node in disk in disk")
 		nBlob, nHash = rawdb.ReadAccountTrieNodeV2(dl.db.diskdb, path)
 	} else {
+		log.Info("read storage trie node in disk in disk")
 		nBlob, nHash = rawdb.ReadStorageTrieNodeV2(dl.db.diskdb, owner, path)
 	}
 	diskDBNodeTimer.UpdateSince(diskNodeStart)
