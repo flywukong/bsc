@@ -641,8 +641,10 @@ func (d *Database) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
 
 func (d *Database) NewReverseIterator(key []byte) ethdb.Iterator {
 	iter, _ := d.db.NewIter(&pebble.IterOptions{})
-	iter.SeekLT(key)
-
+	//	iter.SeekLT(key)
+	if !iter.SeekGE(key) || bytes.Compare(iter.Key(), key) > 0 {
+		iter.Prev()
+	}
 	return &pebbleIterator{iter: iter, moved: true, released: false}
 }
 
