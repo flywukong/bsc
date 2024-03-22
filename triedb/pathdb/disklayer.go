@@ -203,15 +203,15 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 	}
 	// Try to retrieve the trie node from the disk.
 	var (
-		nBlob, leafNodeKey []byte
-		nHash              common.Hash
-		diskNodeStart      = time.Now()
+		nBlob         []byte
+		nHash         common.Hash
+		diskNodeStart = time.Now()
 	)
 	if owner == (common.Hash{}) {
 		nBlob, nHash = rawdb.ReadAccountTrieNodeV2(dl.db.diskdb, path)
 	} else {
-		nBlob, leafNodeKey, nHash = rawdb.ReadStorageTrieNodeV2(dl.db.diskdb, owner, path)
-		val := trie.CheckLeafNode(leafNodeKey, nBlob)
+		nBlob, nHash = rawdb.ReadStorageTrieNodeV2(dl.db.diskdb, owner, path)
+		val := trie.CheckLeafNode(nHash.Bytes(), nBlob)
 		log.Info("leaf node value is ", "prefix:", hex.EncodeToString(val))
 	}
 
