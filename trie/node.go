@@ -17,11 +17,13 @@
 package trie
 
 import (
+	"encoding/hex"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
@@ -122,7 +124,7 @@ func NodeString(hash, buf []byte) string {
 func CheckLeafNode(hash, value []byte) []byte {
 	node := mustDecodeNode(hash, value)
 	if sn, ok := node.(*shortNode); ok {
-		//	log.Info("leaf node key", "key", hex.EncodeToString(sn.Key))
+		log.Info("short  node key", "key", hex.EncodeToString(sn.Key))
 		if val, ok := sn.Val.(valueNode); ok {
 			return val
 		}
