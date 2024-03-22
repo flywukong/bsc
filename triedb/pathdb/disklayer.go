@@ -206,18 +206,18 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 		diskNodeStart = time.Now()
 	)
 	if owner == (common.Hash{}) {
-		log.Info("read account trie node in disk in disk")
 		nBlob, nHash = rawdb.ReadAccountTrieNodeV2(dl.db.diskdb, path)
 	} else {
-		log.Info("read storage trie node in disk in disk")
 		nBlob, nHash = rawdb.ReadStorageTrieNodeV2(dl.db.diskdb, owner, path)
 	}
+
 	diskDBNodeTimer.UpdateSince(diskNodeStart)
 	if nHash != hash {
 		diskFalseMeter.Mark(1)
 		log.Error("Unexpected trie node in disk", "owner", owner, "path", path, "expect", hash, "got", nHash)
 		return nil, newUnexpectedNodeError("disk", hash, nHash, owner, path, nBlob)
 	}
+
 	if dl.cleans != nil && len(nBlob) > 0 {
 		dl.cleans.Set(key, nBlob)
 		cleanWriteMeter.Mark(int64(len(nBlob)))
