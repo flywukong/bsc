@@ -212,7 +212,10 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 	} else {
 		nBlob, leafNodeKey, nHash = rawdb.ReadStorageTrieNodeV2(dl.db.diskdb, owner, path)
 		val := trie.CheckLeafNode(leafNodeKey, nBlob)
-		log.Info("prefix is ", "prefix:", hex.EncodeToString(val))
+		val2 := trie.CheckLeafNode(path, nBlob)
+		val3 := trie.CheckLeafNode(owner.Bytes(), nBlob)
+		log.Info("prefix1 is ", "prefix:", hex.EncodeToString(val),
+			"prefix2:", hex.EncodeToString(val2), "prefix3:", hex.EncodeToString(val3))
 	}
 
 	diskDBNodeTimer.UpdateSince(diskNodeStart)

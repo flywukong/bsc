@@ -119,7 +119,7 @@ func NodeString(hash, buf []byte) string {
 	return node.fstring("NodeString: ")
 }
 
-func CheckLeafNode(hash, value []byte) valueNode {
+func CheckLeafNode(hash, value []byte) []byte {
 	node := mustDecodeNode(hash, value)
 	if sn, ok := node.(*shortNode); ok {
 		if val, ok := sn.Val.(valueNode); ok {
