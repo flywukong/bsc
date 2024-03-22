@@ -17,6 +17,7 @@
 package pathdb
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
@@ -28,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/ethereum/go-ethereum/trie/triestate"
 	"golang.org/x/crypto/sha3"
@@ -201,14 +203,16 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 	}
 	// Try to retrieve the trie node from the disk.
 	var (
-		nBlob         []byte
-		nHash         common.Hash
-		diskNodeStart = time.Now()
+		nBlob, leafNodeKey []byte
+		nHash              common.Hash
+		diskNodeStart      = time.Now()
 	)
 	if owner == (common.Hash{}) {
 		nBlob, nHash = rawdb.ReadAccountTrieNodeV2(dl.db.diskdb, path)
 	} else {
-		nBlob, nHash = rawdb.ReadStorageTrieNodeV2(dl.db.diskdb, owner, path)
+		nBlob, leafNodeKey, nHash = rawdb.ReadStorageTrieNodeV2(dl.db.diskdb, owner, path)
+		val := trie.CheckLeafNode(leafNodeKey, nBlob)
+		log.Info("prefix is ", "prefix:", hex.EncodeToString(val))
 	}
 
 	diskDBNodeTimer.UpdateSince(diskNodeStart)

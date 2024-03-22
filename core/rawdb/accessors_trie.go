@@ -25,7 +25,6 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/trie"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -139,7 +138,7 @@ func ReadStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path 
 	return data, h.hash(data)
 }
 
-func ReadStorageTrieNodeV2(db ethdb.Database, accountHash common.Hash, path []byte) ([]byte, common.Hash) {
+func ReadStorageTrieNodeV2(db ethdb.Database, accountHash common.Hash, path []byte) ([]byte, []byte, common.Hash) {
 	pathkey := storageTrieNodeKey(accountHash, path)
 	it := db.NewReverseIterator(pathkey)
 	defer it.Release()
@@ -149,15 +148,13 @@ func ReadStorageTrieNodeV2(db ethdb.Database, accountHash common.Hash, path []by
 		"the last key less than it:", hex.EncodeToString(targetKey))
 	data, err := db.Get(targetKey)
 	if err != nil {
-		return nil, common.Hash{}
+		return nil, nil, common.Hash{}
 	}
 	// data -> valueNode
 	//	key+prefix == pathkey
-	val := trie.CheckLeafNode(targetKey, data)
-	log.Info("prefix is ", "prefix:", hex.EncodeToString(val))
 	h := newHasher()
 	defer h.release()
-	return data, h.hash(data)
+	return data, targetKey, h.hash(data)
 }
 
 // HasStorageTrieNode checks the storage trie node presence with the provided
