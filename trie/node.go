@@ -41,8 +41,8 @@ type (
 		flags    nodeFlag
 	}
 	shortNode struct {
-		Key   []byte
-		Val   node
+		Key   []byte // 07
+		Val   node   //
 		flags nodeFlag
 	}
 	hashNode  []byte
@@ -117,6 +117,16 @@ func (n rawNode) EncodeRLP(w io.Writer) error {
 func NodeString(hash, buf []byte) string {
 	node := mustDecodeNode(hash, buf)
 	return node.fstring("NodeString: ")
+}
+
+func CheckLeafNode(hash, value []byte) valueNode {
+	node := mustDecodeNode(hash, value)
+	if sn, ok := node.(*shortNode); ok {
+		if val, ok := sn.Val.(valueNode); ok {
+			return val
+		}
+	}
+	return nil
 }
 
 // mustDecodeNode is a wrapper of decodeNode and panic if any error is encountered.

@@ -25,6 +25,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/trie"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -150,6 +151,10 @@ func ReadStorageTrieNodeV2(db ethdb.Database, accountHash common.Hash, path []by
 	if err != nil {
 		return nil, common.Hash{}
 	}
+	// data -> valueNode
+	//	key+prefix == pathkey
+	val := trie.CheckLeafNode(targetKey, data)
+	log.Info("prefix is ", "prefix:", hex.EncodeToString(val))
 	h := newHasher()
 	defer h.release()
 	return data, h.hash(data)
