@@ -294,7 +294,10 @@ func (dl *diskLayer) readAccountTrie(hash common.Hash) []byte {
 	}
 	diskAccountLeftNodeTimer.UpdateSince(start)
 	val, prefix := trie.GetPrefixOfLeafNode(nHash.Bytes(), nBlob)
-	log.Info("short node info ", "account hash", hash.String(), "leftKey", common.BytesToHash(leftKey).String(), "prefix:", common.BytesToHash(prefix).String())
+	log.Info("short node info ", "account hash", hash.String(), "leftKey",
+		common.BytesToHash(leftKey).String(), "prefix:", common.BytesToHash(prefix).String())
+	log.Info("short node info2 ", "account hash", hash.String(), "leftKey",
+		common.Bytes2Hex(leftKey), "prefix:", hex.EncodeToString(prefix))
 	joinKey := [][]byte{leftKey, prefix}
 	if bytes.Compare(bytes.Join(joinKey, []byte{}), hash.Bytes()) == 0 {
 		readAccLeftNodeTimer.UpdateSince(start)

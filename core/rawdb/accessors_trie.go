@@ -81,6 +81,7 @@ func ReadAccountTrieNode(db ethdb.KeyValueReader, path []byte) ([]byte, common.H
 func ReadAccountTrieNodeOfLeft(db ethdb.Database, key []byte) ([]byte, []byte, common.Hash) {
 	it := db.NewReverseIterator(accountTrieNodeKey(key))
 	defer it.Release()
+	log.Info("left node key", "triekey", common.Bytes2Hex(accountTrieNodeKey(key)), "key", common.Bytes2Hex(it.Key()))
 	leftKey := make([]byte, len(it.Key()))
 	copy(leftKey, it.Key())
 	data, err := db.Get(leftKey)
