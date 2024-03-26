@@ -17,10 +17,10 @@
 package pathdb
 
 import (
-	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -288,22 +288,28 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 // readAccountTrie return value of the account leaf node directly from the db
 func (dl *diskLayer) readAccountTrie(hash common.Hash) []byte {
 	start := time.Now()
-	nBlob, leftKey, accountkey, nHash := rawdb.ReadAccountTrieNodeOfLeft(dl.db.diskdb, hash.Bytes())
+	nBlob, pathKey, accountkey, nHash := rawdb.ReadAccountTrieNodeOfLeft(dl.db.diskdb, hash.Bytes())
 	if nBlob == nil {
 		return nil
 	}
 	diskAccountLeftNodeTimer.UpdateSince(start)
-	val, prefix := trie.GetPrefixOfLeafNode(nHash.Bytes(), nBlob)
-	log.Info("short node info ", "account hash", hash.String(), "leftKey",
-		common.BytesToHash(leftKey).String(), "prefix:", common.BytesToHash(prefix).String())
-	log.Info("short node info2 ", "account hash", hash.String(), "leftKey",
-		common.Bytes2Hex(leftKey), "prefix:", hex.EncodeToString(prefix), "key:", hex.EncodeToString(accountkey))
-	joinKey := [][]byte{leftKey, prefix}
+	val, prefix, path := trie.DecodeLeafNode(nHash.Bytes(), pathKey, nBlob)
+	log.Info("account short node info ", "account hash", hash.String(), "path",
+		common.Bytes2Hex(path), "prefix:", hex.EncodeToString(prefix), "key:",
+		hex.EncodeToString(accountkey), "path2", common.Bytes2Hex(pathKey))
+
 	/*
-		prefixStr := common.BytesToHash(prefix).String()
-		leftKeyStr := common.Bytes2Hex(leftKey)
+		joinKey := [][]byte{path, prefix}
+		if bytes.Compare(bytes.Join(joinKey, []byte{}), accountkey[1:]) == 0 {
+			log.Info("path succ")
+			readAccLeftNodeTimer.UpdateSince(start)
+			return val
+		}
 	*/
-	if bytes.Compare(bytes.Join(joinKey, []byte{}), hash.Bytes()) == 0 {
+	accoutHashStr := hex.EncodeToString(accountkey)
+	if strings.Contains(accoutHashStr, common.Bytes2Hex(path)) &&
+		strings.Contains(accoutHashStr, common.Bytes2Hex(prefix)) {
+		log.Info("path succ")
 		readAccLeftNodeTimer.UpdateSince(start)
 		return val
 	}
@@ -314,15 +320,25 @@ func (dl *diskLayer) readAccountTrie(hash common.Hash) []byte {
 func (dl *diskLayer) readStorageTrie(accountHash, storageHash common.Hash) []byte {
 	start := time.Now()
 	key := storageHash.Bytes()
-	nBlob, leftKey, nHash := rawdb.ReadStorageTrieNodeOfLeft(dl.db.diskdb, accountHash, key)
+	nBlob, pathKey, storageHashKey, nHash := rawdb.ReadStorageTrieNodeOfLeft(dl.db.diskdb, accountHash, key)
 	if nBlob == nil {
 		return nil
 	}
 	diskStorageLeftNodeTimer.UpdateSince(start)
-	val, prefix := trie.GetPrefixOfLeafNode(nHash.Bytes(), nBlob)
-	log.Info("short node info ", "prefix:", hex.EncodeToString(prefix), "value:", hex.EncodeToString(val))
-	joinKey := [][]byte{leftKey, prefix}
-	if bytes.Compare(bytes.Join(joinKey, []byte{}), key) == 0 {
+	val, prefix, path := trie.DecodeLeafNode(nHash.Bytes(), pathKey, nBlob)
+	log.Info("storage short node info ", "prefix:", hex.EncodeToString(prefix), "value:", hex.EncodeToString(val))
+	/*
+		joinKey := [][]byte{path, prefix}
+		if bytes.Compare(bytes.Join(joinKey, []byte{}), storageHashKey[1:]) == 0 {
+			readStorageLeftNodeTTimer.UpdateSince(start)
+			return val
+		}
+
+	*/
+	accoutHashStr := hex.EncodeToString(storageHashKey)
+	if strings.Contains(accoutHashStr, common.Bytes2Hex(path)) &&
+		strings.Contains(accoutHashStr, common.Bytes2Hex(prefix)) {
+		log.Info("path succ")
 		readStorageLeftNodeTTimer.UpdateSince(start)
 		return val
 	}

@@ -84,6 +84,7 @@ func ReadAccountTrieNodeOfLeft(db ethdb.Database, key []byte) ([]byte, []byte, [
 	log.Info("left node key", "triekey", common.Bytes2Hex(accountTrieNodeKey(key)), "key", common.Bytes2Hex(it.Key()))
 	leftKey := make([]byte, len(it.Key()))
 	copy(leftKey, it.Key())
+	// todo pre judge
 	data, err := db.Get(leftKey)
 	if err != nil {
 		return nil, nil, nil, common.Hash{}
@@ -148,18 +149,18 @@ func ReadStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path 
 	return data, h.hash(data)
 }
 
-func ReadStorageTrieNodeOfLeft(db ethdb.Database, accountHash common.Hash, key []byte) ([]byte, []byte, common.Hash) {
+func ReadStorageTrieNodeOfLeft(db ethdb.Database, accountHash common.Hash, key []byte) ([]byte, []byte, []byte, common.Hash) {
 	it := db.NewReverseIterator(trieNodeStoragePrefix, nil, storageTrieNodeKey(accountHash, key))
 	defer it.Release()
 	leftKey := make([]byte, len(it.Key()))
 	copy(leftKey, it.Key())
 	data, err := db.Get(leftKey)
 	if err != nil {
-		return nil, nil, common.Hash{}
+		return nil, nil, nil, common.Hash{}
 	}
 	h := newHasher()
 	defer h.release()
-	return data, leftKey, h.hash(data)
+	return data, leftKey, storageTrieNodeKey(accountHash, key), h.hash(data)
 }
 
 // HasStorageTrieNode checks the storage trie node presence with the provided
