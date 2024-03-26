@@ -656,6 +656,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	}
 	var (
 		count  int64
+		count2 int64
 		start  = time.Now()
 		logged = time.Now()
 
@@ -696,6 +697,11 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			key  = it.Key()
 			size = common.StorageSize(len(key) + len(it.Value()))
 		)
+		count2++
+		log.Info("inspect trie:", "key:", common.Bytes2Hex(key))
+		if count2 == 100 {
+			break
+		}
 		total += size
 		switch {
 		case bytes.HasPrefix(key, headerPrefix) && len(key) == (len(headerPrefix)+8+common.HashLength):
@@ -773,6 +779,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			logged = time.Now()
 		}
 	}
+	
 	// inspect separate trie db
 	if trieIter != nil {
 		count = 0

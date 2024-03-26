@@ -476,7 +476,8 @@ func inspect(ctx *cli.Context) error {
 	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
 
-	return rawdb.InspectDatabase(db, prefix, start)
+	trieNodeAccountPrefix := []byte("A")
+	return rawdb.InspectDatabase(db, trieNodeAccountPrefix, start)
 }
 
 func ancientInspect(ctx *cli.Context) error {
