@@ -79,7 +79,7 @@ func ReadAccountTrieNode(db ethdb.KeyValueReader, path []byte) ([]byte, common.H
 }
 
 func ReadAccountTrieNodeOfLeft(db ethdb.Database, key []byte) ([]byte, []byte, common.Hash) {
-	it := db.NewReverseIterator(accountTrieNodeKey(key))
+	it := db.NewReverseIterator(trieNodeAccountPrefix, nil, accountTrieNodeKey(key))
 	defer it.Release()
 	log.Info("left node key", "triekey", common.Bytes2Hex(accountTrieNodeKey(key)), "key", common.Bytes2Hex(it.Key()))
 	leftKey := make([]byte, len(it.Key()))
@@ -149,7 +149,7 @@ func ReadStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path 
 }
 
 func ReadStorageTrieNodeOfLeft(db ethdb.Database, accountHash common.Hash, key []byte) ([]byte, []byte, common.Hash) {
-	it := db.NewReverseIterator(storageTrieNodeKey(accountHash, key))
+	it := db.NewReverseIterator(trieNodeStoragePrefix, nil, storageTrieNodeKey(accountHash, key))
 	defer it.Release()
 	leftKey := make([]byte, len(it.Key()))
 	copy(leftKey, it.Key())
