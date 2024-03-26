@@ -288,7 +288,7 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 // readAccountTrie return value of the account leaf node directly from the db
 func (dl *diskLayer) readAccountTrie(hash common.Hash) []byte {
 	start := time.Now()
-	nBlob, leftKey, nHash := rawdb.ReadAccountTrieNodeOfLeft(dl.db.diskdb, hash.Bytes())
+	nBlob, leftKey, accountkey, nHash := rawdb.ReadAccountTrieNodeOfLeft(dl.db.diskdb, hash.Bytes())
 	if nBlob == nil {
 		return nil
 	}
@@ -297,8 +297,12 @@ func (dl *diskLayer) readAccountTrie(hash common.Hash) []byte {
 	log.Info("short node info ", "account hash", hash.String(), "leftKey",
 		common.BytesToHash(leftKey).String(), "prefix:", common.BytesToHash(prefix).String())
 	log.Info("short node info2 ", "account hash", hash.String(), "leftKey",
-		common.Bytes2Hex(leftKey), "prefix:", hex.EncodeToString(prefix))
+		common.Bytes2Hex(leftKey), "prefix:", hex.EncodeToString(prefix), "key:", hex.EncodeToString(accountkey))
 	joinKey := [][]byte{leftKey, prefix}
+	/*
+		prefixStr := common.BytesToHash(prefix).String()
+		leftKeyStr := common.Bytes2Hex(leftKey)
+	*/
 	if bytes.Compare(bytes.Join(joinKey, []byte{}), hash.Bytes()) == 0 {
 		readAccLeftNodeTimer.UpdateSince(start)
 		return val

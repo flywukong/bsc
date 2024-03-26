@@ -78,7 +78,7 @@ func ReadAccountTrieNode(db ethdb.KeyValueReader, path []byte) ([]byte, common.H
 	return data, h.hash(data)
 }
 
-func ReadAccountTrieNodeOfLeft(db ethdb.Database, key []byte) ([]byte, []byte, common.Hash) {
+func ReadAccountTrieNodeOfLeft(db ethdb.Database, key []byte) ([]byte, []byte, []byte, common.Hash) {
 	it := db.NewReverseIterator(trieNodeAccountPrefix, nil, accountTrieNodeKey(key))
 	defer it.Release()
 	log.Info("left node key", "triekey", common.Bytes2Hex(accountTrieNodeKey(key)), "key", common.Bytes2Hex(it.Key()))
@@ -86,11 +86,11 @@ func ReadAccountTrieNodeOfLeft(db ethdb.Database, key []byte) ([]byte, []byte, c
 	copy(leftKey, it.Key())
 	data, err := db.Get(leftKey)
 	if err != nil {
-		return nil, nil, common.Hash{}
+		return nil, nil, nil, common.Hash{}
 	}
 	h := newHasher()
 	defer h.release()
-	return data, leftKey, h.hash(data)
+	return data, leftKey, accountTrieNodeKey(key), h.hash(data)
 }
 
 // HasAccountTrieNode checks the account trie node presence with the specified
