@@ -52,8 +52,11 @@ func hexToCompact(hex []byte) []byte {
 }
 
 func hexToRaw(hex []byte) []byte {
+	if hasTerm(hex) {
+		hex = hex[:len(hex)-1]
+	}
 	buf := make([]byte, len(hex)/2+1)
-	decodeNibbles(hex, buf)
+	decodeNibbles(hex, buf[1:])
 	return buf
 }
 
