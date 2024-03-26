@@ -667,21 +667,6 @@ func (d *Database) NewReverseIterator(prefix, start, key []byte) ethdb.Iterator 
 	if !iter.SeekGE(key) || bytes.Compare(iter.Key(), key) > 0 {
 		iter.Prev()
 	}
-	log.Info("current key:", "key", common.Bytes2Hex(key), "left key:", common.Bytes2Hex(iter.Key()))
-	for i := 0; i <= 3; i++ {
-		iter.Next()
-		log.Info("next key of left key:", "key", iter.Key())
-	}
-	for i := 0; i <= 3; i++ {
-		iter.Prev()
-	}
-	for i := 0; i <= 3; i++ {
-		iter.Prev()
-		log.Info("pre key of left key:", "key", iter.Key())
-	}
-	for i := 0; i <= 3; i++ {
-		iter.Next()
-	}
 	return &pebbleIterator{iter: iter, moved: true, released: false}
 }
 
