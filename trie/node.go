@@ -133,7 +133,7 @@ func DecodeLeafNode(hash, path, value []byte) ([]byte, []byte, []byte) {
 	n := mustDecodeNode(hash, value)
 	if sn, ok := n.(*shortNode); ok {
 		if val, ok := sn.Val.(valueNode); ok {
-			return val, hexToRaw(sn.Key), hexToCompact(path[1:])
+			return val, hexToCompact(sn.Key[1:]), hexToCompact(path[1:])
 		}
 	}
 	return nil, nil, nil
