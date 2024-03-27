@@ -697,6 +697,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 
 		// Meta- and unaccounted data
 		metadata    stat
+		metadata2   stat
 		unaccounted stat
 
 		// Totals
@@ -770,6 +771,9 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 				persistentStateIDKey, trieJournalKey, snapshotSyncStatusKey, snapSyncStatusFlagKey,
 			} {
 				if bytes.Equal(key, meta) {
+					if bytes.Equal(key, trieJournalKey) {
+						metadata2.Add(size)
+					}
 					metadata.Add(size)
 					accounted = true
 					break
@@ -846,6 +850,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		{"Key-Value store", "Clique snapshots", cliqueSnaps.Size(), cliqueSnaps.Count()},
 		{"Key-Value store", "Parlia snapshots", parliaSnaps.Size(), parliaSnaps.Count()},
 		{"Key-Value store", "Singleton metadata", metadata.Size(), metadata.Count()},
+		{"Key-Value store", "Singleton metadata2", metadata2.Size(), metadata2.Count()},
 		{"Light client", "CHT trie nodes", chtTrieNodes.Size(), chtTrieNodes.Count()},
 		{"Light client", "Bloom trie nodes", bloomTrieNodes.Size(), bloomTrieNodes.Count()},
 	}

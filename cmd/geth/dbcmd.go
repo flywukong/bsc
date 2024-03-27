@@ -809,6 +809,8 @@ func dbDelete(ctx *cli.Context) error {
 		log.Info("Could not decode the key", "error", err)
 		return err
 	}
+
+	key = []byte("TrieJournal")
 	data, err := db.Get(key)
 	if err == nil {
 		fmt.Printf("Previous value: %#x\n", data)
