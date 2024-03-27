@@ -811,14 +811,15 @@ func dbDelete(ctx *cli.Context) error {
 	}
 
 	key = []byte("TrieJournal")
-	data, err := db.Get(key)
+	_, err = db.Get(key)
 	if err == nil {
-		fmt.Printf("Previous value: %#x\n", data)
+		// fmt.Printf("Previous value: %#x\n", data)
+		if err = db.Delete(key); err != nil {
+			log.Info("Delete operation returned an error", "key", fmt.Sprintf("%#x", key), "error", err)
+			return err
+		}
 	}
-	if err = db.Delete(key); err != nil {
-		log.Info("Delete operation returned an error", "key", fmt.Sprintf("%#x", key), "error", err)
-		return err
-	}
+
 	return nil
 }
 
