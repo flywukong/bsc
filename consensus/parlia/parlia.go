@@ -1778,6 +1778,7 @@ func (p *Parlia) applyTransaction(
 	receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool,
 ) (err error) {
 	nonce := state.GetNonce(msg.From())
+	log.Info("apply txn account key is ", "accout hash:", msg.From().String())
 	expectedTx := types.NewTransaction(nonce, *msg.To(), msg.Value(), msg.Gas(), msg.GasPrice(), msg.Data())
 	expectedHash := p.signer.Hash(expectedTx)
 
