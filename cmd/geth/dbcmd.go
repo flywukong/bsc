@@ -18,6 +18,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -818,6 +819,10 @@ func dbDelete(ctx *cli.Context) error {
 			log.Info("Delete operation returned an error", "key", fmt.Sprintf("%#x", key), "error", err)
 			return err
 		}
+	}
+	_, err = db.Get(key)
+	if err != nil {
+		fmt.Println("can log get the key :", hex.EncodeToString(key), "after delete", "err:"+err.Error())
 	}
 
 	return nil
