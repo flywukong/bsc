@@ -1616,8 +1616,8 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 
 				if root != origin {
 					start := time.Now()
-					set := triestate.New(s.accountsOrigin, s.storagesOrigin, incomplete, s.accounts, s.storages, s.convertAccountSet(s.stateObjectsDestruct))
-					if err := s.db.TrieDB().Update(root, origin, block, nodes, set); err != nil {
+					trieSet := triestate.New(s.accountsOrigin, s.storagesOrigin, incomplete, s.accounts, s.storages, s.convertAccountSet(s.stateObjectsDestruct))
+					if err := s.db.TrieDB().Update(root, origin, block, nodes, trieSet); err != nil {
 						return err
 					}
 					s.originalRoot = root
@@ -1625,7 +1625,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 						s.TrieDBCommits += time.Since(start)
 					}
 					if s.onCommit != nil {
-						s.onCommit(set)
+						s.onCommit(trieSet)
 					}
 				}
 			}
