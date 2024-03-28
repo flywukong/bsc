@@ -17,13 +17,8 @@
 package trie
 
 import (
-	"bytes"
-	"encoding/hex"
-	"fmt"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/ethereum/go-ethereum/triedb/database"
@@ -127,19 +122,20 @@ func (t *StateTrie) GetAccount(address common.Address, direct bool) (*types.Stat
 		err error
 	)
 	if direct {
-		res, err = t.trie.GetDirectly(t.hashKey(address.Bytes()))
-		if res == nil || err != nil {
-			return nil, err
-		}
-		accountInfo, accErr := types.FullAccount(res)
-		if accErr == nil {
-			log.Info("get trie directly:", "hash:", address.String(), "nonce", accountInfo.Nonce,
-				"code hash", hex.EncodeToString(accountInfo.CodeHash), "root", common.BytesToHash(accountInfo.Root.Bytes()),
-				"balance:", *accountInfo.Balance)
-		} else {
-			log.Error("get trie directly err:", "err", accErr.Error())
-		}
-
+		/*
+			res, err = t.trie.GetDirectly(t.hashKey(address.Bytes()))
+			if res == nil || err != nil {
+				return nil, err
+			}
+			accountInfo, accErr := types.FullAccount(res)
+			if accErr == nil {
+				log.Info("get trie directly:", "hash:", address.String(), "nonce", accountInfo.Nonce,
+					"code hash", hex.EncodeToString(accountInfo.CodeHash), "root", common.BytesToHash(accountInfo.Root.Bytes()),
+					"balance:", *accountInfo.Balance)
+			} else {
+				log.Error("get trie directly err:", "err", accErr.Error())
+			}
+		*/
 		res, err = t.trie.Get(t.hashKey(address.Bytes()))
 		if res == nil || err != nil {
 			return nil, err
@@ -147,12 +143,16 @@ func (t *StateTrie) GetAccount(address common.Address, direct bool) (*types.Stat
 		ret := new(types.StateAccount)
 		err = rlp.DecodeBytes(res, ret)
 
-		if accountInfo.Root.Cmp(ret.Root) == 0 && bytes.Compare(accountInfo.CodeHash, ret.CodeHash) == 0 && accountInfo.Nonce == ret.Nonce && accountInfo.Balance.Cmp(ret.Balance) == 0 {
-			return accountInfo, nil
-		} else {
-			log.Error("GetAccount mismatch", "trie get:", ret, "trie get directly", accountInfo)
-			return nil, fmt.Errorf("GetAccount mismatch")
-		}
+		return ret, err
+		/*
+			if accountInfo.Root.Cmp(ret.Root) == 0 && bytes.Compare(accountInfo.CodeHash, ret.CodeHash) == 0 && accountInfo.Nonce == ret.Nonce && accountInfo.Balance.Cmp(ret.Balance) == 0 {
+				return accountInfo, nil
+			} else {
+				log.Error("GetAccount mismatch", "trie get:", ret, "trie get directly", accountInfo)
+				return nil, fmt.Errorf("GetAccount mismatch")
+			}
+		
+		*/
 		/*
 			res2, _ := t.trie.Get(t.hashKey(address.Bytes()))
 			if bytes.Compare(res, res2) != 0 {

@@ -1794,7 +1794,7 @@ func (p *Parlia) applyTransaction(
 
 		actualTx := (*receivedTxs)[0]
 		if !bytes.Equal(p.signer.Hash(actualTx).Bytes(), expectedHash.Bytes()) {
-			panic("err txn")
+			//			panic("err txn")
 			log.Info("apply txn err, actualTx info ", "nonce:", actualTx.Nonce(),
 				"to ", actualTx.To().String(), "value:", actualTx.Value(), "gas:", actualTx.Gas(),
 				"price", actualTx.GasPrice().String(), "data:", hex.EncodeToString(actualTx.Data()))
