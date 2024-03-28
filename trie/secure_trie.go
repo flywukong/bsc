@@ -122,20 +122,6 @@ func (t *StateTrie) GetAccount(address common.Address, direct bool) (*types.Stat
 		err error
 	)
 	if direct {
-		/*
-			res, err = t.trie.GetDirectly(t.hashKey(address.Bytes()))
-			if res == nil || err != nil {
-				return nil, err
-			}
-			accountInfo, accErr := types.FullAccount(res)
-			if accErr == nil {
-				log.Info("get trie directly:", "hash:", address.String(), "nonce", accountInfo.Nonce,
-					"code hash", hex.EncodeToString(accountInfo.CodeHash), "root", common.BytesToHash(accountInfo.Root.Bytes()),
-					"balance:", *accountInfo.Balance)
-			} else {
-				log.Error("get trie directly err:", "err", accErr.Error())
-			}
-		*/
 		res, err = t.trie.Get(t.hashKey(address.Bytes()))
 		if res == nil || err != nil {
 			return nil, err
@@ -151,7 +137,7 @@ func (t *StateTrie) GetAccount(address common.Address, direct bool) (*types.Stat
 				log.Error("GetAccount mismatch", "trie get:", ret, "trie get directly", accountInfo)
 				return nil, fmt.Errorf("GetAccount mismatch")
 			}
-		
+
 		*/
 		/*
 			res2, _ := t.trie.Get(t.hashKey(address.Bytes()))

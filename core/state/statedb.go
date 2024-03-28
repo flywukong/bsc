@@ -249,8 +249,6 @@ func (s *StateDB) StartPrefetcher(namespace string) {
 		} else {
 			s.prefetcher = newTriePrefetcher(s.db, s.originalRoot, common.Hash{}, namespace)
 		}
-	} else {
-		s.prefetcher = newTriePrefetcher(s.db, s.originalRoot, common.Hash{}, namespace)
 	}
 }
 
@@ -1058,7 +1056,7 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 	}
 	prefetcher := s.prefetcher
 	if prefetcher != nil && len(addressesToPrefetch) > 0 {
-		if s.snap == nil || s.snap.Verified() {
+		if s.snap.Verified() {
 			prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, addressesToPrefetch)
 		} else if prefetcher.rootParent != (common.Hash{}) {
 			prefetcher.prefetch(common.Hash{}, prefetcher.rootParent, common.Address{}, addressesToPrefetch)
