@@ -18,10 +18,11 @@ package trie
 
 import (
 	"bytes"
-	"fmt"
+	"encoding/hex"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/ethereum/go-ethereum/triedb/database"
@@ -129,21 +130,23 @@ func (t *StateTrie) GetAccount(address common.Address, direct bool) (*types.Stat
 		if res == nil || err != nil {
 			return nil, err
 		}
-		ret := new(types.StateAccount)
-		err = rlp.DecodeBytes(res, ret)
-
-		res1, err1 := t.trie.Get(t.hashKey(address.Bytes()))
-		if res1 == nil || err1 != nil {
-			return nil, err
-		}
-		ret1 := new(types.StateAccount)
-		err = rlp.DecodeBytes(res, ret1)
-
-		if bytes.Compare(res, res1) == 0 {
-			return ret, nil
+		accountInfo, accErr := types.FullAccount(res)
+		if accErr == nil {
+			log.Info("get trie directly:", "hash:", address.String(), "nonce", accountInfo.Nonce,
+				"code hash", hex.EncodeToString(accountInfo.CodeHash), "root", common.BytesToHash(accountInfo.Root.Bytes()),
+				"balance:", *accountInfo.Balance)
 		} else {
-			panic(fmt.Sprintf("direct: %v, trie: %v", ret, ret1))
+			log.Error("get trie directly err:", "err", accErr.Error())
 		}
+		res2, _ := t.trie.Get(t.hashKey(address.Bytes()))
+		if bytes.Compare(res, res2) != 0 {
+			accountInfo2, _ := types.FullAccount(res2)
+			log.Info("get trie data not consistent:", "hash:", address.String(), "nonce", accountInfo2.Nonce,
+				"code hash", hex.EncodeToString(accountInfo2.CodeHash), "root", common.BytesToHash(accountInfo2.Root.Bytes()),
+				"balance:", *accountInfo2.Balance)
+			//return nil, errors.New("get trie data not consistent")
+		}
+		return accountInfo, accErr
 	} else {
 		res, err = t.trie.Get(t.hashKey(address.Bytes()))
 		if res == nil || err != nil {
