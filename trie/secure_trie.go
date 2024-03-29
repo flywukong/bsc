@@ -108,7 +108,7 @@ func (t *StateTrie) GetStorage(_ common.Address, key []byte, direct bool) ([]byt
 		if enc == nil && enc1 == nil {
 			return nil, nil
 		} else if (enc == nil && enc1 != nil) || (enc != nil && enc1 == nil) {
-			log.Error("direct read empty", "error", fmt.Sprintf("direct: %v, trie: %v , storage key %v, key %v", common.Bytes2Hex(enc),
+			log.Error("direct read empty", "error", fmt.Sprintf("direct: %v, trie: %v , hash storage key %v, storage key %v", common.Bytes2Hex(enc),
 				common.Bytes2Hex(enc1), common.Bytes2Hex(t.hashKey(key)), common.Bytes2Hex(key)))
 			time.Sleep(1 * time.Second)
 			panic(fmt.Sprintf("direct: %v, trie: %v , storage key %v, key %v", common.Bytes2Hex(enc),
