@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
@@ -139,8 +140,25 @@ func DecodeLeafNode(hash, path, value []byte) ([]byte, []byte) {
 			if hasTerm(key) {
 				key = key[:len(key)-1]
 			}
+			log.Info("value info", "val", val, "path + keyHash_post", hexToKeybytes(append(path, sn.Key...)))
 			return val, hexToKeybytes(append(path, sn.Key...))
+		} else {
+			log.Info("not value node")
 		}
+	}
+	return nil, nil
+}
+
+func PrintNode(hash, value []byte) ([]byte, []byte) {
+	n := mustDecodeNode(hash, value)
+	if sn, ok := n.(*shortNode); ok {
+		log.Info("trie shortNode info", "sn", sn)
+	}
+	if fn, ok := n.(*fullNode); ok {
+		log.Info("trie fullNode info", "fn", fn)
+	}
+	if val, ok := n.(valueNode); ok {
+		log.Info("trie  value info", "vn", val)
 	}
 	return nil, nil
 }

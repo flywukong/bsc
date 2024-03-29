@@ -145,6 +145,8 @@ func DeleteStorageTrie(db ethdb.KeyValueWriter, accountHash common.Hash) {
 // ReadStorageTrieNode retrieves the storage trie node and the associated node
 // hash with the specified node path.
 func ReadStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path []byte) ([]byte, common.Hash) {
+	log.Info("disk layer storage key", "path ", common.Bytes2Hex(path), " trie dbKey", common.Bytes2Hex(storageTrieNodeKey(accountHash, path)),
+		"account hash", accountHash.String())
 	data, err := db.Get(storageTrieNodeKey(accountHash, path))
 	if err != nil {
 		return nil, common.Hash{}
@@ -157,14 +159,17 @@ func ReadStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path 
 func ReadStorageFromTrieDirectly(db ethdb.Database, accountHash common.Hash, key []byte) ([]byte, []byte, common.Hash) {
 	it := db.NewIterator(trieNodeStoragePrefix, nil)
 	defer it.Release()
-
 	if it.Seek(storageTrieNodeKey(accountHash, EncodeNibbles(key))) && it.Error() == nil {
 		dbKey := it.Key()
+		//	log.Info("read direct dbKey", "dbkey", common.Bytes2Hex(dbKey), "key", common.Bytes2Hex(key))
 		if strings.HasPrefix(string(storageTrieNodeKey(accountHash, EncodeNibbles(key))), string(dbKey)) {
 			data := it.Value()
 			h := newHasher()
 			defer h.release()
-			return data, dbKey[1:], h.hash(data)
+			returnKey := dbKey[1:]
+			log.Info("read direct dbKey", "dbkey",
+				common.Bytes2Hex(dbKey), "data", common.Bytes2Hex(data), "hash", h.hash(data), "prefix:", returnKey[common.HashLength:])
+			return data, returnKey, h.hash(data)
 		}
 	}
 	return nil, nil, common.Hash{}
