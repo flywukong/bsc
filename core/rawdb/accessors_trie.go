@@ -145,6 +145,8 @@ func DeleteStorageTrie(db ethdb.KeyValueWriter, accountHash common.Hash) {
 // ReadStorageTrieNode retrieves the storage trie node and the associated node
 // hash with the specified node path.
 func ReadStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path []byte) ([]byte, common.Hash) {
+	log.Info("disk layer storage key", "path ", common.Bytes2Hex(path), " trie dbKey", common.Bytes2Hex(storageTrieNodeKey(accountHash, path)),
+		"account hash", accountHash.String())
 	data, err := db.Get(storageTrieNodeKey(accountHash, path))
 	if err != nil {
 		return nil, common.Hash{}

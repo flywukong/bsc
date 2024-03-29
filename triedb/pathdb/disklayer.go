@@ -325,8 +325,6 @@ func (dl *diskLayer) readStorageTrie(accountHash, storageHash common.Hash) []byt
 	if bytes.Compare(storageHash.Bytes(), key) == 0 {
 		log.Error("storage hash compare error:",
 			"storage hash,", common.Bytes2Hex(storageHash.Bytes()), "key", common.Bytes2Hex(key))
-		log.Error("storage hash compare error2:",
-			"storage hash,", storageHash.Bytes(), "key", key)
 		return val
 	}
 
