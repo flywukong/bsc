@@ -166,8 +166,10 @@ func ReadStorageFromTrieDirectly(db ethdb.Database, accountHash common.Hash, key
 			data := it.Value()
 			h := newHasher()
 			defer h.release()
-			log.Info("read direct dbKey2", "dbkey", common.Bytes2Hex(dbKey), "data", common.Bytes2Hex(data))
-			return data, dbKey[1:], h.hash(data)
+			returnKey := dbKey[1:]
+			log.Info("read direct dbKey2", "dbkey",
+				common.Bytes2Hex(dbKey), "data", common.Bytes2Hex(data), "hash", h.hash(data), "prefix:", returnKey[common.HashLength:])
+			return data, returnKey, h.hash(data)
 		}
 	}
 	return nil, nil, common.Hash{}
