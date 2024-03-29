@@ -133,12 +133,14 @@ func mustDecodeNode(hash, buf []byte) node {
 func DecodeLeafNode(hash, path, value []byte) ([]byte, []byte) {
 	n := mustDecodeNode(hash, value)
 	if sn, ok := n.(*shortNode); ok {
+		log.Info("shortNode info", "sn", sn)
 		if val, ok := sn.Val.(valueNode); ok {
 			// remove the prefix key of path
 			key := append(path, sn.Key...)
 			if hasTerm(key) {
 				key = key[:len(key)-1]
 			}
+			log.Info("value info", "val", val)
 			return val, hexToKeybytes(append(path, sn.Key...))
 		} else {
 			log.Info("not value node")
