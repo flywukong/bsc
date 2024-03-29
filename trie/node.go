@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
@@ -139,6 +140,8 @@ func DecodeLeafNode(hash, path, value []byte) ([]byte, []byte) {
 				key = key[:len(key)-1]
 			}
 			return val, hexToKeybytes(append(path, sn.Key...))
+		} else {
+			log.Info("not value node")
 		}
 	}
 	return nil, nil
