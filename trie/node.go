@@ -136,14 +136,13 @@ func DecodeLeafNode(hash, path, value []byte) ([]byte, []byte) {
 		log.Info("shortNode info", "sn", sn)
 		if val, ok := sn.Val.(valueNode); ok {
 			// remove the prefix key of path
-			key := append(path, sn.Key...)
-			if hasTerm(key) {
-				key = key[:len(key)-1]
-			}
-			log.Info("value info", "val", val)
 			return val, hexToKeybytes(append(path, sn.Key...))
-		} else {
-			log.Info("not value node")
+		}
+	} else if fn, ok := n.(*fullNode); ok {
+		log.Info("fullNode info", "sn", fn)
+		if val, ok := fn.Children[16].(valueNode); ok {
+			// remove the prefix key of path
+			return val, nil
 		}
 	}
 	return nil, nil
