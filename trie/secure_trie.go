@@ -22,6 +22,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/ethereum/go-ethereum/triedb/database"
@@ -106,6 +107,8 @@ func (t *StateTrie) GetStorage(_ common.Address, key []byte, direct bool) ([]byt
 		if enc == nil && enc1 == nil {
 			return nil, nil
 		} else if (enc == nil && enc1 != nil) || (enc != nil && enc1 == nil) {
+			log.Error("direct read empty", "error", fmt.Sprintf("direct: %v, trie: %v , storage key %v, key %v", common.Bytes2Hex(enc),
+				common.Bytes2Hex(enc1), common.Bytes2Hex(t.hashKey(key)), common.Bytes2Hex(key)))
 			panic(fmt.Sprintf("direct: %v, trie: %v , storage key %v, key %v", common.Bytes2Hex(enc),
 				common.Bytes2Hex(enc1), common.Bytes2Hex(t.hashKey(key)), common.Bytes2Hex(key)))
 		} else {

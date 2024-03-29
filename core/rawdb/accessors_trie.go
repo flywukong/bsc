@@ -160,6 +160,7 @@ func ReadStorageFromTrieDirectly(db ethdb.Database, accountHash common.Hash, key
 
 	if it.Seek(storageTrieNodeKey(accountHash, encodeNibbles(key))) && it.Error() == nil {
 		dbKey := it.Key()
+		log.Info("read direct dbKey", "dbkey", common.Bytes2Hex(dbKey))
 		if strings.HasPrefix(string(storageTrieNodeKey(accountHash, encodeNibbles(key))), string(dbKey)) {
 			data := it.Value()
 			h := newHasher()
