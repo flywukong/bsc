@@ -149,6 +149,20 @@ func DecodeLeafNode(hash, path, value []byte) ([]byte, []byte) {
 	return nil, nil
 }
 
+func PrintNode(hash, value []byte) ([]byte, []byte) {
+	n := mustDecodeNode(hash, value)
+	if sn, ok := n.(*shortNode); ok {
+		log.Info("trie shortNode info", "sn", sn)
+	}
+	if fn, ok := n.(*fullNode); ok {
+		log.Info("trie fullNode info", "fn", fn)
+	}
+	if val, ok := n.(valueNode); ok {
+		log.Info("trie  value info", "vn", val)
+	}
+	return nil, nil
+}
+
 // mustDecodeNodeUnsafe is a wrapper of decodeNodeUnsafe and panic if any error is
 // encountered.
 func mustDecodeNodeUnsafe(hash, buf []byte) node {

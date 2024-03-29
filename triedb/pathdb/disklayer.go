@@ -278,6 +278,7 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 		nBlob, nHash = rawdb.ReadAccountTrieNode(dl.db.diskdb, path)
 	} else {
 		nBlob, nHash = rawdb.ReadStorageTrieNode(dl.db.diskdb, owner, path)
+		trie.PrintNode(nHash.Bytes(), nBlob)
 	}
 	diskDBNodeTimer.UpdateSince(diskNodeStart)
 	if nHash != hash {
@@ -323,9 +324,12 @@ func (dl *diskLayer) readStorageTrie(accountHash, storageHash common.Hash) []byt
 	val, key := trie.DecodeLeafNode(nHash.Bytes(), path[common.HashLength:], nBlob)
 	log.Info("storage short node info ", "key:", hex.EncodeToString(key), "value:", hex.EncodeToString(val))
 	if bytes.Compare(storageHash.Bytes(), key) == 0 {
+		//	log.Error("storage hash compare error:",
+		//		"storage hash,", common.Bytes2Hex(storageHash.Bytes()), "key", common.Bytes2Hex(key))
+		return val
+	} else {
 		log.Error("storage hash compare error:",
 			"storage hash,", common.Bytes2Hex(storageHash.Bytes()), "key", common.Bytes2Hex(key))
-		return val
 	}
 
 	return nil

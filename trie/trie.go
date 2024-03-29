@@ -179,7 +179,6 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, newnode no
 		}
 		return value, n, didResolve, err
 	case hashNode:
-		log.Info("hash node resolveAndTrack", "key", common.Bytes2Hex(key[:pos]))
 		child, err := t.resolveAndTrack(n, key[:pos])
 		if err != nil {
 			return nil, n, true, err
