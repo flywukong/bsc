@@ -23,6 +23,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/ethereum/go-ethereum/triedb/database"
@@ -106,9 +107,10 @@ func (t *StateTrie) GetStorage(_ common.Address, key []byte, direct bool) ([]byt
 
 		hashkey := t.hashKey(key)
 		encodeHash := rawdb.EncodeNibbles(hashkey)
+		newHash := common.BytesToHash(hashkey)
 		log.Info("direct read storage", "info",
-			fmt.Sprintf("direct: %v, trie: %v , hash storage key %v, encoded hash%v", common.Bytes2Hex(enc),
-				common.Bytes2Hex(enc1), common.Bytes2Hex(t.hashKey(key)), common.Bytes2Hex(encodeHash)))
+			fmt.Sprintf("direct: %v, trie: %v , hash storage key %v, encoded hash%v, new hash %v", common.Bytes2Hex(enc),
+				common.Bytes2Hex(enc1), common.Bytes2Hex(t.hashKey(key)), common.Bytes2Hex(encodeHash), newHash.String()))
 		if enc == nil && enc1 == nil {
 			return nil, nil
 		} else if (enc == nil && enc1 != nil) || (enc != nil && enc1 == nil) {

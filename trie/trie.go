@@ -146,7 +146,7 @@ func (t *Trie) Get(key []byte) ([]byte, error) {
 	if t.committed {
 		return nil, ErrCommitted
 	}
-	log.Info("trie get", "key", keybytesToHex(key))
+	log.Info("trie get", "path key", keybytesToHex(key))
 	value, newroot, didResolve, err := t.get(t.root, keybytesToHex(key), 0)
 	if err == nil && didResolve {
 		t.root = newroot
