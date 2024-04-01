@@ -18,7 +18,6 @@ package pathdb
 
 import (
 	"bytes"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
@@ -298,7 +297,8 @@ func (dl *diskLayer) readAccountTrie(hash common.Hash) []byte {
 		readAccLeftNodeTimer.UpdateSince(start)
 		return val
 	} else {
-		log.Debug("account short node info ", "account hash", hash.String(), "gotten key", hex.EncodeToString(key), "path", common.Bytes2Hex(path))
+		log.Debug("account hash compare error ", "account hash", common.Bytes2Hex(hash.Bytes()),
+			"key_hash_pre+ key_hash_post", common.Bytes2Hex(key), "path", common.Bytes2Hex(path))
 	}
 	return nil
 }
@@ -318,7 +318,7 @@ func (dl *diskLayer) readStorageTrie(accountHash, storageHash common.Hash) []byt
 	if bytes.Compare(storageHash.Bytes(), key) == 0 {
 		return val
 	} else {
-		log.Error("storage hash compare error:",
+		log.Debug("storage hash compare error:",
 			"storage hash,", common.Bytes2Hex(storageHash.Bytes()), "key", common.Bytes2Hex(key))
 	}
 

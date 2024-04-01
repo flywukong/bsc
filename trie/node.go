@@ -140,7 +140,7 @@ func DecodeLeafNode(hash, path, value []byte) ([]byte, []byte) {
 			if hasTerm(key) {
 				key = key[:len(key)-1]
 			}
-			log.Info("value info", "val", val, "path + keyHash_post", hexToKeybytes(append(path, sn.Key...)))
+			log.Info("value info", "val", val, "keyHash_pre ", common.Bytes2Hex(path), " keyHash_post", common.Bytes2Hex(hexToKeybytes(sn.Key)))
 			return val, hexToKeybytes(append(path, sn.Key...))
 		} else {
 			log.Info("not value node")
