@@ -305,6 +305,7 @@ func (dl *diskLayer) readAccountTrie(hash common.Hash) []byte {
 
 // readStorageTrie return value of the storage leaf node directly from the db
 func (dl *diskLayer) readStorageTrie(accountHash, storageHash common.Hash) []byte {
+	log.Info("read storage trie", "storage hash", storageHash.String())
 	start := time.Now()
 	key := storageHash.Bytes()
 	nBlob, path, nHash := rawdb.ReadStorageFromTrieDirectly(dl.db.diskdb, accountHash, key)
