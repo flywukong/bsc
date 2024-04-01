@@ -110,7 +110,7 @@ func (t *StateTrie) GetStorage(_ common.Address, key []byte, direct bool) ([]byt
 		encodeHash := rawdb.EncodeNibbles(hashkey)
 		log.Info("direct read storage", "info",
 			fmt.Sprintf("direct: %v, trie: %v , hash storage key %v, encoded hash%v", common.Bytes2Hex(enc),
-				common.Bytes2Hex(enc1), common.Bytes2Hex(t.hashKey(key)), encodeHash))
+				common.Bytes2Hex(enc1), common.Bytes2Hex(t.hashKey(key)), common.Bytes2Hex(encodeHash)))
 		if enc == nil && enc1 == nil {
 			return nil, nil
 		} else if (enc == nil && enc1 != nil) || (enc != nil && enc1 == nil) {
