@@ -90,6 +90,7 @@ Remove blockchain and state databases`,
 			dbHbss2PbssCmd,
 			dbTrieGetCmd,
 			dbTrieDeleteCmd,
+			dbStoreEmbeddedCmd,
 		},
 	}
 	dbInspectCmd = &cli.Command{
@@ -227,6 +228,16 @@ WARNING: This is a low-level operation which may cause database corruption!`,
 		}, utils.NetworkFlags, utils.DatabaseFlags),
 		Description: "This command looks up the specified database key from the database.",
 	}
+	dbStoreEmbeddedCmd = &cli.Command{
+		Action: addEmbeddedNode,
+		Name:   "add-embedded",
+		Usage:  "Add the embedded shortNode",
+		Flags: flags.Merge([]cli.Flag{
+			utils.SyncModeFlag,
+		}, utils.NetworkFlags, utils.DatabaseFlags),
+		Description: `This command redundancy store store the embedded shortNode.`,
+	}
+
 	dbDumpFreezerIndex = &cli.Command{
 		Action:    freezerInspect,
 		Name:      "freezer-index",
@@ -1215,4 +1226,8 @@ func hbss2pbss(ctx *cli.Context) error {
 		return err
 	}
 	return nil
+}
+
+func addEmbeddedNode(ctx *cli.Context) error {
+	
 }
