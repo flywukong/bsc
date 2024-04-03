@@ -764,6 +764,26 @@ func decodeRef(buf []byte) (node, []byte, error) {
 	}
 }
 
+type decodeError struct {
+	what  error
+	stack []string
+}
+
+func wrapError(err error, ctx string) error {
+	if err == nil {
+		return nil
+	}
+	if decErr, ok := err.(*decodeError); ok {
+		decErr.stack = append(decErr.stack, ctx)
+		return decErr
+	}
+	return &decodeError{err, []string{ctx}}
+}
+
+func (err *decodeError) Error() string {
+	return fmt.Sprintf("%v (decode path: %s)", err.what, strings.Join(err.stack, "<-"))
+}
+
 func decodeValue(hash, buf []byte) (node, error) {
 	if len(buf) == 0 {
 		return nil, io.ErrUnexpectedEOF
@@ -775,11 +795,11 @@ func decodeValue(hash, buf []byte) (node, error) {
 	switch c, _ := rlp.CountValues(elems); c {
 	case 2:
 		n, err := decodeS(hash, elems)
-		// return n, wrapError(err, "short")
-		return n, fmt.Errorf("short: %v", err)
+		return n, wrapError(err, "short")
+		//return n, fmt.Errorf("short: %v", err)
 	case 17:
 		n, err := decodeF(hash, elems)
-		return n, fmt.Errorf("full: %v", err)
+		return n, wrapError(err, "full")
 	default:
 		return nil, fmt.Errorf("invalid number of list elements: %v", c)
 	}
