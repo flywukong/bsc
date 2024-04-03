@@ -670,8 +670,8 @@ type (
 		flags nodeFlag
 	}
 	shorNodeInfo struct {
-		Node node
-		Idx  int
+		NodeBytes []byte
+		Idx       int
 	}
 	hashNode  []byte
 	valueNode []byte
@@ -851,6 +851,25 @@ func decodeF(hash, elems []byte) (*fullNode, error) {
 	return n, nil
 }
 
+func nodeToBytes(n shortNode) []byte {
+	w := rlp.NewEncoderBuffer(nil)
+	offset := w.List()
+	w.WriteBytes(n.Key)
+	if n.Val != nil {
+		//	w.WriteBytes(n.Val)
+		if vn, ok := n.Val.(valueNode); ok {
+			w.WriteBytes(vn)
+		}
+	} else {
+		w.Write(rlp.EmptyString)
+	}
+	w.ListEnd(offset)
+
+	result := w.ToBytes()
+	w.Flush()
+	return result
+}
+
 func checkIfContainShortNode(hash, buf []byte, fullNodeCount, shortNodeCount, otherNode *int) ([]shorNodeInfo, error) {
 	n, err := decodeValue(hash, buf)
 	if err != nil {
@@ -868,7 +887,7 @@ func checkIfContainShortNode(hash, buf []byte, fullNodeCount, shortNodeCount, ot
 				if vn, ok := sn.Val.(valueNode); ok {
 					log.Info("find shortNode inside fullnode", "fullnode", fn, "child idx", i,
 						"child", child, "vn", vn)
-					shortNodeInfoList = append(shortNodeInfoList, shorNodeInfo{Node: sn, Idx: i})
+					shortNodeInfoList = append(shortNodeInfoList, shorNodeInfo{NodeBytes: nodeToBytes(*sn), Idx: i})
 				}
 			}
 		}
@@ -1186,7 +1205,9 @@ func IterateTrieState(db ethdb.Database) error {
 						childPath = append(fullNodePath, byte(snode.Idx))
 						newKey := storageTrieNodeKey(common.BytesToHash(key[1:common.HashLength+1]), childPath)
 						log.Info("storage shortNode info", "trie key", key, "fullNode path", fullNodePath,
-							"childPath", childPath, "new Storage key", newKey)
+							"childPath", childPath, "new short node key", newKey, "new shortNode value", snode.NodeBytes)
+
+						// batch
 						/*
 							if err := db.Put(newKey, nodeValue); err != nil {
 								return err
