@@ -1098,6 +1098,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	}
 	return nil
 }
+
 func IterateTrieState(db ethdb.Database) error {
 	var (
 		it     ethdb.Iterator
@@ -1188,6 +1189,10 @@ func IterateTrieState(db ethdb.Database) error {
 	log.Info("embedded node info", "storage embedded node", storageEmbeddedNode, "account embedded node", accountEmbeddedNode)
 	log.Info(" total node info", "fullnode count", fullNodeCount, "short node count", shortNodeCount, "other node", otherNodeCount)
 
+	log.Info("iterate trie state", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
+
+	start = time.Now()
+	count = 0
 	var snapPrefix = [2][]byte{SnapshotAccountPrefix, SnapshotStoragePrefix}
 	var SnapshotAccountKey int
 	var SnapshotStorageKey int
@@ -1221,8 +1226,7 @@ func IterateTrieState(db ethdb.Database) error {
 	}
 	log.Info(" total snap key info ", "snap account", SnapshotAccountKey, "snap storage", SnapshotStorageKey,
 		"total key", SnapshotAccountKey+SnapshotStorageKey)
-	//log.Info("Deleted trie state", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
-
+	log.Info("iterate snap state", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
 	return nil
 }
 
