@@ -97,7 +97,7 @@ func (t *StateTrie) GetStorage(_ common.Address, key []byte, direct bool) ([]byt
 	if direct {
 		enc, err = t.trie.GetDirectly(t.hashKey(key))
 		enc1, err1 := t.trie.Get(t.hashKey(key))
-		if (err == nil && err1 != nil) || (err != nil && err1 != nil) {
+		if (err == nil && err1 != nil) || (err != nil && err1 != nil) z {
 			panic(fmt.Errorf("err: %v, err1%v", err, err1))
 		} else if err != nil && err1 != nil {
 			return nil, fmt.Errorf("err: %v, err1%v", err, err1)

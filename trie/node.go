@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
@@ -185,6 +186,35 @@ func decodeNodeUnsafe(hash, buf []byte) (node, error) {
 	default:
 		return nil, fmt.Errorf("invalid number of list elements: %v", c)
 	}
+}
+
+func CheckIfContainShortNode(hash, buf []byte, fullNodeCount, shortNodeCount, otherNode *int) (node, error, int) {
+	n, err := decodeNodeUnsafe(hash, buf)
+	if err != nil {
+		return nil, err, 0
+	}
+
+	if fn, ok := n.(*fullNode); ok {
+		*fullNodeCount++
+		for i := 0; i < 17; i++ {
+			child := fn.Children[i]
+			// if it is a shortNode contained in fullnode
+			// return the shortNode
+			if sn, ok := child.(*shortNode); ok {
+				if _, ok := sn.Val.(valueNode); ok {
+					log.Info("find shortNode inside fullnode", "fullnode", fn, "child shortNode", child)
+
+					return sn, nil, i
+				}
+			}
+		}
+	} else if _, ok := n.(*shortNode); ok {
+		*shortNodeCount++
+	} else {
+		*otherNode++
+		log.Warn("not full node or short node in disk", "node", n)
+	}
+	return nil, nil, 0
 }
 
 func decodeShort(hash, elems []byte) (node, error) {

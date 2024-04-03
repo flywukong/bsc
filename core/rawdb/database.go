@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/trie"
 	"github.com/olekukonko/tablewriter"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -577,6 +578,11 @@ type stat struct {
 	count counter
 }
 
+type nodeStat struct {
+	fullnodeCounter counter
+	shortNode       counter
+}
+
 // Add size to the stat and increase the counter by 1
 func (s *stat) Add(size common.StorageSize) {
 	s.size += size
@@ -884,6 +890,133 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	if unaccounted.size > 0 {
 		log.Error("Database contains unaccounted data", "size", unaccounted.size, "count", unaccounted.count)
 	}
+	return nil
+}
+func IterateTrieState(db ethdb.Database) error {
+	var (
+		it     ethdb.Iterator
+		start  = time.Now()
+		logged = time.Now()
+		count  int64
+		key    []byte
+	)
+
+	prefixKeys := map[string]func([]byte) bool{
+		string(trieNodeAccountPrefix): IsAccountTrieNode,
+		string(trieNodeStoragePrefix): IsStorageTrieNode,
+	}
+
+	var storageEmbeddedNode int
+	var accountEmbeddedNode int
+	// var nodeStat nodeStat
+	var fullNodeCount *int
+	var shortNodeCount *int
+	var otherNodeCount *int
+	count1 := 0
+	count2 := 0
+	count3 := 0
+	fullNodeCount = &count1
+	shortNodeCount = &count2
+	otherNodeCount = &count3
+	for prefix, isValid := range prefixKeys {
+		it = db.NewIterator([]byte(prefix), nil)
+		for it.Next() {
+			key = it.Key()
+			if !isValid(key) {
+				continue
+			}
+			nodeValue := make([]byte, len(it.Value()))
+			copy(nodeValue, it.Value())
+			h := newHasher()
+			hash := h.hash(it.Value())
+			defer h.release()
+			var newPath []byte
+			// if is full shortnodeInsideFull, check if it contains short shortnodeInsideFull
+			shortnodeInsideFull, err, idx := trie.CheckIfContainShortNode(hash.Bytes(), nodeValue, fullNodeCount, shortNodeCount, otherNodeCount)
+			if err != nil {
+				log.Error("decode trie shortnodeInsideFull err:", "err", err.Error())
+				//				return err
+				continue
+			}
+			// find shorNode inside the fullnode
+			if shortnodeInsideFull != nil {
+				if IsStorageTrieNode(key) {
+					storageEmbeddedNode++
+					//parse the path of fullnode
+					fullNodePath := key[1+common.HashLength:]
+					newPath = append(fullNodePath, byte(idx))
+					newKey := storageTrieNodeKey(common.BytesToHash(key[1:common.HashLength+1]), newPath)
+					log.Info("storage shortNode info", "trie key", key, "fullNode path", fullNodePath,
+						"newPath", newPath, "new Storage key", newKey)
+					/*
+						if err := db.Put(newKey, nodeValue); err != nil {
+							return err
+						}
+
+					*/
+				} else if IsAccountTrieNode(key) {
+					accountEmbeddedNode++
+					//parse the path of fullnode
+					fullNodePath := key[1:]
+					newPath = append(fullNodePath, byte(idx))
+					newKey := accountTrieNodeKey(newPath)
+					log.Info("storage shortNode info", "trie key", key, "fullNode path", fullNodePath,
+						"newPath", newPath, "new Storage key", newKey)
+					/*
+						if err := db.Put(newKey, nodeValue); err != nil {
+							return err
+						}
+
+					*/
+				}
+			}
+
+			count++
+			if time.Since(logged) > 8*time.Second {
+				log.Info("Checking trie state", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
+				logged = time.Now()
+			}
+		}
+		it.Release()
+	}
+	log.Info("embedded node info", "storage embedded node", storageEmbeddedNode, "account embedded node", accountEmbeddedNode)
+	log.Info(" total node info", "fullnode count", fullNodeCount, "short node count", shortNodeCount, "other node", otherNodeCount)
+
+	var snapPrefix = [2][]byte{SnapshotAccountPrefix, SnapshotStoragePrefix}
+	var SnapshotAccountKey int
+	var SnapshotStorageKey int
+	for _, prefix := range snapPrefix {
+		it = db.NewIterator(prefix, nil)
+		for it.Next() {
+			key = it.Key()
+			if bytes.Compare(prefix, SnapshotAccountPrefix) == 0 {
+				if len(key) != (len(SnapshotAccountPrefix) + common.HashLength) {
+					continue
+				} else {
+					SnapshotAccountKey++
+				}
+			}
+
+			if bytes.Compare(prefix, SnapshotStoragePrefix) == 0 {
+				if len(key) != (len(SnapshotStoragePrefix) + 2*common.HashLength) {
+					continue
+				} else {
+					SnapshotStorageKey++
+				}
+			}
+
+			count++
+			if time.Since(logged) > 8*time.Second {
+				log.Info("Checking snap state", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
+				logged = time.Now()
+			}
+		}
+		it.Release()
+	}
+	log.Info(" total snap key info ", "snap account", SnapshotAccountKey, "snap storage", SnapshotStorageKey,
+		"total key", SnapshotAccountKey+SnapshotStorageKey)
+	//log.Info("Deleted trie state", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
+
 	return nil
 }
 
