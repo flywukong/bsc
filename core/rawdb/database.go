@@ -658,6 +658,7 @@ type node interface {
 	// encode(w rlp.EncoderBuffer)
 	fstring(string) string
 }
+
 type (
 	fullNode struct {
 		Children [17]node // Actual trie node data to encode/decode (needs custom encoder)
@@ -667,6 +668,10 @@ type (
 		Key   []byte
 		Val   node
 		flags nodeFlag
+	}
+	shorNodeInfo struct {
+		Node node
+		Idx  int
 	}
 	hashNode  []byte
 	valueNode []byte
@@ -846,12 +851,13 @@ func decodeF(hash, elems []byte) (*fullNode, error) {
 	return n, nil
 }
 
-func CheckIfContainShortNode(hash, buf []byte, fullNodeCount, shortNodeCount, otherNode *int) (node, error, int) {
+func checkIfContainShortNode(hash, buf []byte, fullNodeCount, shortNodeCount, otherNode *int) ([]shorNodeInfo, error) {
 	n, err := decodeValue(hash, buf)
 	if err != nil {
-		return nil, err, 0
+		return nil, err
 	}
 
+	shortNodeInfoList := make([]shorNodeInfo, 0)
 	if fn, ok := n.(*fullNode); ok {
 		*fullNodeCount++
 		for i := 0; i < 17; i++ {
@@ -862,17 +868,18 @@ func CheckIfContainShortNode(hash, buf []byte, fullNodeCount, shortNodeCount, ot
 				if vn, ok := sn.Val.(valueNode); ok {
 					log.Info("find shortNode inside fullnode", "fullnode", fn, "child idx", i,
 						"child", child, "vn", vn)
-					return sn, nil, i
+					shortNodeInfoList = append(shortNodeInfoList, shorNodeInfo{Node: sn, Idx: i})
 				}
 			}
 		}
+		return shortNodeInfoList, nil
 	} else if _, ok := n.(*shortNode); ok {
 		*shortNodeCount++
 	} else {
 		*otherNode++
 		log.Warn("not full node or short node in disk", "node", n)
 	}
-	return nil, nil, 0
+	return nil, nil
 }
 
 // InspectDatabase traverses the entire database and checks the size
@@ -1159,43 +1166,48 @@ func IterateTrieState(db ethdb.Database) error {
 			h.release()
 			var childPath []byte
 			// if is full shortnodeInsideFull, check if it contains short shortnodeInsideFull
-			shortnodeInsideFull, err, idx := CheckIfContainShortNode(hash.Bytes(), it.Value(), fullNodeCount, shortNodeCount, otherNodeCount)
+			shortnodeList, err := checkIfContainShortNode(hash.Bytes(), it.Value(), fullNodeCount, shortNodeCount, otherNodeCount)
 			if err != nil {
-				log.Error("decode trie shortnodeInsideFull err:", "err", err.Error())
+				log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
 				//				return err
 				continue
 			}
 
 			// find shorNode inside the fullnode
-			if shortnodeInsideFull != nil {
-				if IsStorageTrieNode(key) {
-					storageEmbeddedNode++
-					//parse the path of fullnode
-					fullNodePath := key[1+common.HashLength:]
-					childPath = append(fullNodePath, byte(idx))
-					newKey := storageTrieNodeKey(common.BytesToHash(key[1:common.HashLength+1]), childPath)
-					log.Info("storage shortNode info", "trie key", key, "fullNode path", fullNodePath,
-						"childPath", childPath, "new Storage key", newKey)
-					/*
-						if err := db.Put(newKey, nodeValue); err != nil {
-							return err
-						}
+			if len(shortnodeList) > 0 {
+				if len(shortnodeList) > 1 {
+					log.Info("fullnode contain more than 1 shortnode", "short node num", len(shortnodeList))
+				}
+				for _, snode := range shortnodeList {
+					if IsStorageTrieNode(key) {
+						storageEmbeddedNode++
+						//parse the path of fullnode
+						fullNodePath := key[1+common.HashLength:]
+						childPath = append(fullNodePath, byte(snode.Idx))
+						newKey := storageTrieNodeKey(common.BytesToHash(key[1:common.HashLength+1]), childPath)
+						log.Info("storage shortNode info", "trie key", key, "fullNode path", fullNodePath,
+							"childPath", childPath, "new Storage key", newKey)
+						/*
+							if err := db.Put(newKey, nodeValue); err != nil {
+								return err
+							}
 
-					*/
-				} else if IsAccountTrieNode(key) {
-					accountEmbeddedNode++
-					//parse the path of fullnode
-					fullNodePath := key[1:]
-					childPath = append(fullNodePath, byte(idx))
-					newKey := accountTrieNodeKey(childPath)
-					log.Info("storage shortNode info", "trie key", key, "fullNode path", fullNodePath,
-						"childPath", childPath, "new Storage key", newKey)
-					/*
-						if err := db.Put(newKey, nodeValue); err != nil {
-							return err
-						}
+						*/
+					} else if IsAccountTrieNode(key) {
+						accountEmbeddedNode++
+						//parse the path of fullnode
+						fullNodePath := key[1:]
+						childPath = append(fullNodePath, byte(snode.Idx))
+						newKey := accountTrieNodeKey(childPath)
+						log.Info("account shortNode info", "trie key", key, "fullNode path", fullNodePath,
+							"childPath", childPath, "new Storage key", newKey)
+						/*
+							if err := db.Put(newKey, nodeValue); err != nil {
+								return err
+							}
 
-					*/
+						*/
+					}
 				}
 			}
 
