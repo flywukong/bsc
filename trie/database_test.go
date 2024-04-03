@@ -43,10 +43,10 @@ func (r *testReader) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	panic("implement me")
 }
 
-// Node implements database.Reader interface, retrieving trie node with
+// Node implements database.Reader interface, retrieving trie Node with
 // all available cached layers.
 func (r *testReader) Node(owner common.Hash, path []byte, hash common.Hash) ([]byte, error) {
-	// Check the node presence with the cached layer, from latest to oldest.
+	// Check the Node presence with the cached layer, from latest to oldest.
 	for _, nodes := range r.nodes {
 		if _, ok := nodes.Sets[owner]; !ok {
 			continue
@@ -60,7 +60,7 @@ func (r *testReader) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 		}
 		return n.Blob, nil
 	}
-	// Check the node presence in database.
+	// Check the Node presence in database.
 	return rawdb.ReadTrieNode(r.db, owner, path, hash, r.scheme), nil
 }
 

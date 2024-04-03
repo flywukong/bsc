@@ -38,7 +38,7 @@ func TestEmptyIterator(t *testing.T) {
 		seen[string(iter.Path())] = struct{}{}
 	}
 	if len(seen) != 0 {
-		t.Fatal("Unexpected trie node iterated")
+		t.Fatal("Unexpected trie Node iterated")
 	}
 }
 
@@ -124,7 +124,7 @@ type iterationElement struct {
 	blob []byte
 }
 
-// Tests that the node iterator indeed walks over the entire database contents.
+// Tests that the Node iterator indeed walks over the entire database contents.
 func TestNodeIteratorCoverage(t *testing.T) {
 	testNodeIteratorCoverage(t, rawdb.HashScheme)
 	testNodeIteratorCoverage(t, rawdb.PathScheme)
@@ -134,7 +134,7 @@ func testNodeIteratorCoverage(t *testing.T, scheme string) {
 	// Create some arbitrary test trie to iterate
 	db, nodeDb, trie, _ := makeTestTrie(scheme)
 
-	// Gather all the node hashes found by the iterator
+	// Gather all the Node hashes found by the iterator
 	var elements = make(map[common.Hash]iterationElement)
 	for it := trie.MustNodeIterator(nil); it.Next(true); {
 		if it.Hash() != (common.Hash{}) {
@@ -152,9 +152,9 @@ func testNodeIteratorCoverage(t *testing.T, scheme string) {
 	}
 	for _, element := range elements {
 		if blob, err := reader.Node(common.Hash{}, element.path, element.hash); err != nil {
-			t.Errorf("failed to retrieve reported node %x: %v", element.hash, err)
+			t.Errorf("failed to retrieve reported Node %x: %v", element.hash, err)
 		} else if !bytes.Equal(blob, element.blob) {
-			t.Errorf("node blob is different, want %v got %v", element.blob, blob)
+			t.Errorf("Node blob is different, want %v got %v", element.blob, blob)
 		}
 	}
 	var (
@@ -170,7 +170,7 @@ func testNodeIteratorCoverage(t *testing.T, scheme string) {
 		if elem, ok := elements[crypto.Keccak256Hash(it.Value())]; !ok {
 			t.Error("state entry not reported")
 		} else if !bytes.Equal(it.Value(), elem.blob) {
-			t.Errorf("node blob is different, want %v got %v", elem.blob, it.Value())
+			t.Errorf("Node blob is different, want %v got %v", elem.blob, it.Value())
 		}
 	}
 	it.Release()
@@ -398,7 +398,7 @@ func testIteratorContinueAfterError(t *testing.T, memonly bool, scheme string) {
 		// Create trie that will load all nodes from DB.
 		tr, _ := New(TrieID(tr.Hash()), tdb)
 
-		// Remove a random node from the database. It can't be the root node
+		// Remove a random Node from the database. It can't be the root Node
 		// because that one is already loaded.
 		var (
 			rval  []byte
@@ -434,10 +434,10 @@ func testIteratorContinueAfterError(t *testing.T, memonly bool, scheme string) {
 		checkIteratorNoDups(t, it, seen)
 		missing, ok := it.Error().(*MissingNodeError)
 		if !ok || missing.NodeHash != rhash {
-			t.Fatal("didn't hit missing node, got", it.Error())
+			t.Fatal("didn't hit missing Node, got", it.Error())
 		}
 
-		// Add the node back and continue iteration.
+		// Add the Node back and continue iteration.
 		if memonly {
 			delete(tr.reader.banned, string(rpath))
 		} else {
@@ -448,7 +448,7 @@ func testIteratorContinueAfterError(t *testing.T, memonly bool, scheme string) {
 			t.Fatal("unexpected error", it.Error())
 		}
 		if len(seen) != wantNodeCount {
-			t.Fatal("wrong node iteration count, got", len(seen), "want", wantNodeCount)
+			t.Fatal("wrong Node iteration count, got", len(seen), "want", wantNodeCount)
 		}
 	}
 }
@@ -464,7 +464,7 @@ func TestIteratorContinueAfterSeekError(t *testing.T) {
 }
 
 func testIteratorContinueAfterSeekError(t *testing.T, memonly bool, scheme string) {
-	// Commit test trie to db, then remove the node containing "bars".
+	// Commit test trie to db, then remove the Node containing "bars".
 	var (
 		barNodePath []byte
 		barNodeHash = common.HexToHash("05041990364eb72fcb1127652ce40d8bab765f2bfe53225b1170d276cc101c2e")
@@ -497,15 +497,15 @@ func testIteratorContinueAfterSeekError(t *testing.T, memonly bool, scheme strin
 		rawdb.DeleteTrieNode(diskdb, common.Hash{}, barNodePath, barNodeHash, triedb.Scheme())
 	}
 	// Create a new iterator that seeks to "bars". Seeking can't proceed because
-	// the node is missing.
+	// the Node is missing.
 	it := tr.MustNodeIterator([]byte("bars"))
 	missing, ok := it.Error().(*MissingNodeError)
 	if !ok {
 		t.Fatal("want MissingNodeError, got", it.Error())
 	} else if missing.NodeHash != barNodeHash {
-		t.Fatal("wrong node missing")
+		t.Fatal("wrong Node missing")
 	}
-	// Reinsert the missing node.
+	// Reinsert the missing Node.
 	if memonly {
 		delete(tr.reader.banned, string(barNodePath))
 	} else {
@@ -523,7 +523,7 @@ func checkIteratorNoDups(t *testing.T, it NodeIterator, seen map[string]bool) in
 	}
 	for it.Next(true) {
 		if seen[string(it.Path())] {
-			t.Fatalf("iterator visited node path %x twice", it.Path())
+			t.Fatalf("iterator visited Node path %x twice", it.Path())
 		}
 		seen[string(it.Path())] = true
 	}
@@ -580,20 +580,20 @@ func testIteratorNodeBlob(t *testing.T, scheme string) {
 		}
 		got, present := found[crypto.Keccak256Hash(dbIter.Value())]
 		if !present {
-			t.Fatal("Miss trie node")
+			t.Fatal("Miss trie Node")
 		}
 		if !bytes.Equal(got, dbIter.Value()) {
-			t.Fatalf("Unexpected trie node want %v got %v", dbIter.Value(), got)
+			t.Fatalf("Unexpected trie Node want %v got %v", dbIter.Value(), got)
 		}
 		count += 1
 	}
 	if count != len(found) {
-		t.Fatal("Find extra trie node via iterator")
+		t.Fatal("Find extra trie Node via iterator")
 	}
 }
 
 // isTrieNode is a helper function which reports if the provided
-// database entry belongs to a trie node or not. Note in tests
+// database entry belongs to a trie Node or not. Note in tests
 // only single layer trie is used, namely storage trie is not
 // considered at all.
 func isTrieNode(scheme string, key, val []byte) (bool, []byte, common.Hash) {

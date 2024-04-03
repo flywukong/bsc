@@ -117,7 +117,7 @@ func fuzz(data []byte, debugging bool) {
 		nodeset  = make(map[string][]byte) // path -> blob
 		optionsC = NewStackTrieOptions().WithWriter(func(path []byte, hash common.Hash, blob []byte) {
 			if crypto.Keccak256Hash(blob) != hash {
-				panic("invalid node blob")
+				panic("invalid Node blob")
 			}
 			nodeset[string(path)] = common.CopyBytes(blob)
 		})
@@ -136,20 +136,20 @@ func fuzz(data []byte, debugging bool) {
 	for iterA.Next(true) {
 		if iterA.Hash() == (common.Hash{}) {
 			if _, present := nodeset[string(iterA.Path())]; present {
-				panic("unexpected tiny node")
+				panic("unexpected tiny Node")
 			}
 			continue
 		}
 		nodeBlob, present := nodeset[string(iterA.Path())]
 		if !present {
-			panic("missing node")
+			panic("missing Node")
 		}
 		if !bytes.Equal(nodeBlob, iterA.NodeBlob()) {
-			panic("node blob is not matched")
+			panic("Node blob is not matched")
 		}
 		checked += 1
 	}
 	if checked != len(nodeset) {
-		panic("node number is not matched")
+		panic("Node number is not matched")
 	}
 }

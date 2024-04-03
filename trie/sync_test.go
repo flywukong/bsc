@@ -31,7 +31,7 @@ import (
 	"github.com/ethereum/go-ethereum/trie/trienode"
 )
 
-// makeTestTrie create a sample test trie to test node-wise reconstruction.
+// makeTestTrie create a sample test trie to test Node-wise reconstruction.
 func makeTestTrie(scheme string) (ethdb.Database, *testDb, *StateTrie, map[string][]byte) {
 	// Create an empty trie
 	db := rawdb.NewMemoryDatabase()
@@ -123,7 +123,7 @@ func checkTrieConsistency(db ethdb.Database, scheme string, root common.Hash, ra
 	return it.Error()
 }
 
-// trieElement represents the element in the state trie(bytecode or trie node).
+// trieElement represents the element in the state trie(bytecode or trie Node).
 type trieElement struct {
 	path     string
 	hash     common.Hash
@@ -193,7 +193,7 @@ func testIterativeSync(t *testing.T, count int, bypath bool, scheme string) {
 				owner, inner := ResolvePath([]byte(element.path))
 				data, err := reader.Node(owner, inner, element.hash)
 				if err != nil {
-					t.Fatalf("failed to retrieve node data for hash %x: %v", element.hash, err)
+					t.Fatalf("failed to retrieve Node data for hash %x: %v", element.hash, err)
 				}
 				results[i] = NodeSyncResult{element.path, data}
 			}
@@ -201,7 +201,7 @@ func testIterativeSync(t *testing.T, count int, bypath bool, scheme string) {
 			for i, element := range elements {
 				data, _, err := srcTrie.GetNode(element.syncPath[len(element.syncPath)-1])
 				if err != nil {
-					t.Fatalf("failed to retrieve node data for path %x: %v", element.path, err)
+					t.Fatalf("failed to retrieve Node data for path %x: %v", element.path, err)
 				}
 				results[i] = NodeSyncResult{element.path, data}
 			}
@@ -268,7 +268,7 @@ func testIterativeDelayedSync(t *testing.T, scheme string) {
 			owner, inner := ResolvePath([]byte(element.path))
 			data, err := reader.Node(owner, inner, element.hash)
 			if err != nil {
-				t.Fatalf("failed to retrieve node data for %x: %v", element.hash, err)
+				t.Fatalf("failed to retrieve Node data for %x: %v", element.hash, err)
 			}
 			results[i] = NodeSyncResult{element.path, data}
 		}
@@ -337,7 +337,7 @@ func testIterativeRandomSync(t *testing.T, count int, scheme string) {
 			owner, inner := ResolvePath([]byte(element.path))
 			data, err := reader.Node(owner, inner, element.hash)
 			if err != nil {
-				t.Fatalf("failed to retrieve node data for %x: %v", element.hash, err)
+				t.Fatalf("failed to retrieve Node data for %x: %v", element.hash, err)
 			}
 			results = append(results, NodeSyncResult{path, data})
 		}
@@ -404,7 +404,7 @@ func testIterativeRandomDelayedSync(t *testing.T, scheme string) {
 			owner, inner := ResolvePath([]byte(element.path))
 			data, err := reader.Node(owner, inner, element.hash)
 			if err != nil {
-				t.Fatalf("failed to retrieve node data for %x: %v", element.hash, err)
+				t.Fatalf("failed to retrieve Node data for %x: %v", element.hash, err)
 			}
 			results = append(results, NodeSyncResult{path, data})
 
@@ -476,7 +476,7 @@ func testDuplicateAvoidanceSync(t *testing.T, scheme string) {
 			owner, inner := ResolvePath([]byte(element.path))
 			data, err := reader.Node(owner, inner, element.hash)
 			if err != nil {
-				t.Fatalf("failed to retrieve node data for %x: %v", element.hash, err)
+				t.Fatalf("failed to retrieve Node data for %x: %v", element.hash, err)
 			}
 			if _, ok := requested[element.hash]; ok {
 				t.Errorf("hash %x already requested once", element.hash)
@@ -552,7 +552,7 @@ func testIncompleteSync(t *testing.T, scheme string) {
 			owner, inner := ResolvePath([]byte(element.path))
 			data, err := reader.Node(owner, inner, element.hash)
 			if err != nil {
-				t.Fatalf("failed to retrieve node data for %x: %v", element.hash, err)
+				t.Fatalf("failed to retrieve Node data for %x: %v", element.hash, err)
 			}
 			results[i] = NodeSyncResult{element.path, data}
 		}
@@ -586,7 +586,7 @@ func testIncompleteSync(t *testing.T, scheme string) {
 			})
 		}
 	}
-	// Sanity check that removing any node from the database is detected
+	// Sanity check that removing any Node from the database is detected
 	for i, path := range addedKeys {
 		if rand.Int31n(100) > 5 {
 			// Only check 5 percent of added keys as a sanity check
@@ -643,7 +643,7 @@ func testSyncOrdering(t *testing.T, scheme string) {
 			owner, inner := ResolvePath([]byte(element.path))
 			data, err := reader.Node(owner, inner, element.hash)
 			if err != nil {
-				t.Fatalf("failed to retrieve node data for %x: %v", element.hash, err)
+				t.Fatalf("failed to retrieve Node data for %x: %v", element.hash, err)
 			}
 			results[i] = NodeSyncResult{element.path, data}
 		}
@@ -713,7 +713,7 @@ func syncWithHookWriter(t *testing.T, root common.Hash, db ethdb.Database, srcDb
 			owner, inner := ResolvePath([]byte(element.path))
 			data, err := reader.Node(owner, inner, element.hash)
 			if err != nil {
-				t.Fatalf("failed to retrieve node data for hash %x: %v", element.hash, err)
+				t.Fatalf("failed to retrieve Node data for hash %x: %v", element.hash, err)
 			}
 			results[i] = NodeSyncResult{element.path, data}
 		}
@@ -988,8 +988,8 @@ func testSyncAbort(t *testing.T, scheme string) {
 		panic(err)
 	}
 
-	// Sync the new state, but never persist the new root node. Before the
-	// fix #28595, the original old root node will still be left in database
+	// Sync the new state, but never persist the new root Node. Before the
+	// fix #28595, the original old root Node will still be left in database
 	// which breaks the next healing cycle.
 	syncWithHookWriter(t, rootB, destDisk, srcTrieDB, &hookWriter{db: destDisk, filter: func(key []byte, value []byte) bool {
 		if scheme == rawdb.HashScheme {

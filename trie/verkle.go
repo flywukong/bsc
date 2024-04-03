@@ -33,7 +33,7 @@ import (
 
 var (
 	zero               [32]byte
-	errInvalidRootType = errors.New("invalid node type for root")
+	errInvalidRootType = errors.New("invalid Node type for root")
 )
 
 // VerkleTrie is a wrapper around VerkleNode that implements the trie.Trie
@@ -50,7 +50,7 @@ func NewVerkleTrie(root common.Hash, db database.Database, cache *utils.PointCac
 	if err != nil {
 		return nil, err
 	}
-	// Parse the root verkle node if it's not empty.
+	// Parse the root verkle Node if it's not empty.
 	node := verkle.New()
 	if root != types.EmptyVerkleHash && root != types.EmptyRootHash {
 		blob, err := reader.node(nil, common.Hash{})
@@ -220,7 +220,7 @@ func (t *VerkleTrie) Hash() common.Hash {
 func (t *VerkleTrie) Commit(_ bool) (common.Hash, *trienode.NodeSet, error) {
 	root, ok := t.root.(*verkle.InternalNode)
 	if !ok {
-		return common.Hash{}, nil, errors.New("unexpected root node type")
+		return common.Hash{}, nil, errors.New("unexpected root Node type")
 	}
 	nodes, err := root.BatchSerialize()
 	if err != nil {
@@ -245,11 +245,11 @@ func (t *VerkleTrie) NodeIterator(startKey []byte) (NodeIterator, error) {
 
 // Prove implements state.Trie, constructing a Merkle proof for key. The result
 // contains all encoded nodes on the path to the value at key. The value itself
-// is also included in the last node and can be retrieved by verifying the proof.
+// is also included in the last Node and can be retrieved by verifying the proof.
 //
 // If the trie does not contain a value for key, the returned proof contains all
 // nodes of the longest existing prefix of the key (at least the root), ending
-// with the node that proves the absence of the key.
+// with the Node that proves the absence of the key.
 //
 // TODO(gballet, rjl493456442) implement it.
 func (t *VerkleTrie) Prove(key []byte, proofDb ethdb.KeyValueWriter) error {

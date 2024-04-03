@@ -28,10 +28,10 @@ import (
 // deleted nodes eventually.
 //
 // The changed nodes can be mainly divided into two categories: the leaf
-// node and intermediate node. The former is inserted/deleted by callers
+// Node and intermediate Node. The former is inserted/deleted by callers
 // while the latter is inserted/deleted in order to follow the rule of trie.
-// This tool can track all of them no matter the node is embedded in its
-// parent or not, but valueNode is never tracked.
+// This tool can track all of them no matter the Node is embedded in its
+// parent or not, but ValueNode is never tracked.
 //
 // Besides, it's also used for recording the original value of the nodes
 // when they are resolved from the disk. The pre-value of the nodes will
@@ -54,15 +54,15 @@ func newTracer() *tracer {
 	}
 }
 
-// onRead tracks the newly loaded trie node and caches the rlp-encoded
+// onRead tracks the newly loaded trie Node and caches the rlp-encoded
 // blob internally. Don't change the value outside of function since
 // it's not deep-copied.
 func (t *tracer) onRead(path []byte, val []byte) {
 	t.accessList[string(path)] = val
 }
 
-// onInsert tracks the newly inserted trie node. If it's already
-// in the deletion set (resurrected node), then just wipe it from
+// onInsert tracks the newly inserted trie Node. If it's already
+// in the deletion set (resurrected Node), then just wipe it from
 // the deletion set as it's "untouched".
 func (t *tracer) onInsert(path []byte) {
 	if _, present := t.deletes[string(path)]; present {
@@ -72,7 +72,7 @@ func (t *tracer) onInsert(path []byte) {
 	t.inserts[string(path)] = struct{}{}
 }
 
-// onDelete tracks the newly deleted trie node. If it's already
+// onDelete tracks the newly deleted trie Node. If it's already
 // in the addition set, then just wipe it from the addition set
 // as it's untouched.
 func (t *tracer) onDelete(path []byte) {
@@ -113,7 +113,7 @@ func (t *tracer) copy() *tracer {
 	}
 }
 
-// deletedNodes returns a list of node paths which are deleted from the trie.
+// deletedNodes returns a list of Node paths which are deleted from the trie.
 func (t *tracer) deletedNodes() []string {
 	var paths []string
 	for path := range t.deletes {

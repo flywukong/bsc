@@ -20,13 +20,14 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum/trie"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/olekukonko/tablewriter"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -649,6 +650,211 @@ func PruneHashTrieNodeInDataBase(db ethdb.Database) error {
 	return nil
 }
 
+/******************************************************************************/
+type TrieNode = node
+type TrieFullNode = fullNode
+type node interface {
+	// cache() (hashNode, bool)
+	// encode(w rlp.EncoderBuffer)
+	fstring(string) string
+}
+type (
+	fullNode struct {
+		Children [17]node // Actual trie node data to encode/decode (needs custom encoder)
+		flags    nodeFlag
+	}
+	shortNode struct {
+		Key   []byte
+		Val   node
+		flags nodeFlag
+	}
+	hashNode  []byte
+	valueNode []byte
+)
+
+// nodeFlag contains caching-related metadata about a node.
+type nodeFlag struct {
+	hash  hashNode // cached hash of the node (may be nil)
+	dirty bool     // whether the node has changes that must be written to the database
+}
+
+const hashLen = len(common.Hash{})
+
+func compactToHex(compact []byte) []byte {
+	if len(compact) == 0 {
+		return compact
+	}
+	base := keybytesToHex(compact)
+	// delete terminator flag
+	if base[0] < 2 {
+		base = base[:len(base)-1]
+	}
+	// apply odd flag
+	chop := 2 - base[0]&1
+	return base[chop:]
+}
+
+func keybytesToHex(str []byte) []byte {
+	l := len(str)*2 + 1
+	var nibbles = make([]byte, l)
+	for i, b := range str {
+		nibbles[i*2] = b / 16
+		nibbles[i*2+1] = b % 16
+	}
+	nibbles[l-1] = 16
+	return nibbles
+}
+
+// hasTerm returns whether a hex key has the terminator flag.
+func hasTerm(s []byte) bool {
+	return len(s) > 0 && s[len(s)-1] == 16
+}
+
+var indices = []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f", "[17]"}
+
+// Pretty printing.
+func (n *fullNode) String() string  { return n.fstring("") }
+func (n *shortNode) String() string { return n.fstring("") }
+func (n hashNode) String() string   { return n.fstring("") }
+func (n valueNode) String() string  { return n.fstring("") }
+
+func (n *fullNode) fstring(ind string) string {
+	resp := fmt.Sprintf("[\n%s  ", ind)
+	for i, node := range &n.Children {
+		if node == nil {
+			resp += fmt.Sprintf("%s: <nil> ", indices[i])
+		} else {
+			resp += fmt.Sprintf("%s: %v", indices[i], node.fstring(ind+"  "))
+		}
+	}
+	return resp + fmt.Sprintf("\n%s] ", ind)
+}
+func (n *shortNode) fstring(ind string) string {
+	return fmt.Sprintf("{%x: %v} ", n.Key, n.Val.fstring(ind+"  "))
+}
+func (n hashNode) fstring(ind string) string {
+	return fmt.Sprintf("<%x> ", []byte(n))
+}
+func (n valueNode) fstring(ind string) string {
+	return fmt.Sprintf("%x ", []byte(n))
+}
+
+func decodeRef(buf []byte) (node, []byte, error) {
+	kind, val, rest, err := rlp.Split(buf)
+	if err != nil {
+		return nil, buf, err
+	}
+	switch {
+	case kind == rlp.List:
+		// 'embedded' node reference. The encoding must be smaller
+		// than a hash in order to be valid.
+		if size := len(buf) - len(rest); size > hashLen {
+			err := fmt.Errorf("oversized embedded node (size is %d bytes, want size < %d)", size, hashLen)
+			return nil, buf, err
+		}
+		n, err := decodeValue(nil, buf)
+		return n, rest, err
+	case kind == rlp.String && len(val) == 0:
+		// empty node
+		return nil, rest, nil
+	case kind == rlp.String && len(val) == 32:
+		return hashNode(val), rest, nil
+	default:
+		return nil, nil, fmt.Errorf("invalid RLP string size %d (want 0 or 32)", len(val))
+	}
+}
+
+func decodeValue(hash, buf []byte) (node, error) {
+	if len(buf) == 0 {
+		return nil, io.ErrUnexpectedEOF
+	}
+	elems, _, err := rlp.SplitList(buf)
+	if err != nil {
+		return nil, fmt.Errorf("decode error: %v", err)
+	}
+	switch c, _ := rlp.CountValues(elems); c {
+	case 2:
+		n, err := decodeS(hash, elems)
+		// return n, wrapError(err, "short")
+		return n, fmt.Errorf("short: %v", err)
+	case 17:
+		n, err := decodeF(hash, elems)
+		return n, fmt.Errorf("full: %v", err)
+	default:
+		return nil, fmt.Errorf("invalid number of list elements: %v", c)
+	}
+}
+
+func decodeS(hash, elems []byte) (node, error) {
+	kbuf, rest, err := rlp.SplitString(elems)
+	if err != nil {
+		return nil, err
+	}
+	flag := nodeFlag{hash: hash}
+	key := compactToHex(kbuf)
+	if hasTerm(key) {
+		// value node
+		val, _, err := rlp.SplitString(rest)
+		if err != nil {
+			return nil, fmt.Errorf("invalid value node: %v", err)
+		}
+		return &shortNode{key, valueNode(val), flag}, nil
+	}
+	r, _, err := decodeRef(rest)
+	if err != nil {
+		return nil, fmt.Errorf("val: %v", err)
+	}
+	return &shortNode{key, r, flag}, nil
+}
+
+func decodeF(hash, elems []byte) (*fullNode, error) {
+	n := &fullNode{flags: nodeFlag{hash: hash}}
+	for i := 0; i < 16; i++ {
+		cld, rest, err := decodeRef(elems)
+		if err != nil {
+			return n, fmt.Errorf("err: %v", err)
+		}
+		n.Children[i], elems = cld, rest
+	}
+	val, _, err := rlp.SplitString(elems)
+	if err != nil {
+		return n, err
+	}
+	if len(val) > 0 {
+		n.Children[16] = valueNode(val)
+	}
+	return n, nil
+}
+
+func CheckIfContainShortNode(hash, buf []byte, fullNodeCount, shortNodeCount, otherNode *int) (node, error, int) {
+	n, err := decodeValue(hash, buf)
+	if err != nil {
+		return nil, err, 0
+	}
+
+	if fn, ok := n.(*fullNode); ok {
+		*fullNodeCount++
+		for i := 0; i < 17; i++ {
+			child := fn.Children[i]
+			// if it is a shortNode contained in fullnode
+			// return the shortNode
+			if sn, ok := child.(*shortNode); ok {
+				if vn, ok := sn.Val.(valueNode); ok {
+					log.Info("find shortNode inside fullnode", "fullnode", fn, "child idx", i,
+						"child", child, "vn", vn)
+					return sn, nil, i
+				}
+			}
+		}
+	} else if _, ok := n.(*shortNode); ok {
+		*shortNodeCount++
+	} else {
+		*otherNode++
+		log.Warn("not full node or short node in disk", "node", n)
+	}
+	return nil, nil, 0
+}
+
 // InspectDatabase traverses the entire database and checks the size
 // of all different categories of data.
 func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
@@ -932,7 +1138,7 @@ func IterateTrieState(db ethdb.Database) error {
 			defer h.release()
 			var newPath []byte
 			// if is full shortnodeInsideFull, check if it contains short shortnodeInsideFull
-			shortnodeInsideFull, err, idx := trie.CheckIfContainShortNode(hash.Bytes(), nodeValue, fullNodeCount, shortNodeCount, otherNodeCount)
+			shortnodeInsideFull, err, idx := CheckIfContainShortNode(hash.Bytes(), nodeValue, fullNodeCount, shortNodeCount, otherNodeCount)
 			if err != nil {
 				log.Error("decode trie shortnodeInsideFull err:", "err", err.Error())
 				//				return err

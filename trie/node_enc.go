@@ -20,7 +20,7 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
-func nodeToBytes(n node) []byte {
+func nodeToBytes(n Node) []byte {
 	w := rlp.NewEncoderBuffer(nil)
 	n.encode(w)
 	result := w.ToBytes()
@@ -28,7 +28,7 @@ func nodeToBytes(n node) []byte {
 	return result
 }
 
-func (n *fullNode) encode(w rlp.EncoderBuffer) {
+func (n *FullNode) encode(w rlp.EncoderBuffer) {
 	offset := w.List()
 	for _, c := range n.Children {
 		if c != nil {
@@ -40,7 +40,7 @@ func (n *fullNode) encode(w rlp.EncoderBuffer) {
 	w.ListEnd(offset)
 }
 
-func (n *shortNode) encode(w rlp.EncoderBuffer) {
+func (n *ShortNode) encode(w rlp.EncoderBuffer) {
 	offset := w.List()
 	w.WriteBytes(n.Key)
 	if n.Val != nil {
@@ -51,11 +51,11 @@ func (n *shortNode) encode(w rlp.EncoderBuffer) {
 	w.ListEnd(offset)
 }
 
-func (n hashNode) encode(w rlp.EncoderBuffer) {
+func (n HashNode) encode(w rlp.EncoderBuffer) {
 	w.WriteBytes(n)
 }
 
-func (n valueNode) encode(w rlp.EncoderBuffer) {
+func (n ValueNode) encode(w rlp.EncoderBuffer) {
 	w.WriteBytes(n)
 }
 

@@ -24,7 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/triedb/database"
 )
 
-// trieReader is a wrapper of the underlying node reader. It's not safe
+// trieReader is a wrapper of the underlying Node reader. It's not safe
 // for concurrent usage.
 type trieReader struct {
 	owner  common.Hash
@@ -32,7 +32,7 @@ type trieReader struct {
 	banned map[string]struct{} // Marker to prevent node from being accessed, for tests
 }
 
-// newTrieReader initializes the trie reader with the given node reader.
+// newTrieReader initializes the trie reader with the given Node reader.
 func newTrieReader(stateRoot, owner common.Hash, db database.Database) (*trieReader, error) {
 	if stateRoot == (common.Hash{}) || stateRoot == types.EmptyRootHash {
 		if stateRoot == (common.Hash{}) {
@@ -53,11 +53,11 @@ func newEmptyReader() *trieReader {
 	return &trieReader{}
 }
 
-// node retrieves the rlp-encoded trie node with the provided trie node
-// information. An MissingNodeError will be returned in case the node is
+// Node retrieves the rlp-encoded trie Node with the provided trie Node
+// information. An MissingNodeError will be returned in case the Node is
 // not found or any error is encountered.
 func (r *trieReader) node(path []byte, hash common.Hash) ([]byte, error) {
-	// Perform the logics in tests for preventing trie node access.
+	// Perform the logics in tests for preventing trie Node access.
 	if r.banned != nil {
 		if _, ok := r.banned[string(path)]; ok {
 			return nil, &MissingNodeError{Owner: r.owner, NodeHash: hash, Path: path}

@@ -59,7 +59,7 @@ func TestTrieTracer(t *testing.T) {
 }
 
 // Tests if the trie diffs are tracked correctly. Tracer should capture
-// all non-leaf dirty nodes, no matter the node is embedded or not.
+// all non-leaf dirty nodes, no matter the Node is embedded or not.
 func testTrieTracer(t *testing.T, vals []struct{ k, v string }) {
 	db := newTestDatabase(rawdb.NewMemoryDatabase(), rawdb.HashScheme)
 	trie := NewEmpty(db)
@@ -259,8 +259,8 @@ func TestAccessListLeak(t *testing.T) {
 	}
 }
 
-// Tests whether the original tree node is correctly deleted after being embedded
-// in its parent due to the smaller size of the original tree node.
+// Tests whether the original tree Node is correctly deleted after being embedded
+// in its parent due to the smaller size of the original tree Node.
 func TestTinyTree(t *testing.T) {
 	var (
 		db   = newTestDatabase(rawdb.NewMemoryDatabase(), rawdb.HashScheme)

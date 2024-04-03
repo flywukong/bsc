@@ -45,7 +45,7 @@ type StackTrieOptions struct {
 // NewStackTrieOptions initializes an empty options for stackTrie.
 func NewStackTrieOptions() *StackTrieOptions { return &StackTrieOptions{} }
 
-// WithWriter configures trie node writer within the options.
+// WithWriter configures trie Node writer within the options.
 func (o *StackTrieOptions) WithWriter(writer func(path []byte, hash common.Hash, blob []byte)) *StackTrieOptions {
 	o.Writer = writer
 	return o
@@ -130,15 +130,15 @@ func (t *StackTrie) Reset() {
 	t.last = nil
 }
 
-// stNode represents a node within a StackTrie
+// stNode represents a Node within a StackTrie
 type stNode struct {
-	typ      uint8       // node type (as in branch, ext, leaf)
-	key      []byte      // key chunk covered by this (leaf|ext) node
-	val      []byte      // value contained by this node if it's a leaf
+	typ      uint8       // Node type (as in branch, ext, leaf)
+	key      []byte      // key chunk covered by this (leaf|ext) Node
+	val      []byte      // value contained by this Node if it's a leaf
 	children [16]*stNode // list of children (for branch and exts)
 }
 
-// newLeaf constructs a leaf node with provided node key and value. The key
+// newLeaf constructs a leaf Node with provided Node key and value. The key
 // will be deep-copied in the function and safe to modify afterwards, but
 // value is not.
 func newLeaf(key, val []byte) *stNode {
@@ -149,7 +149,7 @@ func newLeaf(key, val []byte) *stNode {
 	return st
 }
 
-// newExt constructs an extension node with provided node key and child. The
+// newExt constructs an extension Node with provided Node key and child. The
 // key will be deep-copied in the function and safe to modify afterwards.
 func newExt(key []byte, child *stNode) *stNode {
 	st := stPool.Get().(*stNode)
@@ -219,20 +219,20 @@ func (t *StackTrie) insert(st *stNode, key, value []byte, path []byte) {
 		diffidx := st.getDiffIndex(key)
 
 		// Check if chunks are identical. If so, recurse into
-		// the child node. Otherwise, the key has to be split
+		// the child Node. Otherwise, the key has to be split
 		// into 1) an optional common prefix, 2) the fullnode
 		// representing the two differing path, and 3) a leaf
 		// for each of the differentiated subtrees.
 		if diffidx == len(st.key) {
 			// Ext key and key segment are identical, recurse into
-			// the child node.
+			// the child Node.
 			t.insert(st.children[0], key[diffidx:], value, append(path, key[:diffidx]...))
 			return
 		}
 		// Save the original part. Depending if the break is
 		// at the extension's last byte or not, create an
 		// intermediate extension or use the extension's child
-		// node directly.
+		// Node directly.
 		var n *stNode
 		if diffidx < len(st.key)-1 {
 			// Break on the non-last byte, insert an intermediate
@@ -242,7 +242,7 @@ func (t *StackTrie) insert(st *stNode, key, value []byte, path []byte) {
 			t.hash(n, append(path, st.key[:diffidx+1]...))
 		} else {
 			// Break on the last byte, no need to insert
-			// an extension node: reuse the current node.
+			// an extension Node: reuse the current Node.
 			// The path prefix of the original part should
 			// still be same.
 			n = st.children[0]
@@ -251,15 +251,15 @@ func (t *StackTrie) insert(st *stNode, key, value []byte, path []byte) {
 		var p *stNode
 		if diffidx == 0 {
 			// the break is on the first byte, so
-			// the current node is converted into
-			// a branch node.
+			// the current Node is converted into
+			// a branch Node.
 			st.children[0] = nil
 			p = st
 			st.typ = branchNode
 		} else {
 			// the common prefix is at least one byte
 			// long, insert a new intermediate branch
-			// node.
+			// Node.
 			st.children[0] = stPool.Get().(*stNode)
 			st.children[0].typ = branchNode
 			p = st.children[0]
@@ -298,8 +298,8 @@ func (t *StackTrie) insert(st *stNode, key, value []byte, path []byte) {
 			p = st
 			st.children[0] = nil
 		} else {
-			// Convert current node into an ext,
-			// and insert a child branch node.
+			// Convert current Node into an ext,
+			// and insert a child branch Node.
 			st.typ = extNode
 			st.children[0] = stPool.Get().(*stNode)
 			st.children[0].typ = branchNode
@@ -347,8 +347,8 @@ func (t *StackTrie) insert(st *stNode, key, value []byte, path []byte) {
 // This method also sets 'st.type' to hashedNode, and clears 'st.key'.
 func (t *StackTrie) hash(st *stNode, path []byte) {
 	var (
-		blob     []byte   // RLP-encoded node blob
-		internal [][]byte // List of node paths covered by the extension node
+		blob     []byte   // RLP-encoded Node blob
+		internal [][]byte // List of Node paths covered by the extension Node
 	)
 	switch st.typ {
 	case hashedNode:
@@ -361,7 +361,7 @@ func (t *StackTrie) hash(st *stNode, path []byte) {
 		return
 
 	case branchNode:
-		var nodes fullNode
+		var nodes FullNode
 		for i, child := range st.children {
 			if child == nil {
 				nodes.Children[i] = nilValueNode
@@ -372,7 +372,7 @@ func (t *StackTrie) hash(st *stNode, path []byte) {
 			if len(child.val) < 32 {
 				nodes.Children[i] = rawNode(child.val)
 			} else {
-				nodes.Children[i] = hashNode(child.val)
+				nodes.Children[i] = HashNode(child.val)
 			}
 			st.children[i] = nil
 			stPool.Put(child.reset()) // Release child back to pool.
@@ -384,7 +384,7 @@ func (t *StackTrie) hash(st *stNode, path []byte) {
 		// recursively hash and commit child as the first step
 		t.hash(st.children[0], append(path, st.key...))
 
-		// Collect the path of internal nodes between shortNode and its **in disk**
+		// Collect the path of internal nodes between ShortNode and its **in disk**
 		// child. This is essential in the case of path mode scheme to avoid leaving
 		// danging nodes within the range of this internal path on disk, which would
 		// break the guarantee for state healing.
@@ -393,12 +393,12 @@ func (t *StackTrie) hash(st *stNode, path []byte) {
 				internal = append(internal, append(path, st.key[:i]...))
 			}
 		}
-		// encode the extension node
-		n := shortNode{Key: hexToCompactInPlace(st.key)}
+		// encode the extension Node
+		n := ShortNode{Key: hexToCompactInPlace(st.key)}
 		if len(st.children[0].val) < 32 {
 			n.Val = rawNode(st.children[0].val)
 		} else {
-			n.Val = hashNode(st.children[0].val)
+			n.Val = HashNode(st.children[0].val)
 		}
 		n.encode(t.h.encbuf)
 		blob = t.h.encodedBytes()
@@ -408,19 +408,19 @@ func (t *StackTrie) hash(st *stNode, path []byte) {
 
 	case leafNode:
 		st.key = append(st.key, byte(16))
-		n := shortNode{Key: hexToCompactInPlace(st.key), Val: valueNode(st.val)}
+		n := ShortNode{Key: hexToCompactInPlace(st.key), Val: ValueNode(st.val)}
 
 		n.encode(t.h.encbuf)
 		blob = t.h.encodedBytes()
 
 	default:
-		panic("invalid node type")
+		panic("invalid Node type")
 	}
 
 	st.typ = hashedNode
 	st.key = st.key[:0]
 
-	// Skip committing the non-root node if the size is smaller than 32 bytes.
+	// Skip committing the non-root Node if the size is smaller than 32 bytes.
 	if len(blob) < 32 && len(path) > 0 {
 		st.val = common.CopyBytes(blob)
 		return
@@ -433,7 +433,7 @@ func (t *StackTrie) hash(st *stNode, path []byte) {
 	if t.options.Writer == nil {
 		return
 	}
-	// Skip committing if the node is on the left boundary and stackTrie is
+	// Skip committing if the Node is on the left boundary and stackTrie is
 	// configured to filter the boundary.
 	if t.options.SkipLeftBoundary && bytes.HasPrefix(t.first, path) {
 		if t.options.boundaryGauge != nil {
@@ -441,7 +441,7 @@ func (t *StackTrie) hash(st *stNode, path []byte) {
 		}
 		return
 	}
-	// Skip committing if the node is on the right boundary and stackTrie is
+	// Skip committing if the Node is on the right boundary and stackTrie is
 	// configured to filter the boundary.
 	if t.options.SkipRightBoundary && bytes.HasPrefix(t.last, path) {
 		if t.options.boundaryGauge != nil {
@@ -449,8 +449,8 @@ func (t *StackTrie) hash(st *stNode, path []byte) {
 		}
 		return
 	}
-	// Clean up the internal dangling nodes covered by the extension node.
-	// This should be done before writing the node to adhere to the committing
+	// Clean up the internal dangling nodes covered by the extension Node.
+	// This should be done before writing the Node to adhere to the committing
 	// order from bottom to top.
 	for _, path := range internal {
 		t.options.Cleaner(path)

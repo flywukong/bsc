@@ -44,7 +44,7 @@ type Inspector struct {
 	db             Database
 	stateRootHash  common.Hash
 	blocknum       uint64
-	root           node // root of triedb
+	root           Node // root of triedb
 	totalNum       uint64
 	wg             sync.WaitGroup
 	statLock       sync.RWMutex
@@ -65,19 +65,19 @@ type NodeStat struct {
 	ValueNodeCnt uint64
 }
 
-func (trieStat *TrieTreeStat) AtomicAdd(theNode node, height uint32) {
+func (trieStat *TrieTreeStat) AtomicAdd(theNode Node, height uint32) {
 	switch (theNode).(type) {
-	case *shortNode:
+	case *ShortNode:
 		atomic.AddUint64(&trieStat.totalNodeStat.ShortNodeCnt, 1)
 		atomic.AddUint64(&(trieStat.theNodeStatByLevel[height].ShortNodeCnt), 1)
-	case *fullNode:
+	case *FullNode:
 		atomic.AddUint64(&trieStat.totalNodeStat.FullNodeCnt, 1)
 		atomic.AddUint64(&trieStat.theNodeStatByLevel[height].FullNodeCnt, 1)
-	case valueNode:
+	case ValueNode:
 		atomic.AddUint64(&trieStat.totalNodeStat.ValueNodeCnt, 1)
 		atomic.AddUint64(&((trieStat.theNodeStatByLevel[height]).ValueNodeCnt), 1)
 	default:
-		panic(errors.New("Invalid node type to statistics"))
+		panic(errors.New("Invalid Node type to statistics"))
 	}
 }
 
@@ -170,27 +170,27 @@ func (inspect *Inspector) Run() {
 	inspect.wg.Wait()
 }
 
-func (inspect *Inspector) SubConcurrentTraversal(theTrie *Trie, theTrieTreeStat *TrieTreeStat, theNode node, height uint32, path []byte) {
+func (inspect *Inspector) SubConcurrentTraversal(theTrie *Trie, theTrieTreeStat *TrieTreeStat, theNode Node, height uint32, path []byte) {
 	inspect.ConcurrentTraversal(theTrie, theTrieTreeStat, theNode, height, path)
 	inspect.wg.Done()
 }
 
-func (inspect *Inspector) ConcurrentTraversal(theTrie *Trie, theTrieTreeStat *TrieTreeStat, theNode node, height uint32, path []byte) {
+func (inspect *Inspector) ConcurrentTraversal(theTrie *Trie, theTrieTreeStat *TrieTreeStat, theNode Node, height uint32, path []byte) {
 	// print process progress
 	total_num := atomic.AddUint64(&inspect.totalNum, 1)
 	if total_num%100000 == 0 {
 		fmt.Printf("Complete progress: %v, go routines Num: %v\n", total_num, runtime.NumGoroutine())
 	}
 
-	// nil node
+	// nil Node
 	if theNode == nil {
 		return
 	}
 
 	switch current := (theNode).(type) {
-	case *shortNode:
+	case *ShortNode:
 		inspect.ConcurrentTraversal(theTrie, theTrieTreeStat, current.Val, height, append(path, current.Key...))
-	case *fullNode:
+	case *FullNode:
 		for idx, child := range current.Children {
 			if child == nil {
 				continue
@@ -205,7 +205,7 @@ func (inspect *Inspector) ConcurrentTraversal(theTrie *Trie, theTrieTreeStat *Tr
 				inspect.ConcurrentTraversal(theTrie, theTrieTreeStat, child, height+1, childPath)
 			}
 		}
-	case hashNode:
+	case HashNode:
 		n, err := theTrie.resloveWithoutTrack(current, path)
 		if err != nil {
 			fmt.Printf("Resolve HashNode error: %v, TrieRoot: %v, Height: %v, Path: %v\n", err, theTrie.Hash().String(), height+1, path)
@@ -213,7 +213,7 @@ func (inspect *Inspector) ConcurrentTraversal(theTrie *Trie, theTrieTreeStat *Tr
 		}
 		inspect.ConcurrentTraversal(theTrie, theTrieTreeStat, n, height, path)
 		return
-	case valueNode:
+	case ValueNode:
 		if !hasTerm(path) {
 			break
 		}
@@ -230,7 +230,7 @@ func (inspect *Inspector) ConcurrentTraversal(theTrie *Trie, theTrieTreeStat *Tr
 		ownerAddress := common.BytesToHash(hexToCompact(path))
 		contractTrie, err := New(StorageTrieID(inspect.stateRootHash, ownerAddress, account.Root), inspect.db)
 		if err != nil {
-			fmt.Printf("New contract trie node: %v, error: %v, Height: %v, Path: %v\n", theNode, err, height, path)
+			fmt.Printf("New contract trie Node: %v, error: %v, Height: %v, Path: %v\n", theNode, err, height, path)
 			break
 		}
 		contractTrie.tracer.reset()
@@ -248,7 +248,7 @@ func (inspect *Inspector) ConcurrentTraversal(theTrie *Trie, theTrieTreeStat *Tr
 		inspect.wg.Add(1)
 		go inspect.SubConcurrentTraversal(contractTrie, trieStat, contractTrie.root, 0, []byte{})
 	default:
-		panic(errors.New("Invalid node type to traverse."))
+		panic(errors.New("Invalid Node type to traverse."))
 	}
 	theTrieTreeStat.AtomicAdd(theNode, height)
 }

@@ -445,7 +445,7 @@ func verifyAccessList(old *Trie, new *Trie, set *trienode.NodeSet) error {
 	for path := range inserts {
 		n, ok := set.Nodes[path]
 		if !ok || n.IsDeleted() {
-			return errors.New("expect new node")
+			return errors.New("expect new Node")
 		}
 		//if len(n.Prev) > 0 {
 		//	return errors.New("unexpected origin value")
@@ -455,7 +455,7 @@ func verifyAccessList(old *Trie, new *Trie, set *trienode.NodeSet) error {
 	for path := range deletes {
 		n, ok := set.Nodes[path]
 		if !ok || !n.IsDeleted() {
-			return errors.New("expect deleted node")
+			return errors.New("expect deleted Node")
 		}
 		//if len(n.Prev) == 0 {
 		//	return errors.New("expect origin value")
@@ -468,7 +468,7 @@ func verifyAccessList(old *Trie, new *Trie, set *trienode.NodeSet) error {
 	for path := range updates {
 		n, ok := set.Nodes[path]
 		if !ok || n.IsDeleted() {
-			return errors.New("expect updated node")
+			return errors.New("expect updated Node")
 		}
 		//if len(n.Prev) == 0 {
 		//	return errors.New("expect origin value")
@@ -601,12 +601,12 @@ func runRandTest(rt randTest) error {
 			}
 			for insert := range tr.tracer.inserts {
 				if _, present := insertExp[insert]; !present {
-					rt[i].err = errors.New("missing inserted node")
+					rt[i].err = errors.New("missing inserted Node")
 				}
 			}
 			for del := range tr.tracer.deletes {
 				if _, present := deleteExp[del]; !present {
-					rt[i].err = errors.New("missing deleted node")
+					rt[i].err = errors.New("missing deleted Node")
 				}
 			}
 		}

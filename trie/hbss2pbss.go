@@ -21,7 +21,7 @@ type Hbss2Pbss struct {
 	trie            *Trie // traverse trie
 	db              Database
 	blocknum        uint64
-	root            node // root of triedb
+	root            Node // root of triedb
 	stateRootHash   common.Hash
 	concurrentQueue chan struct{}
 	totalNum        uint64
@@ -55,8 +55,8 @@ func NewHbss2Pbss(tr *Trie, db Database, stateRootHash common.Hash, blocknum uin
 	return ins, nil
 }
 
-func (t *Trie) resloveWithoutTrack(n node, prefix []byte) (node, error) {
-	if n, ok := n.(hashNode); ok {
+func (t *Trie) resloveWithoutTrack(n Node, prefix []byte) (Node, error) {
+	if n, ok := n.(HashNode); ok {
 		blob, err := t.reader.node(prefix, common.BytesToHash(n))
 		if err != nil {
 			return nil, err
@@ -69,10 +69,10 @@ func (t *Trie) resloveWithoutTrack(n node, prefix []byte) (node, error) {
 func (h2p *Hbss2Pbss) writeNode(pathKey []byte, n *trienode.Node, owner common.Hash) {
 	if owner == (common.Hash{}) {
 		rawdb.WriteAccountTrieNode(h2p.db.DiskDB(), pathKey, n.Blob)
-		log.Debug("WriteNodes account node, ", "path: ", common.Bytes2Hex(pathKey), "Hash: ", n.Hash, "BlobHash: ", crypto.Keccak256Hash(n.Blob))
+		log.Debug("WriteNodes account Node, ", "path: ", common.Bytes2Hex(pathKey), "Hash: ", n.Hash, "BlobHash: ", crypto.Keccak256Hash(n.Blob))
 	} else {
 		rawdb.WriteStorageTrieNode(h2p.db.DiskDB(), owner, pathKey, n.Blob)
-		log.Debug("WriteNodes storage node, ", "path: ", common.Bytes2Hex(pathKey), "owner: ", owner.String(), "Hash: ", n.Hash, "BlobHash: ", crypto.Keccak256Hash(n.Blob))
+		log.Debug("WriteNodes storage Node, ", "path: ", common.Bytes2Hex(pathKey), "owner: ", owner.String(), "Hash: ", n.Hash, "BlobHash: ", crypto.Keccak256Hash(n.Blob))
 	}
 }
 
@@ -89,22 +89,22 @@ func (h2p *Hbss2Pbss) Run() {
 	rawdb.WriteStateID(h2p.db.DiskDB(), h2p.stateRootHash, h2p.blocknum)
 }
 
-func (h2p *Hbss2Pbss) SubConcurrentTraversal(theTrie *Trie, theNode node, path []byte) {
+func (h2p *Hbss2Pbss) SubConcurrentTraversal(theTrie *Trie, theNode Node, path []byte) {
 	h2p.concurrentQueue <- struct{}{}
 	h2p.ConcurrentTraversal(theTrie, theNode, path)
 	<-h2p.concurrentQueue
 	h2p.wg.Done()
 }
 
-func (h2p *Hbss2Pbss) ConcurrentTraversal(theTrie *Trie, theNode node, path []byte) {
+func (h2p *Hbss2Pbss) ConcurrentTraversal(theTrie *Trie, theNode Node, path []byte) {
 	total_num := uint64(0)
-	// nil node
+	// nil Node
 	if theNode == nil {
 		return
 	}
 
 	switch current := (theNode).(type) {
-	case *shortNode:
+	case *ShortNode:
 		collapsed := current.copy()
 		collapsed.Key = hexToCompact(current.Key)
 		var hash, _ = current.cache()
@@ -112,7 +112,7 @@ func (h2p *Hbss2Pbss) ConcurrentTraversal(theTrie *Trie, theNode node, path []by
 
 		h2p.ConcurrentTraversal(theTrie, current.Val, append(path, current.Key...))
 
-	case *fullNode:
+	case *FullNode:
 		// copy from trie/Committer (*committer).commit
 		collapsed := current.copy()
 		var hash, _ = collapsed.cache()
@@ -120,7 +120,7 @@ func (h2p *Hbss2Pbss) ConcurrentTraversal(theTrie *Trie, theNode node, path []by
 
 		nodebytes := nodeToBytes(collapsed)
 		if common.BytesToHash(hash) != common.BytesToHash(crypto.Keccak256(nodebytes)) {
-			log.Error("Hash is inconsistent, hash: ", common.BytesToHash(hash), "node hash: ", common.BytesToHash(crypto.Keccak256(nodebytes)), "node: ", collapsed.fstring(""))
+			log.Error("Hash is inconsistent, hash: ", common.BytesToHash(hash), "Node hash: ", common.BytesToHash(crypto.Keccak256(nodebytes)), "Node: ", collapsed.fstring(""))
 			panic("hash inconsistent.")
 		}
 
@@ -140,7 +140,7 @@ func (h2p *Hbss2Pbss) ConcurrentTraversal(theTrie *Trie, theNode node, path []by
 				h2p.ConcurrentTraversal(theTrie, child, childPath)
 			}
 		}
-	case hashNode:
+	case HashNode:
 		n, err := theTrie.resloveWithoutTrack(current, path)
 		if err != nil {
 			log.Error("Resolve HashNode", "error", err, "TrieRoot", theTrie.Hash(), "Path", path)
@@ -152,7 +152,7 @@ func (h2p *Hbss2Pbss) ConcurrentTraversal(theTrie *Trie, theNode node, path []by
 			log.Info("Converting ", "Complete progress", total_num, "go routines Num", runtime.NumGoroutine(), "h2p concurrentQueue", len(h2p.concurrentQueue))
 		}
 		return
-	case valueNode:
+	case ValueNode:
 		if !hasTerm(path) {
 			log.Info("ValueNode miss path term", "path", common.Bytes2Hex(path))
 			break
@@ -177,13 +177,13 @@ func (h2p *Hbss2Pbss) ConcurrentTraversal(theTrie *Trie, theNode node, path []by
 		h2p.wg.Add(1)
 		go h2p.SubConcurrentTraversal(tr, tr.root, []byte{})
 	default:
-		panic(errors.New("Invalid node type to traverse."))
+		panic(errors.New("Invalid Node type to traverse."))
 	}
 }
 
 // copy from trie/Commiter (*committer).commit
-func (h2p *Hbss2Pbss) commitChildren(path []byte, n *fullNode) [17]node {
-	var children [17]node
+func (h2p *Hbss2Pbss) commitChildren(path []byte, n *FullNode) [17]Node {
+	var children [17]Node
 	for i := 0; i < 16; i++ {
 		child := n.Children[i]
 		if child == nil {
@@ -191,8 +191,8 @@ func (h2p *Hbss2Pbss) commitChildren(path []byte, n *fullNode) [17]node {
 		}
 		// If it's the hashed child, save the hash value directly.
 		// Note: it's impossible that the child in range [0, 15]
-		// is a valueNode.
-		if hn, ok := child.(hashNode); ok {
+		// is a ValueNode.
+		if hn, ok := child.(HashNode); ok {
 			children[i] = hn
 			continue
 		}
@@ -206,8 +206,8 @@ func (h2p *Hbss2Pbss) commitChildren(path []byte, n *fullNode) [17]node {
 	return children
 }
 
-// commit collapses a node down into a hash node and returns it.
-func (h2p *Hbss2Pbss) commit(path []byte, n node) node {
+// commit collapses a Node down into a hash Node and returns it.
+func (h2p *Hbss2Pbss) commit(path []byte, n Node) Node {
 	// if this path is clean, use available cached data
 	hash, dirty := n.cache()
 	if hash != nil && !dirty {
@@ -215,29 +215,29 @@ func (h2p *Hbss2Pbss) commit(path []byte, n node) node {
 	}
 	// Commit children, then parent, and remove the dirty flag.
 	switch cn := n.(type) {
-	case *shortNode:
+	case *ShortNode:
 		// Commit child
 		collapsed := cn.copy()
 
-		// If the child is fullNode, recursively commit,
-		// otherwise it can only be hashNode or valueNode.
-		if _, ok := cn.Val.(*fullNode); ok {
+		// If the child is FullNode, recursively commit,
+		// otherwise it can only be HashNode or ValueNode.
+		if _, ok := cn.Val.(*FullNode); ok {
 			collapsed.Val = h2p.commit(append(path, cn.Key...), cn.Val)
 		}
 		// The key needs to be copied, since we're adding it to the
 		// modified nodeset.
 		collapsed.Key = hexToCompact(cn.Key)
 		return collapsed
-	case *fullNode:
+	case *FullNode:
 		hashedKids := h2p.commitChildren(path, cn)
 		collapsed := cn.copy()
 		collapsed.Children = hashedKids
 
 		return collapsed
-	case hashNode:
+	case HashNode:
 		return cn
 	default:
 		// nil, valuenode shouldn't be committed
-		panic(fmt.Sprintf("%T: invalid node: %v", n, n))
+		panic(fmt.Sprintf("%T: invalid Node: %v", n, n))
 	}
 }
