@@ -1157,7 +1157,7 @@ func IterateTrieState(db ethdb.Database) error {
 			h := newHasher()
 			hash := h.hash(it.Value())
 			h.release()
-			var newPath []byte
+			var childPath []byte
 			// if is full shortnodeInsideFull, check if it contains short shortnodeInsideFull
 			shortnodeInsideFull, err, idx := CheckIfContainShortNode(hash.Bytes(), it.Value(), fullNodeCount, shortNodeCount, otherNodeCount)
 			if err != nil {
@@ -1172,10 +1172,10 @@ func IterateTrieState(db ethdb.Database) error {
 					storageEmbeddedNode++
 					//parse the path of fullnode
 					fullNodePath := key[1+common.HashLength:]
-					newPath = append(fullNodePath, byte(idx))
-					newKey := storageTrieNodeKey(common.BytesToHash(key[1:common.HashLength+1]), newPath)
+					childPath = append(fullNodePath, byte(idx))
+					newKey := storageTrieNodeKey(common.BytesToHash(key[1:common.HashLength+1]), childPath)
 					log.Info("storage shortNode info", "trie key", key, "fullNode path", fullNodePath,
-						"newPath", newPath, "new Storage key", newKey)
+						"childPath", childPath, "new Storage key", newKey)
 					/*
 						if err := db.Put(newKey, nodeValue); err != nil {
 							return err
@@ -1186,10 +1186,10 @@ func IterateTrieState(db ethdb.Database) error {
 					accountEmbeddedNode++
 					//parse the path of fullnode
 					fullNodePath := key[1:]
-					newPath = append(fullNodePath, byte(idx))
-					newKey := accountTrieNodeKey(newPath)
+					childPath = append(fullNodePath, byte(idx))
+					newKey := accountTrieNodeKey(childPath)
 					log.Info("storage shortNode info", "trie key", key, "fullNode path", fullNodePath,
-						"newPath", newPath, "new Storage key", newKey)
+						"childPath", childPath, "new Storage key", newKey)
 					/*
 						if err := db.Put(newKey, nodeValue); err != nil {
 							return err
