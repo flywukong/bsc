@@ -131,7 +131,7 @@ func (h2p *Hbss2Pbss) ConcurrentTraversal(theTrie *Trie, theNode Node, path []by
 				continue
 			}
 			childPath := append(path, byte(idx))
-			log.Info("path info", "path", path, "child path", childPath)
+			log.Info("path info", "path", path, "idx", idx, "child path", childPath)
 			if len(h2p.concurrentQueue)*2 < cap(h2p.concurrentQueue) {
 				h2p.wg.Add(1)
 				dst := make([]byte, len(childPath))
