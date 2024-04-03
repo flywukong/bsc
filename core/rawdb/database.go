@@ -1156,7 +1156,7 @@ func IterateTrieState(db ethdb.Database) error {
 			//	copy(nodeValue, it.Value())
 			h := newHasher()
 			hash := h.hash(it.Value())
-			defer h.release()
+			h.release()
 			var newPath []byte
 			// if is full shortnodeInsideFull, check if it contains short shortnodeInsideFull
 			shortnodeInsideFull, err, idx := CheckIfContainShortNode(hash.Bytes(), it.Value(), fullNodeCount, shortNodeCount, otherNodeCount)
