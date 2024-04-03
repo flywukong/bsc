@@ -1152,19 +1152,20 @@ func IterateTrieState(db ethdb.Database) error {
 			if !isValid(key) {
 				continue
 			}
-			nodeValue := make([]byte, len(it.Value()))
-			copy(nodeValue, it.Value())
+			//	nodeValue := make([]byte, len(it.Value()))
+			//	copy(nodeValue, it.Value())
 			h := newHasher()
 			hash := h.hash(it.Value())
 			defer h.release()
 			var newPath []byte
 			// if is full shortnodeInsideFull, check if it contains short shortnodeInsideFull
-			shortnodeInsideFull, err, idx := CheckIfContainShortNode(hash.Bytes(), nodeValue, fullNodeCount, shortNodeCount, otherNodeCount)
+			shortnodeInsideFull, err, idx := CheckIfContainShortNode(hash.Bytes(), it.Value(), fullNodeCount, shortNodeCount, otherNodeCount)
 			if err != nil {
 				log.Error("decode trie shortnodeInsideFull err:", "err", err.Error())
 				//				return err
 				continue
 			}
+
 			// find shorNode inside the fullnode
 			if shortnodeInsideFull != nil {
 				if IsStorageTrieNode(key) {
