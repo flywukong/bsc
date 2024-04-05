@@ -892,8 +892,10 @@ func checkIfContainShortNode(hash, buf []byte, fullNodeCount, shortNodeCount, ot
 			}
 		}
 		return shortNodeInfoList, nil
-	} else if _, ok := n.(*shortNode); ok {
-		*shortNodeCount++
+	} else if sn2, ok := n.(*shortNode); ok {
+		if _, ok := sn2.Val.(valueNode); ok {
+			*shortNodeCount++
+		}
 	} else {
 		*otherNode++
 		log.Warn("not full node or short node in disk", "node", n)
@@ -1178,8 +1180,7 @@ func IterateTrieState(db ethdb.Database) error {
 			if !isValid(key) {
 				continue
 			}
-			//	nodeValue := make([]byte, len(it.Value()))
-			//	copy(nodeValue, it.Value())
+
 			h := newHasher()
 			hash := h.hash(it.Value())
 			h.release()
