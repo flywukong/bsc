@@ -402,6 +402,15 @@ func (db *Database) GetAllRooHash() [][]string {
 	return pdb.GetAllRooHash()
 }
 
+func (db *Database) GetBottomHash() common.Hash {
+	pdb, ok := db.backend.(*pathdb.Database)
+	if !ok {
+		log.Error("Not supported")
+		return common.Hash{}
+	}
+	return pdb.GetBottomHash()
+}
+
 // IsVerkle returns the indicator if the database is holding a verkle tree.
 func (db *Database) IsVerkle() bool {
 	return db.config.IsVerkle

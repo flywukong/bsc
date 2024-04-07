@@ -93,6 +93,9 @@ Remove blockchain and state databases`,
 			dbHbss2PbssCmd,
 			dbTrieGetCmd,
 			dbTrieDeleteCmd,
+			dbStoreEmbeddedCmd,
+			dbCompareEmbeddedCmd,
+			dbDeleteStableTrieCmd,
 		},
 	}
 	dbInspectCmd = &cli.Command{
@@ -116,6 +119,37 @@ Remove blockchain and state databases`,
 		Usage:       "Inspect the MPT tree of the account and contract.",
 		Description: `This commands iterates the entrie WorldState.`,
 	}
+
+	dbStoreEmbeddedCmd = &cli.Command{
+		Action: refactorEmbeddedNode,
+		Name:   "add-embedded",
+		Usage:  "Add the embedded shortNode",
+		Flags: flags.Merge([]cli.Flag{
+			utils.SyncModeFlag,
+		}, utils.NetworkFlags, utils.DatabaseFlags),
+		Description: `This command redundancy store store the embedded shortNode.`,
+	}
+
+	dbCompareEmbeddedCmd = &cli.Command{
+		Action: compareMPT,
+		Name:   "compare-mpt",
+		Usage:  "Add the embedded shortNode",
+		Flags: flags.Merge([]cli.Flag{
+			utils.SyncModeFlag,
+		}, utils.NetworkFlags, utils.DatabaseFlags),
+		Description: `This command redundancy store store the embedded shortNode.`,
+	}
+
+	dbDeleteStableTrieCmd = &cli.Command{
+		Action: deleteStaleTrie,
+		Name:   "del-stale",
+		Usage:  "Delete stable trie",
+		Flags: flags.Merge([]cli.Flag{
+			utils.SyncModeFlag,
+		}, utils.NetworkFlags, utils.DatabaseFlags),
+		Description: `This command delete the trie node with the account which root is nil.`,
+	}
+
 	dbCheckStateContentCmd = &cli.Command{
 		Action:    checkStateContent,
 		Name:      "check-state-content",
@@ -1309,5 +1343,142 @@ func hbss2pbss(ctx *cli.Context) error {
 		log.Error("Prune Hash trie node in database failed", "error", err)
 		return err
 	}
+	return nil
+}
+
+func refactorEmbeddedNode(ctx *cli.Context) error {
+	stack, _ := makeConfigNode(ctx)
+	defer stack.Close()
+
+	chaindb := utils.MakeChainDatabase(ctx, stack, true, false)
+	defer chaindb.Close()
+
+	log.Info("open chain db finish")
+	if rawdb.ReadStateScheme(chaindb) != rawdb.PathScheme {
+		log.Crit("refactor emedded node is not required for hash scheme")
+	}
+
+	embeddedNodesStorer := trie.NewEmbeddedNodeRestorer(chaindb)
+
+	triedb := utils.MakeTrieDatabase(ctx, chaindb, false, true, false)
+	defer triedb.Close()
+	log.Info("open trie db finish")
+
+	embeddedNodesStorer.TrieDB = triedb
+	defer triedb.Close()
+
+	destDir := ctx.Args().Get(0)
+
+	return embeddedNodesStorer.WriteNewTrie(destDir)
+}
+
+func compareMPT(ctx *cli.Context) error {
+	stack, _ := makeConfigNode(ctx)
+	defer stack.Close()
+
+	chaindb := utils.MakeChainDatabase(ctx, stack, true, false)
+	defer chaindb.Close()
+
+	log.Info("open chain db finish")
+	if rawdb.ReadStateScheme(chaindb) != rawdb.PathScheme {
+		log.Crit("refactor emedded node is not required for hash scheme")
+	}
+	embeddedNodesStorer := trie.NewEmbeddedNodeRestorer(chaindb)
+	triedb := utils.MakeTrieDatabase(ctx, chaindb, false, true, false)
+	defer triedb.Close()
+	log.Info("open trie db finish")
+	embeddedNodesStorer.TrieDB = triedb
+
+	destDir := ctx.Args().Get(0)
+	newDB := utils.MakeNewDBDatabase(ctx, stack, true, false, destDir)
+	embeddedNodesStorer.NewDB = newDB
+	defer newDB.Close()
+	newTrieDB := utils.MakeTrieDatabase(ctx, newDB, false, true, false)
+	embeddedNodesStorer.NewTrieDB = newTrieDB
+
+	defer newTrieDB.Close()
+	return embeddedNodesStorer.CompareTrie()
+}
+
+func deleteStaleTrie(ctx *cli.Context) error {
+	if ctx.NArg() > 0 {
+		return fmt.Errorf("no arguments required")
+	}
+	logged := time.Now()
+	stack, _ := makeConfigNode(ctx)
+	defer stack.Close()
+
+	chaindb := utils.MakeChainDatabase(ctx, stack, false, false)
+	defer chaindb.Close()
+
+	triedb := triedb.NewDatabase(chaindb, &triedb.Config{
+		Preimages: false,
+		PathDB:    pathdb.Defaults,
+	})
+	defer triedb.Close()
+
+	_, diskRoot := rawdb.ReadAccountTrieNode(chaindb, nil)
+	diskRoot = types.TrieRootHash(diskRoot)
+	log.Info("disk root info", "hash", diskRoot)
+
+	t, err := trie.NewStateTrie(trie.StateTrieID(diskRoot), triedb)
+	if err != nil {
+		log.Error("Failed to open trie", "root", diskRoot, "err", err)
+		return err
+	}
+	if t == nil {
+		return errors.New("trie empty")
+	}
+
+	var (
+		it  ethdb.Iterator
+		key []byte
+	)
+
+	it = chaindb.NewIterator(rawdb.TrieNodeStoragePrefix, nil)
+	storageDirty := 0
+	accountDirty := 0
+	var dirtyAccount string
+	for it.Next() {
+		key = it.Key()
+		if !rawdb.IsStorageTrieNode(key) {
+			continue
+		}
+
+		// Get Account Hash
+		accountHash := common.BytesToHash(key[1 : 1+common.HashLength])
+		// Read Account Hash from trie
+		stateAcc, err := t.GetAccountByHash(accountHash)
+		if err != nil {
+			return err
+		}
+
+		// if account.root == empty,  deleteRange(Account)
+		emptyHash := common.Hash{}
+		if stateAcc == nil || stateAcc.Root == emptyHash {
+			if dirtyAccount != accountHash.String() {
+				dirtyAccount = accountHash.String()
+				accountDirty++
+			}
+			if stateAcc != nil {
+				log.Info("state account info", "db key", common.Bytes2Hex(key), "account", common.Bytes2Hex(accountHash.Bytes()),
+					"account root", stateAcc.Root, "code hash", stateAcc.CodeHash)
+			}
+			storageDirty++
+			if stateAcc != nil && stateAcc.Root == emptyHash {
+				log.Info("state account hash empty")
+			} else {
+				log.Info("account is nil", "db key", common.Bytes2Hex(key), "account", common.Bytes2Hex(accountHash.Bytes()))
+			}
+			// log.Info("range deleting the stale trie", "account hash", accountHash)
+			//	rawdb.DeleteStorageTrie(chaindb, accountHash)
+		}
+		if time.Since(logged) > 30*time.Second {
+			log.Info("Checking dirty state", "account dirty", accountDirty, "storage dirty", storageDirty)
+			logged = time.Now()
+		}
+	}
+	it.Release()
+	log.Info("Checking dirty state finish", "account dirty", accountDirty, "storage dirty", storageDirty)
 	return nil
 }
