@@ -78,17 +78,19 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 					if rawdb.IsStorageTrieNode(key) {
 						// full node path
 						valueNodePath := key[1+common.HashLength:]
+						valueNodePath2 := key[1+common.HashLength:]
 						log.Info("found value path0", "path", valueNodePath, "len", len(valueNodePath),
-							"len2", compactToHex(valueNodePath))
+							"len2", len(compactToHex(valueNodePath)))
 						// add index
 						valueNodePath = append(valueNodePath, byte(i))
+						valueNodePath2 = append(valueNodePath2, byte(i))
 						log.Info("found value path1", "path", valueNodePath, "len", len(valueNodePath))
 						// add short node prefix
 						valueNodePath = append(valueNodePath, rawdb.EncodeNibbles(sn.Key)...)
 						log.Info("found value path2", "path", valueNodePath, "len", len(valueNodePath))
 
 						log.Info("found value path3", "len1", hexToCompact(sn.Key), "len2", len(hexToCompact(sn.Key)),
-							"len3", len(sn.Key))
+							"len3", len(sn.Key), "len4", len(hexToKeybytes(append(valueNodePath2, sn.Key...))))
 						// 32-bit key should be 64-bit after nibbles  encoding
 						if len(valueNodePath) == 64 {
 							stat.EmbeddedNodeCnt++
