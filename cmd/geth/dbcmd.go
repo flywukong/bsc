@@ -90,6 +90,7 @@ Remove blockchain and state databases`,
 			dbHbss2PbssCmd,
 			dbTrieGetCmd,
 			dbTrieDeleteCmd,
+			dbStoreEmbeddedCmd,
 		},
 	}
 	dbInspectCmd = &cli.Command{
@@ -113,6 +114,17 @@ Remove blockchain and state databases`,
 		Usage:       "Inspect the MPT tree of the account and contract.",
 		Description: `This commands iterates the entrie WorldState.`,
 	}
+
+	dbStoreEmbeddedCmd = &cli.Command{
+		Action: refactorEmbeddedNode,
+		Name:   "add-embedded",
+		Usage:  "Add the embedded shortNode",
+		Flags: flags.Merge([]cli.Flag{
+			utils.SyncModeFlag,
+		}, utils.NetworkFlags, utils.DatabaseFlags),
+		Description: `This command redundancy store store the embedded shortNode.`,
+	}
+
 	dbCheckStateContentCmd = &cli.Command{
 		Action:    checkStateContent,
 		Name:      "check-state-content",
@@ -1215,4 +1227,23 @@ func hbss2pbss(ctx *cli.Context) error {
 		return err
 	}
 	return nil
+}
+
+func refactorEmbeddedNode(ctx *cli.Context) error {
+	if ctx.NArg() > 0 {
+		return fmt.Errorf("no arguments required")
+	}
+
+	stack, _ := makeConfigNode(ctx)
+	defer stack.Close()
+
+	chaindb := utils.MakeChainDatabase(ctx, stack, false, false)
+	defer chaindb.Close()
+
+	if rawdb.ReadStateScheme(chaindb) != rawdb.PathScheme {
+		log.Crit("refactor emedded node is not required for hash scheme")
+	}
+
+	embeddedNodesStorer := trie.NewEmbeddedNodeRestorer(chaindb)
+	return embeddedNodesStorer.Run()
 }
