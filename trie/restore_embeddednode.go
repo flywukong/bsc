@@ -73,26 +73,20 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 					panic("should not exist child[17] in secure trie")
 				}
 				if vn, ok := sn.Val.(valueNode); ok {
-					log.Info("found shortNode inside full node", "full node info", fn, "child idx", i,
-						"child", child, "value", vn)
 					if rawdb.IsStorageTrieNode(key) {
 						// full node path
 						valueNodePath := key[1+common.HashLength:]
-						valueNodePath2 := key[1+common.HashLength:]
-						log.Info("found value path0", "path", valueNodePath, "len", len(valueNodePath),
-							"len2", len(compactToHex(valueNodePath)))
 						// add index
 						valueNodePath = append(valueNodePath, byte(i))
-						valueNodePath2 = append(valueNodePath2, byte(i))
-						log.Info("found value path1", "path", valueNodePath, "len", len(valueNodePath))
 						// add short node prefix
-						valueNodePath = append(valueNodePath, rawdb.EncodeNibbles(sn.Key)...)
-						log.Info("found value path2", "path", valueNodePath, "len", len(valueNodePath))
-
-						log.Info("found value path3", "len1", hexToCompact(sn.Key), "len2", len(hexToCompact(sn.Key)),
-							"len3", len(sn.Key), "len4", len(hexToKeybytes(append(valueNodePath2, sn.Key...))))
+						//	valueNodePath = append(valueNodePath, rawdb.EncodeNibbles(sn.Key)...)
+						//	log.Info("found value path2", "path", valueNodePath, "len", len(valueNodePath))
+						//		log.Info("found value path3", "len1", hexToCompact(sn.Key), "len2", len(hexToCompact(sn.Key)),
+						//		"len3", len(sn.Key), "len4", len(hexToKeybytes(append(valueNodePath2, sn.Key...))))
 						// 32-bit key should be 64-bit after nibbles  encoding
-						if len(valueNodePath) == 64 {
+						if len(hexToKeybytes(append(valueNodePath, sn.Key...))) == 32 {
+							log.Info("found short leaf Node inside full node", "full node info", fn, "child idx", i,
+								"child", child, "value", vn)
 							stat.EmbeddedNodeCnt++
 							shortNodeInfoList = append(shortNodeInfoList,
 								shorNodeInfo{NodeBytes: nodeToBytes(child), Idx: i})
@@ -107,18 +101,16 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 		if _, ok := sn.Val.(valueNode); ok {
 			if rawdb.IsStorageTrieNode(key) {
 				shortNodePath := key[1+common.HashLength:]
-				log.Info("found short path1 storage", "path", shortNodePath, "len", len(shortNodePath))
-				shortNodePath = append(shortNodePath, rawdb.EncodeNibbles(sn.Key)...)
-				log.Info("found short path2", "path", shortNodePath, "len", len(shortNodePath))
-				if len(shortNodePath) == 64 {
+				shortNodePath = append(shortNodePath, sn.Key...)
+				if len(hexToKeybytes(shortNodePath)) == 32 {
+					log.Info("found short path storage", "path", shortNodePath)
 					stat.ValueNodeCnt++
 				}
 			} else {
 				shortNodePath := key[1:]
-				log.Info("found short path account", "path", shortNodePath, "len", len(shortNodePath))
-				shortNodePath = append(shortNodePath, rawdb.EncodeNibbles(sn.Key)...)
-				log.Info("found short path1", "path", shortNodePath, "len", len(shortNodePath))
-				if len(shortNodePath) == 64 {
+				shortNodePath = append(shortNodePath, sn.Key...)
+				if len(hexToKeybytes(shortNodePath)) == 32 {
+					log.Info("found short path account", "path", shortNodePath)
 					stat.ValueNodeCnt++
 				}
 			}
