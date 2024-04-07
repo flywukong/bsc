@@ -155,7 +155,7 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 			h.Release()
 			var childPath []byte
 			// if is full short node InsideFull, check if it contains short shortnodeInsideFull
-			shortnodeList, err := checkIfContainShortNode(hash.Bytes(), it.Value(), key, restorer.stat)
+			shortnodeList, err := checkIfContainShortNode(hash.Bytes(), key, it.Value(), restorer.stat)
 			if err != nil {
 				log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
 				return err
