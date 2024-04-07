@@ -48,22 +48,22 @@ const HashScheme = "hash"
 // on extra state diffs to survive deep reorg.
 const PathScheme = "path"
 
-// hasher is used to compute the sha256 hash of the provided data.
-type hasher struct{ sha crypto.KeccakState }
+// ShaHasher is used to compute the sha256 hash of the provided data.
+type ShaHasher struct{ sha crypto.KeccakState }
 
 var hasherPool = sync.Pool{
-	New: func() interface{} { return &hasher{sha: sha3.NewLegacyKeccak256().(crypto.KeccakState)} },
+	New: func() interface{} { return &ShaHasher{sha: sha3.NewLegacyKeccak256().(crypto.KeccakState)} },
 }
 
-func newHasher() *hasher {
-	return hasherPool.Get().(*hasher)
+func NewSha256Hasher() *ShaHasher {
+	return hasherPool.Get().(*ShaHasher)
 }
 
-func (h *hasher) hash(data []byte) common.Hash {
+func (h *ShaHasher) Hash(data []byte) common.Hash {
 	return crypto.HashData(h.sha, data)
 }
 
-func (h *hasher) release() {
+func (h *ShaHasher) Release() {
 	hasherPool.Put(h)
 }
 
@@ -74,9 +74,9 @@ func ReadAccountTrieNode(db ethdb.KeyValueReader, path []byte) ([]byte, common.H
 	if err != nil {
 		return nil, common.Hash{}
 	}
-	h := newHasher()
-	defer h.release()
-	return data, h.hash(data)
+	h := NewSha256Hasher()
+	defer h.Release()
+	return data, h.Hash(data)
 }
 
 func ReadAccountFromTrieDirectly(db ethdb.Database, key []byte) ([]byte, []byte, common.Hash) {
@@ -87,9 +87,9 @@ func ReadAccountFromTrieDirectly(db ethdb.Database, key []byte) ([]byte, []byte,
 		dbKey := it.Key()
 		if strings.HasPrefix(string(accountTrieNodeKey(EncodeNibbles(key))), string(dbKey)) {
 			data := it.Value()
-			h := newHasher()
-			defer h.release()
-			return data, dbKey[1:], h.hash(data)
+			h := NewSha256Hasher()
+			defer h.Release()
+			return data, dbKey[1:], h.Hash(data)
 		} else {
 			log.Debug("ReadAccountFromTrieDirectly", "dbKey", common.Bytes2Hex(dbKey), "target key", common.Bytes2Hex(accountTrieNodeKey(EncodeNibbles(key))))
 		}
@@ -106,9 +106,9 @@ func HasAccountTrieNode(db ethdb.KeyValueReader, path []byte, hash common.Hash) 
 	if err != nil {
 		return false
 	}
-	h := newHasher()
-	defer h.release()
-	return h.hash(data) == hash
+	h := NewSha256Hasher()
+	defer h.Release()
+	return h.Hash(data) == hash
 }
 
 // ExistsAccountTrieNode checks the presence of the account trie node with the
@@ -149,9 +149,9 @@ func ReadStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path 
 	if err != nil {
 		return nil, common.Hash{}
 	}
-	h := newHasher()
-	defer h.release()
-	return data, h.hash(data)
+	h := NewSha256Hasher()
+	defer h.Release()
+	return data, h.Hash(data)
 }
 
 func ReadStorageFromTrieDirectly(db ethdb.Database, accountHash common.Hash, key []byte) ([]byte, []byte, common.Hash) {
@@ -162,9 +162,9 @@ func ReadStorageFromTrieDirectly(db ethdb.Database, accountHash common.Hash, key
 		dbKey := it.Key()
 		if strings.HasPrefix(string(storageTrieNodeKey(accountHash, EncodeNibbles(key))), string(dbKey)) {
 			data := it.Value()
-			h := newHasher()
-			defer h.release()
-			return data, dbKey[1:], h.hash(data)
+			h := NewSha256Hasher()
+			defer h.Release()
+			return data, dbKey[1:], h.Hash(data)
 		}
 	}
 	return nil, nil, common.Hash{}
@@ -177,9 +177,9 @@ func HasStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path [
 	if err != nil {
 		return false
 	}
-	h := newHasher()
-	defer h.release()
-	return h.hash(data) == hash
+	h := NewSha256Hasher()
+	defer h.Release()
+	return h.Hash(data) == hash
 }
 
 // ExistsStorageTrieNode checks the presence of the storage trie node with the
