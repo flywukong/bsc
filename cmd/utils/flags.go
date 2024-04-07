@@ -2399,6 +2399,20 @@ func MakeStateDataBase(ctx *cli.Context, stack *node.Node, readonly, disableFree
 	return statediskdb
 }
 
+func MakeNewDBDatabase(ctx *cli.Context, stack *node.Node, readonly, disableFreeze bool, path string) ethdb.Database {
+	var (
+		cache   = ctx.Int(CacheFlag.Name) * ctx.Int(CacheDatabaseFlag.Name) / 100
+		handles = MakeDatabaseHandles(ctx.Int(FDLimitFlag.Name))
+	)
+
+	trieDB, err := stack.OpenDatabaseForNewDB(path, cache, handles/2,
+		ctx.String(AncientFlag.Name), "eth/db/chaindata/", readonly, disableFreeze, false, false)
+	if err != nil {
+		Fatalf("Could not open trie database: %v", err)
+	}
+	return trieDB
+}
+
 // tryMakeReadOnlyDatabase try to open the chain database in read-only mode,
 // or fallback to write mode if the database is not initialized.
 //
