@@ -128,9 +128,9 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 		it     ethdb.Iterator
 		start  = time.Now()
 		logged = time.Now()
-		batch  = restorer.db.NewBatch()
-		count  int64
-		key    []byte
+		//	batch  = restorer.db.NewBatch()
+		count int64
+		key   []byte
 	)
 
 	prefixKeys := map[string]func([]byte) bool{
@@ -176,9 +176,12 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 						log.Info("storage shortNode info", "trie key", key, "fullNode path", fullNodePath,
 							"child path", childPath, "new node key", newKey, "new node value", snode.NodeBytes)
 						// batch write
-						if err := batch.Put(newKey, snode.NodeBytes); err != nil {
-							return err
-						}
+						/*
+							if err := batch.Put(newKey, snode.NodeBytes); err != nil {
+								return err
+							}
+
+						*/
 
 					} else if rawdb.IsAccountTrieNode(key) {
 						// should not contain account embedded node,
@@ -193,15 +196,15 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 					}
 				}
 			}
-
-			if batch.ValueSize() > ethdb.IdealBatchSize {
-				if err := batch.Write(); err != nil {
-					it.Release()
-					return err
+			/*
+				if batch.ValueSize() > ethdb.IdealBatchSize {
+					if err := batch.Write(); err != nil {
+						it.Release()
+						return err
+					}
+					batch.Reset()
 				}
-				batch.Reset()
-			}
-
+			*/
 			count++
 			if time.Since(logged) > 8*time.Second {
 				log.Info("Checking trie state", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
@@ -215,13 +218,15 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 	log.Info(" total node info", "fullnode count", restorer.stat.FullNodeCnt,
 		"short node count", restorer.stat.ShortNodeCnt, "value node", restorer.stat.ValueNodeCnt,
 		"embedded node", restorer.stat.EmbeddedNodeCnt)
-
-	if batch.ValueSize() > 0 {
-		if err := batch.Write(); err != nil {
-			return err
+	/*
+		if batch.ValueSize() > 0 {
+			if err := batch.Write(); err != nil {
+				return err
+			}
+			batch.Reset()
 		}
-		batch.Reset()
-	}
+
+	*/
 
 	log.Info("embedded node has been restored successfully", "elapsed", common.PrettyDuration(time.Since(start)))
 
