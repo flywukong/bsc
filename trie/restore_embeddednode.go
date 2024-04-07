@@ -132,7 +132,7 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 	)
 
 	prefixKeys := map[string]func([]byte) bool{
-		//	string(rawdb.TrieNodeAccountPrefix): rawdb.IsAccountTrieNode,
+		string(rawdb.TrieNodeAccountPrefix): rawdb.IsAccountTrieNode,
 		string(rawdb.TrieNodeStoragePrefix): rawdb.IsStorageTrieNode,
 	}
 
