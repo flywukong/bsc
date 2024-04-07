@@ -150,9 +150,9 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 				continue
 			}
 
-			h := newdbHasher()
-			hash := h.hash(it.Value())
-			h.release()
+			h := rawdb.NewSha256Hasher()
+			hash := h.Hash(it.Value())
+			h.Release()
 			var childPath []byte
 			// if is full short node InsideFull, check if it contains short shortnodeInsideFull
 			shortnodeList, err := checkIfContainShortNode(hash.Bytes(), it.Value(), key, restorer.stat)
