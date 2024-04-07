@@ -56,7 +56,7 @@ type shorNodeInfo struct {
 	Idx       int
 }
 
-func checkIfContainShortNode(hash, buf []byte, stat *dbNodeStat) ([]shorNodeInfo, error) {
+func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNodeInfo, error) {
 	n, err := decodeNode(hash, buf)
 	if err != nil {
 		return nil, err
@@ -75,8 +75,23 @@ func checkIfContainShortNode(hash, buf []byte, stat *dbNodeStat) ([]shorNodeInfo
 				if vn, ok := sn.Val.(valueNode); ok {
 					log.Info("found shortNode inside full node", "full node info", fn, "child idx", i,
 						"child", child, "value", vn)
-					stat.EmbeddedNodeCnt++
-					shortNodeInfoList = append(shortNodeInfoList, shorNodeInfo{NodeBytes: nodeToBytes(child), Idx: i})
+					if rawdb.IsStorageTrieNode(key) {
+						// full node path
+						valueNodePath := key[1+common.HashLength:]
+						log.Info("found value path0", "path", valueNodePath, "len", len(valueNodePath))
+						// add index
+						valueNodePath = append(valueNodePath, byte(i))
+						log.Info("found value path1", "path", valueNodePath, "len", len(valueNodePath))
+						// add short node prefix
+						valueNodePath = append(valueNodePath, rawdb.EncodeNibbles(sn.Key)...)
+						log.Info("found value path2", "path", valueNodePath, "len", len(valueNodePath))
+						// 32-bit key should be 64-bit after nibbles  encoding
+						if len(valueNodePath) == 64 {
+							stat.EmbeddedNodeCnt++
+							shortNodeInfoList = append(shortNodeInfoList,
+								shorNodeInfo{NodeBytes: nodeToBytes(child), Idx: i})
+						}
+					}
 				}
 			}
 		}
@@ -84,7 +99,23 @@ func checkIfContainShortNode(hash, buf []byte, stat *dbNodeStat) ([]shorNodeInfo
 	} else if sn, ok := n.(*shortNode); ok {
 		stat.ShortNodeCnt++
 		if _, ok := sn.Val.(valueNode); ok {
-			stat.ValueNodeCnt++
+			if rawdb.IsStorageTrieNode(key) {
+				shortNodePath := key[1+common.HashLength:]
+				log.Info("found short path1 storage", "path", shortNodePath, "len", len(shortNodePath))
+				shortNodePath = append(shortNodePath, rawdb.EncodeNibbles(sn.Key)...)
+				log.Info("found short path2", "path", shortNodePath, "len", len(shortNodePath))
+				if len(shortNodePath) == 64 {
+					stat.ValueNodeCnt++
+				}
+			} else {
+				shortNodePath := key[1:]
+				log.Info("found short path account", "path", shortNodePath, "len", len(shortNodePath))
+				shortNodePath = append(shortNodePath, rawdb.EncodeNibbles(sn.Key)...)
+				log.Info("found short path1", "path", shortNodePath, "len", len(shortNodePath))
+				if len(shortNodePath) == 64 {
+					stat.ValueNodeCnt++
+				}
+			}
 		}
 	} else {
 		log.Warn("not full node or short node in disk", "node", n)
@@ -109,7 +140,6 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 
 	var storageEmbeddedNode int
 	var accountEmbeddedNode int
-	// var nodeStat nodeStat
 
 	// todo no need AccountPrefix iterator
 	for prefix, isValid := range prefixKeys {
@@ -125,7 +155,7 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 			h.release()
 			var childPath []byte
 			// if is full short node InsideFull, check if it contains short shortnodeInsideFull
-			shortnodeList, err := checkIfContainShortNode(hash.Bytes(), it.Value(), restorer.stat)
+			shortnodeList, err := checkIfContainShortNode(hash.Bytes(), it.Value(), key, restorer.stat)
 			if err != nil {
 				log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
 				return err
@@ -145,7 +175,7 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 						//	newKey := storageTrieNodeKey(common.BytesToHash(key[1:common.HashLength+1]), childPath)
 						log.Info("storage shortNode info", "trie key", key, "fullNode path", fullNodePath,
 							"child path", childPath, "new node key", newKey, "new node value", snode.NodeBytes)
-						// batch write?
+						// batch write
 						if err := batch.Put(newKey, snode.NodeBytes); err != nil {
 							return err
 						}
