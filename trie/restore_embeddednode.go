@@ -79,10 +79,11 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 						valueNodePath := key[1+common.HashLength:]
 						// add node index to path
 						valueNodePath = append(valueNodePath, byte(i))
-
-						combinePath := hexToKeybytes(append(valueNodePath, sn.Key...))
-						log.Info("info", "db key", key, "full node path", key[1+common.HashLength:],
-							"short node key", sn.Key, "hex to bytes", combinePath, "len1", len(key),
+						combinePth2 := append(valueNodePath, sn.Key...)
+						combinePath := hexToKeybytes(combinePth2)
+						log.Info("info", "db key", common.Bytes2Hex(key), "full node path", common.Bytes2Hex(key[1+common.HashLength:]),
+							"short node key", common.Bytes2Hex(sn.Key), "combined path", common.Bytes2Hex(combinePth2),
+							"hex to bytes encode", common.Bytes2Hex(combinePath), "len1", len(key),
 							"len2", len(sn.Key), "len3", len(combinePath))
 
 						// check the length of node path
@@ -108,8 +109,8 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 				shortNodePath2 := key[1+common.HashLength:]
 				shortNodePath = append(shortNodePath, sn.Key...)
 				combinePath := hexToKeybytes(shortNodePath)
-				log.Info("info", "db key", key, "short node path", shortNodePath2,
-					"short node key", sn.Key, "hex to bytes", combinePath, "len1", len(key),
+				log.Info("short node info", "db key", common.Bytes2Hex(key), "short node path", common.Bytes2Hex(shortNodePath2),
+					"short node key", common.Bytes2Hex(sn.Key), "hex to bytes", common.Bytes2Hex(combinePath), "len1", len(key),
 					"len2", len(sn.Key), "len3", len(combinePath))
 				if len(combinePath) == ExpectLeafNodeLen {
 					stat.ValueNodeCnt++
