@@ -79,8 +79,14 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 						valueNodePath := key[1+common.HashLength:]
 						// add node index to path
 						valueNodePath = append(valueNodePath, byte(i))
+
+						combinePath := hexToKeybytes(append(valueNodePath, sn.Key...))
+						log.Info("info", "db key", key, "full node path", key[1+common.HashLength:],
+							"short node key", sn.Key, "hex to bytes", combinePath, "len1", len(key),
+							"len2", len(sn.Key), "len3", len(combinePath))
+
 						// check the length of node path
-						if len(hexToKeybytes(append(valueNodePath, sn.Key...))) == ExpectLeafNodeLen {
+						if len(combinePath) == ExpectLeafNodeLen {
 							log.Info("found short leaf Node inside full node", "full node info", fn, "child idx", i,
 								"child", child, "value", vn)
 							stat.EmbeddedNodeCnt++
@@ -99,8 +105,13 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 		if _, ok := sn.Val.(valueNode); ok {
 			if rawdb.IsStorageTrieNode(key) {
 				shortNodePath := key[1+common.HashLength:]
+				shortNodePath2 := key[1+common.HashLength:]
 				shortNodePath = append(shortNodePath, sn.Key...)
-				if len(hexToKeybytes(shortNodePath)) == ExpectLeafNodeLen {
+				combinePath := hexToKeybytes(shortNodePath)
+				log.Info("info", "db key", key, "short node path", shortNodePath2,
+					"short node key", sn.Key, "hex to bytes", combinePath, "len1", len(key),
+					"len2", len(sn.Key), "len3", len(combinePath))
+				if len(combinePath) == ExpectLeafNodeLen {
 					stat.ValueNodeCnt++
 				}
 			} else {
