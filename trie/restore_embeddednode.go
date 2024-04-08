@@ -2,14 +2,18 @@ package trie
 
 import (
 	"bytes"
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/state/snapshot"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/triedb"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -173,7 +177,7 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 						}
 
 					} else if rawdb.IsAccountTrieNode(key) {
-						// should not contain account embedded node 
+						// should not contain account embedded node
 						accountEmbeddedNode++
 						fullNodePath := key[1:]
 						childPath = append(fullNodePath, byte(snode.Idx))
@@ -256,4 +260,60 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 			"value node key", restorer.stat.EmbeddedNodeCnt+restorer.stat.ValueNodeCnt)
 	}
 	return nil
+}
+
+func (restorer *EmbeddedNodeRestorer) DeleteStaleKv() error {
+	headBlock := rawdb.ReadHeadBlock(restorer.db)
+	if headBlock == nil {
+		return errors.New("failed to load head block")
+	}
+
+	triedb := triedb.NewDatabase(restorer.db, triedb.HashDefaults)
+	defer triedb.Close()
+
+	snapconfig := snapshot.Config{
+		CacheSize:  256,
+		Recovery:   false,
+		NoBuild:    true,
+		AsyncBuild: false,
+	}
+	snaptree, err := snapshot.New(snapconfig, restorer.db, triedb, headBlock.Root(), 128, false)
+	if err != nil {
+		return err // The relevant snapshot(s) might not exist
+	}
+
+	// Retrieve the root node of persistent state.
+	_, diskRoot := rawdb.ReadAccountTrieNode(restorer.db, nil)
+	diskRoot = types.TrieRootHash(diskRoot)
+
+	snapshot := snaptree.Snapshot(diskRoot)
+	if snapshot == nil {
+		return errors.New("snapshot empty")
+	}
+	var (
+		it  ethdb.Iterator
+		key []byte
+	)
+
+	it = restorer.db.NewIterator(rawdb.TrieNodeStoragePrefix, nil)
+	for it.Next() {
+		key = it.Key()
+		if !rawdb.IsStorageTrieNode(key) {
+			continue
+		}
+		// Get Account Hash
+		accountHash := common.BytesToHash(key[1 : 1+common.HashLength])
+		// Read Account Hash from snap
+		simAcc, err := snapshot.Account(accountHash)
+		if err != nil {
+			return err
+		}
+		// if account.root == empty,  deleteRange(Account)
+		if simAcc == nil || simAcc.Root == nil {
+
+		}
+
+	}
+	it.Release()
+
 }
