@@ -1319,9 +1319,12 @@ func deleteStaleTrie(ctx *cli.Context) error {
 		if err != nil {
 			return err
 		}
-		log.Info("slim account info", "account root", simAcc.Root, "code hash", simAcc.CodeHash)
+		log.Info("slim account info", "db key", common.Bytes2Hex(key), "account root", simAcc.Root, "code hash", simAcc.CodeHash)
 		// if account.root == empty,  deleteRange(Account)
 		if simAcc == nil || simAcc.Root == nil {
+			if simAcc.Root == nil {
+				log.Info("account root is nil")
+			}
 			log.Info("range deleting the stale trie", "account hash", accountHash)
 			//rawdb.DeleteStorageTrie(chaindb, accountHash)
 		}
