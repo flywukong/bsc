@@ -1,7 +1,6 @@
 package trie
 
 import (
-	"bytes"
 	"sync"
 	"time"
 
@@ -88,6 +87,8 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 							shortNodeInfoList = append(shortNodeInfoList,
 								shorNodeInfo{NodeBytes: nodeToBytes(child), Idx: i})
 						}
+					} else if rawdb.IsAccountTrieNode(key) {
+						panic("should not exist account embedded")
 					}
 				}
 			}
@@ -121,9 +122,9 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 		it     ethdb.Iterator
 		start  = time.Now()
 		logged = time.Now()
-		batch  = restorer.db.NewBatch()
-		count  int64
-		key    []byte
+		//	batch  = restorer.db.NewBatch()
+		count int64
+		key   []byte
 	)
 
 	prefixKeys := map[string]func([]byte) bool{
@@ -168,12 +169,13 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 						log.Info("storage shortNode info", "trie key", key, "fullNode path", fullNodePath,
 							"child path", childPath, "new node key", newKey, "new node value", snode.NodeBytes)
 						// batch write
-						if err := batch.Put(newKey, snode.NodeBytes); err != nil {
-							return err
-						}
+						/*
+							if err := batch.Put(newKey, snode.NodeBytes); err != nil {
+								return err
+							}	*/
 
 					} else if rawdb.IsAccountTrieNode(key) {
-						// should not contain account embedded node 
+						// should not contain account embedded node
 						accountEmbeddedNode++
 						fullNodePath := key[1:]
 						childPath = append(fullNodePath, byte(snode.Idx))
@@ -184,15 +186,15 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 					}
 				}
 			}
-
-			if batch.ValueSize() > ethdb.IdealBatchSize {
-				if err := batch.Write(); err != nil {
-					it.Release()
-					return err
+			/*
+				if batch.ValueSize() > ethdb.IdealBatchSize {
+					if err := batch.Write(); err != nil {
+						it.Release()
+						return err
+					}
+					batch.Reset()
 				}
-				batch.Reset()
-			}
-
+			*/
 			count++
 			if time.Since(logged) > 8*time.Second {
 				log.Info("Checking trie state", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
@@ -206,54 +208,56 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 	log.Info(" total node info", "fullnode count", restorer.stat.FullNodeCnt,
 		"short node count", restorer.stat.ShortNodeCnt, "value node", restorer.stat.ValueNodeCnt,
 		"embedded node", restorer.stat.EmbeddedNodeCnt)
-
-	if batch.ValueSize() > 0 {
-		if err := batch.Write(); err != nil {
-			return err
+	/*
+		if batch.ValueSize() > 0 {
+			if err := batch.Write(); err != nil {
+				return err
+			}
+			batch.Reset()
 		}
-		batch.Reset()
-	}
 
-	log.Info("embedded node has been restored successfully", "elapsed", common.PrettyDuration(time.Since(start)))
-	// TODO remove the following code, used to compare snapshot key num
-	start = time.Now()
-	count = 0
-	var snapPrefix = [2][]byte{rawdb.SnapshotAccountPrefix, rawdb.SnapshotStoragePrefix}
-	var SnapshotAccountKey int
-	var SnapshotStorageKey int
-	for _, prefix := range snapPrefix {
-		it = restorer.db.NewIterator(prefix, nil)
-		for it.Next() {
-			key = it.Key()
-			if bytes.Compare(prefix, rawdb.SnapshotAccountPrefix) == 0 {
-				if len(key) != (len(rawdb.SnapshotAccountPrefix) + common.HashLength) {
-					continue
-				} else {
-					SnapshotAccountKey++
+		log.Info("embedded node has been restored successfully", "elapsed", common.PrettyDuration(time.Since(start)))
+		// TODO remove the following code, used to compare snapshot key num
+		start = time.Now()
+		count = 0
+		var snapPrefix = [2][]byte{rawdb.SnapshotAccountPrefix, rawdb.SnapshotStoragePrefix}
+		var SnapshotAccountKey int
+		var SnapshotStorageKey int
+		for _, prefix := range snapPrefix {
+			it = restorer.db.NewIterator(prefix, nil)
+			for it.Next() {
+				key = it.Key()
+				if bytes.Compare(prefix, rawdb.SnapshotAccountPrefix) == 0 {
+					if len(key) != (len(rawdb.SnapshotAccountPrefix) + common.HashLength) {
+						continue
+					} else {
+						SnapshotAccountKey++
+					}
+				}
+
+				if bytes.Compare(prefix, rawdb.SnapshotStoragePrefix) == 0 {
+					if len(key) != (len(rawdb.SnapshotStoragePrefix) + 2*common.HashLength) {
+						continue
+					} else {
+						SnapshotStorageKey++
+					}
+				}
+
+				count++
+				if time.Since(logged) > 8*time.Second {
+					log.Info("Checking snap state", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
+					logged = time.Now()
 				}
 			}
-
-			if bytes.Compare(prefix, rawdb.SnapshotStoragePrefix) == 0 {
-				if len(key) != (len(rawdb.SnapshotStoragePrefix) + 2*common.HashLength) {
-					continue
-				} else {
-					SnapshotStorageKey++
-				}
-			}
-
-			count++
-			if time.Since(logged) > 8*time.Second {
-				log.Info("Checking snap state", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
-				logged = time.Now()
-			}
+			it.Release()
 		}
-		it.Release()
-	}
-	log.Info(" total snap key info ", "snap account", SnapshotAccountKey, "snap storage", SnapshotStorageKey)
+		log.Info(" total snap key info ", "snap account", SnapshotAccountKey, "snap storage", SnapshotStorageKey)
 
-	if uint64(SnapshotAccountKey+SnapshotStorageKey) != restorer.stat.EmbeddedNodeCnt+restorer.stat.ValueNodeCnt {
-		log.Warn("compare not same", "snapshot total key", SnapshotAccountKey+SnapshotStorageKey,
-			"value node key", restorer.stat.EmbeddedNodeCnt+restorer.stat.ValueNodeCnt)
-	}
+		if uint64(SnapshotAccountKey+SnapshotStorageKey) != restorer.stat.EmbeddedNodeCnt+restorer.stat.ValueNodeCnt {
+			log.Warn("compare not same", "snapshot total key", SnapshotAccountKey+SnapshotStorageKey,
+				"value node key", restorer.stat.EmbeddedNodeCnt+restorer.stat.ValueNodeCnt)
+		}
+
+	*/
 	return nil
 }
