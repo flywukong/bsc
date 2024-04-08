@@ -2,18 +2,14 @@ package trie
 
 import (
 	"bytes"
-	"errors"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/state/snapshot"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/triedb"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -262,6 +258,7 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 	return nil
 }
 
+/*
 func (restorer *EmbeddedNodeRestorer) DeleteStaleTrie() error {
 	headBlock := rawdb.ReadHeadBlock(restorer.db)
 	if headBlock == nil {
@@ -316,6 +313,6 @@ func (restorer *EmbeddedNodeRestorer) DeleteStaleTrie() error {
 		}
 	}
 	it.Release()
-
 	return nil
 }
+*/

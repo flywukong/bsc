@@ -35,6 +35,7 @@ import (
 	"github.com/ethereum/go-ethereum/console/prompt"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/internal/flags"
@@ -91,6 +92,7 @@ Remove blockchain and state databases`,
 			dbTrieGetCmd,
 			dbTrieDeleteCmd,
 			dbStoreEmbeddedCmd,
+			dbDeleteStableTrieCmd,
 		},
 	}
 	dbInspectCmd = &cli.Command{
@@ -123,6 +125,16 @@ Remove blockchain and state databases`,
 			utils.SyncModeFlag,
 		}, utils.NetworkFlags, utils.DatabaseFlags),
 		Description: `This command redundancy store store the embedded shortNode.`,
+	}
+
+	dbDeleteStableTrieCmd = &cli.Command{
+		Action: deleteStaleTrie,
+		Name:   "del-stale",
+		Usage:  "Delete stable trie",
+		Flags: flags.Merge([]cli.Flag{
+			utils.SyncModeFlag,
+		}, utils.NetworkFlags, utils.DatabaseFlags),
+		Description: `This command delete the trie node with the account which root is nil.`,
 	}
 
 	dbCheckStateContentCmd = &cli.Command{
@@ -1245,6 +1257,75 @@ func refactorEmbeddedNode(ctx *cli.Context) error {
 	}
 
 	embeddedNodesStorer := trie.NewEmbeddedNodeRestorer(chaindb)
-	//return embeddedNodesStorer.Run()
-	return embeddedNodesStorer.DeleteStaleTrie()
+
+	return embeddedNodesStorer.Run()
+}
+
+func deleteStaleTrie(ctx *cli.Context) error {
+	if ctx.NArg() > 0 {
+		return fmt.Errorf("no arguments required")
+	}
+
+	stack, _ := makeConfigNode(ctx)
+	defer stack.Close()
+
+	chaindb := utils.MakeChainDatabase(ctx, stack, false, false)
+	defer chaindb.Close()
+
+	headBlock := rawdb.ReadHeadBlock(chaindb)
+	if headBlock == nil {
+		return errors.New("failed to load head block")
+	}
+
+	triedb := triedb.NewDatabase(chaindb, triedb.HashDefaults)
+	defer triedb.Close()
+
+	snapconfig := snapshot.Config{
+		CacheSize:  1024,
+		Recovery:   false,
+		NoBuild:    true,
+		AsyncBuild: false,
+	}
+
+	snaptree, err := snapshot.New(snapconfig, chaindb, triedb, headBlock.Root(), 128, false)
+	if err != nil {
+		return err // The relevant snapshot(s) might not exist
+	}
+
+	// Retrieve the root node of persistent state.
+	_, diskRoot := rawdb.ReadAccountTrieNode(chaindb, nil)
+	diskRoot = types.TrieRootHash(diskRoot)
+
+	snapshot := snaptree.Snapshot(diskRoot)
+	if snapshot == nil {
+		return errors.New("snapshot empty")
+	}
+	var (
+		it  ethdb.Iterator
+		key []byte
+	)
+
+	it = chaindb.NewIterator(rawdb.TrieNodeStoragePrefix, nil)
+	for it.Next() {
+		key = it.Key()
+		if !rawdb.IsStorageTrieNode(key) {
+			continue
+		}
+		// Get Account Hash
+		accountHash := common.BytesToHash(key[1 : 1+common.HashLength])
+		// Read Account Hash from snap
+		simAcc, err := snapshot.Account(accountHash)
+		if err != nil {
+			return err
+		}
+		log.Info("slim account info", "account root", simAcc.Root, "code hash", simAcc.CodeHash)
+		// if account.root == empty,  deleteRange(Account)
+		if simAcc == nil || simAcc.Root == nil {
+			log.Info("range deleting the stale trie", "account hash", accountHash)
+			//rawdb.DeleteStorageTrie(chaindb, accountHash)
+		}
+	}
+	it.Release()
+
+	return nil
 }
