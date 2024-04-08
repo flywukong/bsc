@@ -13,6 +13,8 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
+const ExpectLeafNodeLen = 32
+
 type EmbeddedNodeRestorer struct {
 	db   ethdb.Database
 	stat *dbNodeStat
@@ -76,15 +78,10 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 					if rawdb.IsStorageTrieNode(key) {
 						// full node path
 						valueNodePath := key[1+common.HashLength:]
-						// add index
+						// add node index to path
 						valueNodePath = append(valueNodePath, byte(i))
-						// add short node prefix
-						//	valueNodePath = append(valueNodePath, rawdb.EncodeNibbles(sn.Key)...)
-						//	log.Info("found value path2", "path", valueNodePath, "len", len(valueNodePath))
-						//		log.Info("found value path3", "len1", hexToCompact(sn.Key), "len2", len(hexToCompact(sn.Key)),
-						//		"len3", len(sn.Key), "len4", len(hexToKeybytes(append(valueNodePath2, sn.Key...))))
-						// 32-bit key should be 64-bit after nibbles  encoding
-						if len(hexToKeybytes(append(valueNodePath, sn.Key...))) == 32 {
+						// check the length of node path
+						if len(hexToKeybytes(append(valueNodePath, sn.Key...))) == ExpectLeafNodeLen {
 							log.Info("found short leaf Node inside full node", "full node info", fn, "child idx", i,
 								"child", child, "value", vn)
 							stat.EmbeddedNodeCnt++
@@ -102,15 +99,13 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 			if rawdb.IsStorageTrieNode(key) {
 				shortNodePath := key[1+common.HashLength:]
 				shortNodePath = append(shortNodePath, sn.Key...)
-				if len(hexToKeybytes(shortNodePath)) == 32 {
-					log.Info("found short path storage", "path", shortNodePath)
+				if len(hexToKeybytes(shortNodePath)) == ExpectLeafNodeLen {
 					stat.ValueNodeCnt++
 				}
 			} else {
 				shortNodePath := key[1:]
 				shortNodePath = append(shortNodePath, sn.Key...)
-				if len(hexToKeybytes(shortNodePath)) == 32 {
-					log.Info("found short path account", "path", shortNodePath)
+				if len(hexToKeybytes(shortNodePath)) == ExpectLeafNodeLen {
 					stat.ValueNodeCnt++
 				}
 			}
@@ -126,9 +121,9 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 		it     ethdb.Iterator
 		start  = time.Now()
 		logged = time.Now()
-		//	batch  = restorer.db.NewBatch()
-		count int64
-		key   []byte
+		batch  = restorer.db.NewBatch()
+		count  int64
+		key    []byte
 	)
 
 	prefixKeys := map[string]func([]byte) bool{
@@ -170,21 +165,16 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 						fullNodePath := key[1+common.HashLength:]
 						childPath = append(fullNodePath, byte(snode.Idx))
 						newKey := append(key, byte(snode.Idx))
-						//	newKey := storageTrieNodeKey(common.BytesToHash(key[1:common.HashLength+1]), childPath)
 						log.Info("storage shortNode info", "trie key", key, "fullNode path", fullNodePath,
 							"child path", childPath, "new node key", newKey, "new node value", snode.NodeBytes)
 						// batch write
-						/*
-							if err := batch.Put(newKey, snode.NodeBytes); err != nil {
-								return err
-							}
-
-						*/
+						if err := batch.Put(newKey, snode.NodeBytes); err != nil {
+							return err
+						}
 
 					} else if rawdb.IsAccountTrieNode(key) {
-						// should not contain account embedded node,
+						// should not contain account embedded node 
 						accountEmbeddedNode++
-						//parse the path of fullnode
 						fullNodePath := key[1:]
 						childPath = append(fullNodePath, byte(snode.Idx))
 						newKey := append(key, byte(snode.Idx))
@@ -194,15 +184,15 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 					}
 				}
 			}
-			/*
-				if batch.ValueSize() > ethdb.IdealBatchSize {
-					if err := batch.Write(); err != nil {
-						it.Release()
-						return err
-					}
-					batch.Reset()
+
+			if batch.ValueSize() > ethdb.IdealBatchSize {
+				if err := batch.Write(); err != nil {
+					it.Release()
+					return err
 				}
-			*/
+				batch.Reset()
+			}
+
 			count++
 			if time.Since(logged) > 8*time.Second {
 				log.Info("Checking trie state", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
@@ -216,18 +206,15 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 	log.Info(" total node info", "fullnode count", restorer.stat.FullNodeCnt,
 		"short node count", restorer.stat.ShortNodeCnt, "value node", restorer.stat.ValueNodeCnt,
 		"embedded node", restorer.stat.EmbeddedNodeCnt)
-	/*
-		if batch.ValueSize() > 0 {
-			if err := batch.Write(); err != nil {
-				return err
-			}
-			batch.Reset()
-		}
 
-	*/
+	if batch.ValueSize() > 0 {
+		if err := batch.Write(); err != nil {
+			return err
+		}
+		batch.Reset()
+	}
 
 	log.Info("embedded node has been restored successfully", "elapsed", common.PrettyDuration(time.Since(start)))
-
 	// TODO remove the following code, used to compare snapshot key num
 	start = time.Now()
 	count = 0
