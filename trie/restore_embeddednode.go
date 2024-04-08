@@ -310,9 +310,10 @@ func (restorer *EmbeddedNodeRestorer) DeleteStaleKv() error {
 		}
 		// if account.root == empty,  deleteRange(Account)
 		if simAcc == nil || simAcc.Root == nil {
-
+			if simAcc.Root == nil {
+				err := rawdb.DeleteStorageTrie(restorer.db, accountHash)
+			}
 		}
-
 	}
 	it.Release()
 
