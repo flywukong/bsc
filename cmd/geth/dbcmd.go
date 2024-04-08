@@ -1277,6 +1277,7 @@ func deleteStaleTrie(ctx *cli.Context) error {
 		return errors.New("failed to load head block")
 	}
 
+	log.Info("head root info", "hash", headBlock.Root())
 	triedb := triedb.NewDatabase(chaindb, triedb.HashDefaults)
 	defer triedb.Close()
 
@@ -1295,7 +1296,7 @@ func deleteStaleTrie(ctx *cli.Context) error {
 	// Retrieve the root node of persistent state.
 	_, diskRoot := rawdb.ReadAccountTrieNode(chaindb, nil)
 	diskRoot = types.TrieRootHash(diskRoot)
-
+	log.Info("disk root info", "hash", diskRoot)
 	snapshot := snaptree.Snapshot(diskRoot)
 	if snapshot == nil {
 		return errors.New("snapshot empty")
