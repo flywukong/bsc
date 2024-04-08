@@ -1245,5 +1245,6 @@ func refactorEmbeddedNode(ctx *cli.Context) error {
 	}
 
 	embeddedNodesStorer := trie.NewEmbeddedNodeRestorer(chaindb)
-	return embeddedNodesStorer.Run()
+	//return embeddedNodesStorer.Run()
+	return embeddedNodesStorer.DeleteStaleTrie()
 }

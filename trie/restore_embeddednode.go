@@ -262,7 +262,7 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 	return nil
 }
 
-func (restorer *EmbeddedNodeRestorer) DeleteStaleKv() error {
+func (restorer *EmbeddedNodeRestorer) DeleteStaleTrie() error {
 	headBlock := rawdb.ReadHeadBlock(restorer.db)
 	if headBlock == nil {
 		return errors.New("failed to load head block")
@@ -308,13 +308,14 @@ func (restorer *EmbeddedNodeRestorer) DeleteStaleKv() error {
 		if err != nil {
 			return err
 		}
+		log.Info("slim account info", "account root", simAcc.Root, "code hash", simAcc.CodeHash)
 		// if account.root == empty,  deleteRange(Account)
 		if simAcc == nil || simAcc.Root == nil {
-			if simAcc.Root == nil {
-				err := rawdb.DeleteStorageTrie(restorer.db, accountHash)
-			}
+			log.Info("range deleting the stale trie", "account hash", accountHash)
+			rawdb.DeleteStorageTrie(restorer.db, accountHash)
 		}
 	}
 	it.Release()
 
+	return nil
 }
