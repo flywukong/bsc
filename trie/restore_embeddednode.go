@@ -173,7 +173,7 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 						}
 
 					} else if rawdb.IsAccountTrieNode(key) {
-						// should not contain account embedded node 
+						// should not contain account embedded node
 						accountEmbeddedNode++
 						fullNodePath := key[1:]
 						childPath = append(fullNodePath, byte(snode.Idx))

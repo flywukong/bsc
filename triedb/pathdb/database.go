@@ -524,3 +524,13 @@ func (db *Database) GetAllRooHash() [][]string {
 	data = append(data, []string{"-1", db.tree.bottom().rootHash().String()})
 	return data
 }
+
+func (db *Database) GetBottomHash() common.Hash {
+	db.lock.Lock()
+	defer db.lock.Unlock()
+
+	if db.tree.bottom() != nil {
+		return db.tree.bottom().rootHash()
+	}
+	return common.Hash{}
+}

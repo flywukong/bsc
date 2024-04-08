@@ -35,6 +35,7 @@ import (
 	"github.com/ethereum/go-ethereum/console/prompt"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/internal/flags"
@@ -91,6 +92,7 @@ Remove blockchain and state databases`,
 			dbTrieGetCmd,
 			dbTrieDeleteCmd,
 			dbStoreEmbeddedCmd,
+			dbDeleteStableTrieCmd,
 		},
 	}
 	dbInspectCmd = &cli.Command{
@@ -123,6 +125,16 @@ Remove blockchain and state databases`,
 			utils.SyncModeFlag,
 		}, utils.NetworkFlags, utils.DatabaseFlags),
 		Description: `This command redundancy store store the embedded shortNode.`,
+	}
+
+	dbDeleteStableTrieCmd = &cli.Command{
+		Action: deleteStaleTrie,
+		Name:   "del-stale",
+		Usage:  "Delete stable trie",
+		Flags: flags.Merge([]cli.Flag{
+			utils.SyncModeFlag,
+		}, utils.NetworkFlags, utils.DatabaseFlags),
+		Description: `This command delete the trie node with the account which root is nil.`,
 	}
 
 	dbCheckStateContentCmd = &cli.Command{
@@ -1245,5 +1257,97 @@ func refactorEmbeddedNode(ctx *cli.Context) error {
 	}
 
 	embeddedNodesStorer := trie.NewEmbeddedNodeRestorer(chaindb)
+
 	return embeddedNodesStorer.Run()
+}
+
+func deleteStaleTrie(ctx *cli.Context) error {
+	if ctx.NArg() > 0 {
+		return fmt.Errorf("no arguments required")
+	}
+	logged := time.Now()
+	stack, _ := makeConfigNode(ctx)
+	defer stack.Close()
+
+	chaindb := utils.MakeChainDatabase(ctx, stack, false, false)
+	defer chaindb.Close()
+
+	headBlock := rawdb.ReadHeadBlock(chaindb)
+	if headBlock == nil {
+		return errors.New("failed to load head block")
+	}
+
+	log.Info("head root info", "hash", headBlock.Root())
+	triedb := triedb.NewDatabase(chaindb, &triedb.Config{
+		Preimages: false,
+		PathDB:    pathdb.Defaults,
+	})
+	defer triedb.Close()
+
+	log.Info("head info", "head number", headBlock.Number())
+
+	_, diskRoot := rawdb.ReadAccountTrieNode(chaindb, nil)
+	diskRoot = types.TrieRootHash(diskRoot)
+	log.Info("disk root info", "hash", diskRoot)
+
+	t, err := trie.NewStateTrie(trie.StateTrieID(diskRoot), triedb)
+	if err != nil {
+		log.Error("Failed to open trie", "root", headBlock.Root(), "err", err)
+		return err
+	}
+	if t == nil {
+		return errors.New("trie empty")
+	}
+
+	var (
+		it  ethdb.Iterator
+		key []byte
+	)
+
+	it = chaindb.NewIterator(rawdb.TrieNodeStoragePrefix, nil)
+	storageDirty := 0
+	accountDirty := 0
+	var dirtyAccount string
+	for it.Next() {
+		key = it.Key()
+		if !rawdb.IsStorageTrieNode(key) {
+			continue
+		}
+
+		// Get Account Hash
+		accountHash := common.BytesToAddress(key[1 : 1+common.HashLength])
+		if dirtyAccount != accountHash.String() {
+			dirtyAccount = accountHash.String()
+			accountDirty++
+		}
+
+		// Read Account Hash from trie
+		stateAcc, err := t.GetAccount(accountHash, false)
+		if err != nil {
+			return err
+		}
+		if stateAcc != nil {
+			log.Info("state account info", "db key", common.Bytes2Hex(key), "account", common.Bytes2Hex(accountHash.Bytes()),
+				"account root", stateAcc.Root, "code hash", stateAcc.CodeHash)
+		}
+		// if account.root == empty,  deleteRange(Account)
+		emptyHash := common.Hash{}
+		if stateAcc == nil || stateAcc.Root == emptyHash {
+			storageDirty++
+			if stateAcc != nil && stateAcc.Root == emptyHash {
+				log.Info("state account hash empty")
+			} else {
+				log.Info("account is nil", "db key", common.Bytes2Hex(key), "account", common.Bytes2Hex(accountHash.Bytes()))
+			}
+			// log.Info("range deleting the stale trie", "account hash", accountHash)
+			//	rawdb.DeleteStorageTrie(chaindb, accountHash)
+		}
+		if time.Since(logged) > 30*time.Second {
+			log.Info("Checking dirty state", "account dirty", accountDirty, "storage dirty", storageDirty)
+			logged = time.Now()
+		}
+	}
+	it.Release()
+
+	return nil
 }
