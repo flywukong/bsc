@@ -1278,7 +1278,11 @@ func deleteStaleTrie(ctx *cli.Context) error {
 	}
 
 	log.Info("head root info", "hash", headBlock.Root())
-	triedb := triedb.NewDatabase(chaindb, triedb.HashDefaults)
+
+	triedb := triedb.NewDatabase(chaindb, &triedb.Config{
+		Preimages: false,
+		PathDB:    pathdb.Defaults,
+	})
 	defer triedb.Close()
 
 	snapconfig := snapshot.Config{
