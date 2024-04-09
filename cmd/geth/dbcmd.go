@@ -1272,19 +1272,11 @@ func deleteStaleTrie(ctx *cli.Context) error {
 	chaindb := utils.MakeChainDatabase(ctx, stack, false, false)
 	defer chaindb.Close()
 
-	headBlock := rawdb.ReadHeadBlock(chaindb)
-	if headBlock == nil {
-		return errors.New("failed to load head block")
-	}
-
-	log.Info("head root info", "hash", headBlock.Root())
 	triedb := triedb.NewDatabase(chaindb, &triedb.Config{
 		Preimages: false,
 		PathDB:    pathdb.Defaults,
 	})
 	defer triedb.Close()
-
-	log.Info("head info", "head number", headBlock.Number())
 
 	_, diskRoot := rawdb.ReadAccountTrieNode(chaindb, nil)
 	diskRoot = types.TrieRootHash(diskRoot)
@@ -1292,7 +1284,7 @@ func deleteStaleTrie(ctx *cli.Context) error {
 
 	t, err := trie.NewStateTrie(trie.StateTrieID(diskRoot), triedb)
 	if err != nil {
-		log.Error("Failed to open trie", "root", headBlock.Root(), "err", err)
+		log.Error("Failed to open trie", "root", diskRoot, "err", err)
 		return err
 	}
 	if t == nil {
@@ -1315,24 +1307,24 @@ func deleteStaleTrie(ctx *cli.Context) error {
 		}
 
 		// Get Account Hash
-		accountHash := common.BytesToAddress(key[1 : 1+common.HashLength])
-		if dirtyAccount != accountHash.String() {
-			dirtyAccount = accountHash.String()
-			accountDirty++
-		}
-
+		accountHash := common.BytesToHash(key[1 : 1+common.HashLength])
 		// Read Account Hash from trie
-		stateAcc, err := t.GetAccount(accountHash, false)
+		stateAcc, err := t.GetAccountByHash(accountHash)
 		if err != nil {
 			return err
 		}
-		if stateAcc != nil {
-			log.Info("state account info", "db key", common.Bytes2Hex(key), "account", common.Bytes2Hex(accountHash.Bytes()),
-				"account root", stateAcc.Root, "code hash", stateAcc.CodeHash)
-		}
+
 		// if account.root == empty,  deleteRange(Account)
 		emptyHash := common.Hash{}
 		if stateAcc == nil || stateAcc.Root == emptyHash {
+			if dirtyAccount != accountHash.String() {
+				dirtyAccount = accountHash.String()
+				accountDirty++
+			}
+			if stateAcc != nil {
+				log.Info("state account info", "db key", common.Bytes2Hex(key), "account", common.Bytes2Hex(accountHash.Bytes()),
+					"account root", stateAcc.Root, "code hash", stateAcc.CodeHash)
+			}
 			storageDirty++
 			if stateAcc != nil && stateAcc.Root == emptyHash {
 				log.Info("state account hash empty")
@@ -1348,6 +1340,6 @@ func deleteStaleTrie(ctx *cli.Context) error {
 		}
 	}
 	it.Release()
-
+	log.Info("Checking dirty state finish", "account dirty", accountDirty, "storage dirty", storageDirty)
 	return nil
 }
