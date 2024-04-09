@@ -35,7 +35,6 @@ import (
 	"github.com/ethereum/go-ethereum/console/prompt"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/internal/flags"
@@ -1296,12 +1295,15 @@ func deleteStaleTrie(ctx *cli.Context) error {
 	if err != nil {
 		return err // The relevant snapshot(s) might not exist
 	}
-
 	// Retrieve the root node of persistent state.
-	_, diskRoot := rawdb.ReadAccountTrieNode(chaindb, nil)
-	diskRoot = types.TrieRootHash(diskRoot)
-	log.Info("disk root info", "hash", diskRoot)
-	snapshot := snaptree.Snapshot(diskRoot)
+	/*
+		_, diskRoot := rawdb.ReadAccountTrieNode(chaindb, nil)
+		diskRoot = types.TrieRootHash(diskRoot)
+		log.Info("disk root info", "hash", diskRoot)
+	*/
+	bottomHash := triedb.GetBottomHash()
+	log.Info("bottom hash", "hash", bottomHash)
+	snapshot := snaptree.Snapshot(bottomHash)
 	if snapshot == nil {
 		return errors.New("snapshot empty")
 	}
