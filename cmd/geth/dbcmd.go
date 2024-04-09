@@ -1295,6 +1295,9 @@ func deleteStaleTrie(ctx *cli.Context) error {
 		log.Error("Failed to open trie", "root", headBlock.Root(), "err", err)
 		return err
 	}
+	if t == nil {
+		return errors.New("trie empty")
+	}
 
 	var (
 		it  ethdb.Iterator
