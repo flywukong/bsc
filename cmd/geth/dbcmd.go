@@ -35,6 +35,7 @@ import (
 	"github.com/ethereum/go-ethereum/console/prompt"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/internal/flags"
@@ -1277,36 +1278,24 @@ func deleteStaleTrie(ctx *cli.Context) error {
 	}
 
 	log.Info("head root info", "hash", headBlock.Root())
-
 	triedb := triedb.NewDatabase(chaindb, &triedb.Config{
 		Preimages: false,
 		PathDB:    pathdb.Defaults,
 	})
 	defer triedb.Close()
 
-	snapconfig := snapshot.Config{
-		CacheSize:  1024,
-		Recovery:   false,
-		NoBuild:    true,
-		AsyncBuild: false,
+	log.Info("head info", "head number", headBlock.Number())
+
+	_, diskRoot := rawdb.ReadAccountTrieNode(chaindb, nil)
+	diskRoot = types.TrieRootHash(diskRoot)
+	log.Info("disk root info", "hash", diskRoot)
+
+	t, err := trie.NewStateTrie(trie.StateTrieID(diskRoot), triedb)
+	if err != nil {
+		log.Error("Failed to open trie", "root", headBlock.Root(), "err", err)
+		return err
 	}
 
-	snaptree, err := snapshot.New(snapconfig, chaindb, triedb, headBlock.Root(), 128, false)
-	if err != nil {
-		return err // The relevant snapshot(s) might not exist
-	}
-	// Retrieve the root node of persistent state.
-	/*
-		_, diskRoot := rawdb.ReadAccountTrieNode(chaindb, nil)
-		diskRoot = types.TrieRootHash(diskRoot)
-		log.Info("disk root info", "hash", diskRoot)
-	*/
-	bottomHash := triedb.GetBottomHash()
-	log.Info("bottom hash", "hash", bottomHash)
-	snapshot := snaptree.Snapshot(bottomHash)
-	if snapshot == nil {
-		return errors.New("snapshot empty")
-	}
 	var (
 		it  ethdb.Iterator
 		key []byte
@@ -1319,17 +1308,20 @@ func deleteStaleTrie(ctx *cli.Context) error {
 			continue
 		}
 		// Get Account Hash
-		accountHash := common.BytesToHash(key[1 : 1+common.HashLength])
+		accountHash := common.BytesToAddress(key[1 : 1+common.HashLength])
 		// Read Account Hash from snap
-		simAcc, err := snapshot.Account(accountHash)
+		stateAcc, err := t.GetAccount(accountHash, false)
 		if err != nil {
 			return err
 		}
-		log.Info("slim account info", "db key", common.Bytes2Hex(key), "account root", simAcc.Root, "code hash", simAcc.CodeHash)
+		log.Info("slim account info", "db key", common.Bytes2Hex(key), "account root", stateAcc.Root, "code hash", stateAcc.CodeHash)
 		// if account.root == empty,  deleteRange(Account)
-		if simAcc == nil || simAcc.Root == nil {
-			if simAcc.Root == nil {
+		emptyHash := common.Hash{}
+		if stateAcc == nil || stateAcc.Root == emptyHash {
+			if stateAcc.Root == emptyHash {
 				log.Info("account root is nil")
+			} else {
+				log.Info("account is nik")
 			}
 			log.Info("range deleting the stale trie", "account hash", accountHash)
 			//rawdb.DeleteStorageTrie(chaindb, accountHash)
