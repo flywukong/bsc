@@ -1317,14 +1317,17 @@ func deleteStaleTrie(ctx *cli.Context) error {
 		if err != nil {
 			return err
 		}
-		log.Info("slim account info", "db key", common.Bytes2Hex(key), "account root", stateAcc.Root, "code hash", stateAcc.CodeHash)
+		if stateAcc != nil {
+			log.Info("state account info", "db key", common.Bytes2Hex(key), "account", common.Bytes2Hex(accountHash.Bytes()),
+				"account root", stateAcc.Root, "code hash", stateAcc.CodeHash)
+		}
 		// if account.root == empty,  deleteRange(Account)
 		emptyHash := common.Hash{}
 		if stateAcc == nil || stateAcc.Root == emptyHash {
-			if stateAcc.Root == emptyHash {
-				log.Info("account root is nil")
+			if stateAcc != nil && stateAcc.Root == emptyHash {
+				log.Info("state account hash empty")
 			} else {
-				log.Info("account is nik")
+				log.Info("account is nil", "db key", common.Bytes2Hex(key), "account", common.Bytes2Hex(accountHash.Bytes()))
 			}
 			log.Info("range deleting the stale trie", "account hash", accountHash)
 			//rawdb.DeleteStorageTrie(chaindb, accountHash)
