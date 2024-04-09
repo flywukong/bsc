@@ -1265,7 +1265,7 @@ func deleteStaleTrie(ctx *cli.Context) error {
 	if ctx.NArg() > 0 {
 		return fmt.Errorf("no arguments required")
 	}
-
+	logged := time.Now()
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
@@ -1305,14 +1305,23 @@ func deleteStaleTrie(ctx *cli.Context) error {
 	)
 
 	it = chaindb.NewIterator(rawdb.TrieNodeStoragePrefix, nil)
+	storageDirty := 0
+	accountDirty := 0
+	var dirtyAccount string
 	for it.Next() {
 		key = it.Key()
 		if !rawdb.IsStorageTrieNode(key) {
 			continue
 		}
+
 		// Get Account Hash
 		accountHash := common.BytesToAddress(key[1 : 1+common.HashLength])
-		// Read Account Hash from snap
+		if dirtyAccount != accountHash.String() {
+			dirtyAccount = accountHash.String()
+			accountDirty++
+		}
+
+		// Read Account Hash from trie
 		stateAcc, err := t.GetAccount(accountHash, false)
 		if err != nil {
 			return err
@@ -1324,13 +1333,18 @@ func deleteStaleTrie(ctx *cli.Context) error {
 		// if account.root == empty,  deleteRange(Account)
 		emptyHash := common.Hash{}
 		if stateAcc == nil || stateAcc.Root == emptyHash {
+			storageDirty++
 			if stateAcc != nil && stateAcc.Root == emptyHash {
 				log.Info("state account hash empty")
 			} else {
 				log.Info("account is nil", "db key", common.Bytes2Hex(key), "account", common.Bytes2Hex(accountHash.Bytes()))
 			}
-			log.Info("range deleting the stale trie", "account hash", accountHash)
-			//rawdb.DeleteStorageTrie(chaindb, accountHash)
+			// log.Info("range deleting the stale trie", "account hash", accountHash)
+			//	rawdb.DeleteStorageTrie(chaindb, accountHash)
+		}
+		if time.Since(logged) > 30*time.Second {
+			log.Info("Checking dirty state", "account dirty", accountDirty, "storage dirty", storageDirty)
+			logged = time.Now()
 		}
 	}
 	it.Release()
