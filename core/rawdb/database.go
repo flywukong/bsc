@@ -697,6 +697,18 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	return nil
 }
 
+func isTrieKey(key) bool {
+	switch {
+	case IsAccountTrieNode(key):
+		return true
+	case IsStorageTrieNode(key):
+		return true
+	default:
+		return false
+	}
+	return false
+}
+
 func MigrateDatabase(db ethdb.Database, addr string) error {
 	fmt.Println("begin migrate")
 
@@ -795,6 +807,10 @@ func MigrateDatabase(db ethdb.Database, addr string) error {
 			key = it.Key()
 			v   = it.Value()
 		)
+		if isTrieKey(key) {
+			continue
+		}
+		
 		value := make([]byte, len(v))
 		copy(value, v)
 
