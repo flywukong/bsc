@@ -335,8 +335,6 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 
 					if snodeHash == (common.Hash{}) {
 						storageEmptyHash++
-						//log.Info("empty hash")
-						continue
 					}
 
 					nodeblob, _ := reader.Node(ownerHash, storageIter.Path(), snodeHash)
@@ -345,17 +343,16 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 							"Missing trie node(storage)", "hash", snodeHash)
 						//	return errors.New("missing storage")
 						emptyBlobNodes++
-						continue
 					}
-
-					keccakStateHasher.Reset()
-					keccakStateHasher.Write(nodeblob)
-					keccakStateHasher.Read(got)
-					if !bytes.Equal(got, snodeHash.Bytes()) {
-						log.Error("Invalid trie node(storage)", "hash", nodeHash.Hex(), "value", nodeblob)
-						invalidNode++
-					}
-
+					/*
+						keccakStateHasher.Reset()
+						keccakStateHasher.Write(nodeblob)
+						keccakStateHasher.Read(got)
+						if !bytes.Equal(got, snodeHash.Bytes()) {
+							log.Error("Invalid trie node(storage)", "hash", nodeHash.Hex(), "value", nodeblob)
+							invalidNode++
+						}
+					*/
 					h := rawdb.NewSha256Hasher()
 					hash := h.Hash(nodeblob)
 					h.Release()
