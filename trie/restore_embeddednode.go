@@ -273,16 +273,16 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		return err
 	}
 	var (
-		nodes          int
-		accounts       int
-		slots          int
-		lastReport     time.Time
-		start          = time.Now()
-		emptyBlobNodes int
-		CA_account     int
-		embeddedCount  = 0
-		//	keccakStateHasher   = crypto.NewKeccakState()
-		//	got                 = make([]byte, 32)
+		nodes               int
+		accounts            int
+		slots               int
+		lastReport          time.Time
+		start               = time.Now()
+		emptyBlobNodes      int
+		CA_account          int
+		embeddedCount       = 0
+		keccakStateHasher   = crypto.NewKeccakState()
+		got                 = make([]byte, 32)
 		invalidNode         = 0
 		storageEmbeddedNode int
 		storageEmptyHash    int
@@ -339,11 +339,19 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 
 					nodeblob, _ := reader.Node(ownerHash, storageIter.Path(), snodeHash)
 					if len(nodeblob) == 0 {
-						log.Error(""+
-							"Missing trie node(storage)", "hash", snodeHash)
+						//	log.Error(""+
+						//		"Missing trie node(storage)", "hash", snodeHash)
 						//	return errors.New("missing storage")
 						emptyBlobNodes++
 					} else {
+						keccakStateHasher.Reset()
+						keccakStateHasher.Write(nodeblob)
+						keccakStateHasher.Read(got)
+						if !bytes.Equal(got, snodeHash.Bytes()) {
+							log.Error("Invalid trie node(storage)", "hash", snodeHash.Hex(), "value", nodeblob)
+							invalidNode++
+						}
+
 						h := rawdb.NewSha256Hasher()
 						hash := h.Hash(nodeblob)
 						h.Release()
@@ -401,7 +409,7 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 					if time.Since(lastReport) > time.Second*3 {
 						log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "CA account", CA_account,
 							"embedded", embeddedCount, "storage embedded node", storageEmbeddedNode,
-							"invalid", invalidNode, "empty hash", storageEmptyHash, "slot", slots, "elapsed",
+							"invalid", invalidNode, "empty hash", storageEmptyHash, "empty blob", emptyBlobNodes, "elapsed",
 							common.PrettyDuration(time.Since(start)))
 						lastReport = time.Now()
 					}
@@ -415,8 +423,8 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 
 			if time.Since(lastReport) > time.Second*8 {
 				log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "CA account", CA_account,
-					"embedded", embeddedCount, "storage embedded node", storageEmbeddedNode, "invalid", invalidNode,
-					"slot", slots, "empty hash", storageEmptyHash, "elapsed",
+					"embedded", embeddedCount, "storage embedded node", storageEmbeddedNode,
+					"invalid", invalidNode, "empty hash", storageEmptyHash, "empty blob", emptyBlobNodes, "elapsed",
 					common.PrettyDuration(time.Since(start)))
 				lastReport = time.Now()
 			}
