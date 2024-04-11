@@ -2,22 +2,26 @@ package trie
 
 import (
 	"bytes"
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/rlp"
 	"golang.org/x/crypto/sha3"
 )
 
 const ExpectLeafNodeLen = 32
 
 type EmbeddedNodeRestorer struct {
-	db   ethdb.Database
-	stat *dbNodeStat
+	db     ethdb.Database
+	triedb Database
+	stat   *dbNodeStat
 }
 
 type dbNodeStat struct {
@@ -256,4 +260,173 @@ func (restorer *EmbeddedNodeRestorer) Run() error {
 			"value node key", restorer.stat.EmbeddedNodeCnt+restorer.stat.ValueNodeCnt)
 	}
 	return nil
+}
+
+func (restorer *EmbeddedNodeRestorer) Run2() error {
+	_, diskRoot := rawdb.ReadAccountTrieNode(restorer.db, nil)
+	diskRoot = types.TrieRootHash(diskRoot)
+	log.Info("disk root info", "hash", diskRoot)
+
+	t, err := NewStateTrie(StateTrieID(diskRoot), restorer.triedb)
+	if err != nil {
+		log.Error("Failed to open trie", "root", diskRoot, "err", err)
+		return err
+	}
+	var (
+		nodes               int
+		accounts            int
+		slots               int
+		lastReport          time.Time
+		start               = time.Now()
+		emptyBlobNodes      int
+		CA_account          = uint64(0)
+		embeddedCount       = 0
+		keccakStateHasher   = crypto.NewKeccakState()
+		got                 = make([]byte, 32)
+		invalidNode         = 0
+		storageEmbeddedNode int
+	)
+	accIter, err := t.NodeIterator(nil)
+	if err != nil {
+		log.Error("Failed to open iterator", "root", diskRoot, "err", err)
+		return err
+	}
+	reader, err := restorer.triedb.Reader(diskRoot)
+	if err != nil {
+		log.Error("State is non-existent", "root", diskRoot)
+		return nil
+	}
+
+	for accIter.Next(true) {
+		nodes += 1
+		nodeHash := accIter.Hash()
+
+		// If it's a leaf node, yes we are touching an account,
+		// dig into the storage trie further.
+		if accIter.Leaf() {
+			accounts += 1
+			var acc types.StateAccount
+			if err := rlp.DecodeBytes(accIter.LeafBlob(), &acc); err != nil {
+				log.Error("Invalid account encountered during traversal", "err", err)
+				return errors.New("invalid account")
+			}
+
+			// if it is a CA account , iterator the storage trie to find embedded node
+			if acc.Root != types.EmptyRootHash {
+				id := StorageTrieID(diskRoot, common.BytesToHash(accIter.LeafKey()), acc.Root)
+				storageTrie, err := NewStateTrie(id, restorer.triedb)
+				if err != nil {
+					log.Error("Failed to open storage trie", "root", acc.Root, "err", err)
+					return errors.New("missing storage trie")
+				}
+
+				storageIter, err := storageTrie.NodeIterator(nil)
+				if err != nil {
+					log.Error("Failed to open storage iterator", "root", acc.Root, "err", err)
+					return err
+				}
+				// iterator the storage trie
+				for storageIter.Next(true) {
+					nodes += 1
+					snodeHash := storageIter.Hash()
+					ownerHash := common.BytesToHash(accIter.LeafKey())
+					nodeblob, _ := reader.Node(ownerHash, storageIter.Path(), snodeHash)
+					if len(nodeblob) == 0 {
+						log.Error("Missing trie node(storage)", "hash", nodeHash)
+						//	return errors.New("missing storage")
+						emptyBlobNodes++
+						continue
+					}
+					keccakStateHasher.Reset()
+					keccakStateHasher.Write(nodeblob)
+					keccakStateHasher.Read(got)
+					if !bytes.Equal(got, snodeHash.Bytes()) {
+						log.Error("Invalid trie node(storage)", "hash", nodeHash.Hex(), "value", nodeblob)
+						invalidNode++
+					}
+
+					h := rawdb.NewSha256Hasher()
+					hash := h.Hash(nodeblob)
+					h.Release()
+
+					key := storageTrieNodeKey(ownerHash, storageIter.Path())
+					// check if is full short node inside full node
+					shortnodeList, err := checkIfContainShortNode(hash.Bytes(), key, nodeblob, restorer.stat)
+					if err != nil {
+						log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
+						return err
+					}
+
+					// find shorNode inside the fullnode
+					if len(shortnodeList) > 0 {
+						if len(shortnodeList) > 1 {
+							log.Info("fullnode contain more than 1 short node", "short node num", len(shortnodeList))
+						}
+						for _, snode := range shortnodeList {
+							if rawdb.IsStorageTrieNode(key) {
+								storageEmbeddedNode++
+								fullNodePath := key[1+common.HashLength:]
+								newKey := append(key, byte(snode.Idx))
+								log.Info("embedded storage shortNode info", "trie key", common.Bytes2Hex(key),
+									"fullNode path", common.Bytes2Hex(fullNodePath),
+									"new node key", common.Bytes2Hex(newKey), "new node value", common.Bytes2Hex(snode.NodeBytes))
+								// batch write
+								//	if err := batch.Put(newKey, snode.NodeBytes); err != nil {
+								//		return err
+							}
+
+						}
+					}
+
+					// Bump the counter if it's leaf node.
+					if storageIter.Leaf() {
+						CA_account++
+					}
+
+					if storageIter.NodeBlob() == nil {
+						embeddedCount++
+					}
+
+					if time.Since(lastReport) > time.Second*8 {
+						log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "slots", slots,
+							"embedded", embeddedCount, "invalid", invalidNode, "elapsed", common.PrettyDuration(time.Since(start)))
+						lastReport = time.Now()
+					}
+				}
+
+				if storageIter.Error() != nil {
+					log.Error("Failed to traverse storage trie", "root", acc.Root, "err", storageIter.Error())
+					return storageIter.Error()
+				}
+			}
+
+			if time.Since(lastReport) > time.Second*8 {
+				log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "slots", slots, "elapsed", common.PrettyDuration(time.Since(start)))
+				lastReport = time.Now()
+			}
+		}
+	}
+	if accIter.Error() != nil {
+		log.Error("Failed to traverse state trie", "root", diskRoot, "err", accIter.Error())
+		return accIter.Error()
+	}
+
+	log.Info("embedded node info", "storage embedded node", storageEmbeddedNode)
+
+	log.Info("State is complete", "nodes", nodes, "accounts", accounts, "slots", slots, "elapsed", common.PrettyDuration(time.Since(start)))
+	return nil
+}
+
+// accountTrieNodeKey = TrieNodeAccountPrefix + nodePath.
+func accountTrieNodeKey(path []byte) []byte {
+	return append(rawdb.TrieNodeAccountPrefix, path...)
+}
+
+// storageTrieNodeKey = TrieNodeStoragePrefix + accountHash + nodePath.
+func storageTrieNodeKey(accountHash common.Hash, path []byte) []byte {
+	buf := make([]byte, len(rawdb.TrieNodeStoragePrefix)+common.HashLength+len(path))
+	n := copy(buf, rawdb.TrieNodeStoragePrefix)
+	n += copy(buf[n:], accountHash.Bytes())
+	copy(buf[n:], path)
+	return buf
 }
