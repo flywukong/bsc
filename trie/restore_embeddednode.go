@@ -391,12 +391,12 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 
 					// Bump the counter if it's leaf node.
 					if storageIter.Leaf() {
-						CA_account++
-						slots++
+						CA_account += 1
+						slots += 1
 					}
 
 					if storageIter.NodeBlob() == nil {
-						embeddedCount++
+						embeddedCount += 1
 					}
 
 					if time.Since(lastReport) > time.Second*3 {
