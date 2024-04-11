@@ -808,6 +808,8 @@ func traverseRawState(ctx *cli.Context) error {
 							log.Error("Invalid trie node(storage)", "hash", node.Hex(), "value", blob)
 							return errors.New("invalid storage node")
 						}
+					} else {
+						log.Info("empty storage hash node", "hash", node)
 					}
 					// Bump the counter if it's leaf node.
 					if storageIter.Leaf() {

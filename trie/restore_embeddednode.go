@@ -287,6 +287,7 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		//got                 = make([]byte, 32)
 		// batch               = restorer.newDB.NewBatch()
 		invalidNode         = 0
+		embeddedNode        int
 		storageEmbeddedNode int
 		storageEmptyHash    int
 	)
@@ -296,30 +297,24 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		log.Error("Failed to open iterator", "root", diskRoot, "err", err)
 		return err
 	}
-	reader, err := restorer.Triedb.Reader(diskRoot)
-	if err != nil {
-		log.Error("State is non-existent", "root", diskRoot)
-		return nil
-	}
 
 	for accIter.Next(true) {
 		nodes += 1
-		nodeHash := accIter.Hash()
-		if nodeHash != (common.Hash{}) {
-			/*
-				accKey := accountTrieNodeKey(accIter.Path())
-				accValue, _ := reader.Node(common.Hash{}, accIter.Path(), nodeHash)
-				if len(accValue) == 0 {
-					log.Error("Missing trie node(account)", "hash", nodeHash)
-					return errors.New("missing account")
-				}
-				log.Info("write key", "account", accKey)
-				// write
-				if err := batch.Put(accKey, accValue); err != nil {
-					return err
-				}
 
-			*/
+		// write the node into db
+		accKey := accountTrieNodeKey(accIter.Path())
+		accValue := accIter.NodeBlob()
+		if accValue == nil {
+			log.Warn("trie node(account) with node blob empty")
+			embeddedNode++
+		}
+		compareValue, err := restorer.db.Get(accKey)
+		if err == nil && bytes.Compare(compareValue, accValue) == 0 {
+			log.Info("compare value in db same", "key", common.Bytes2Hex(accKey))
+		} else {
+			log.Info("compare value in db not same", "err", err.Error(),
+				"key", common.Bytes2Hex(accKey), "node blob", common.Bytes2Hex(accValue), ""+
+					"db value", common.Bytes2Hex(compareValue))
 		}
 
 		// If it's a leaf node, yes we are touching an account,
@@ -350,65 +345,57 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 				// iterator the storage trie
 				for storageIter.Next(true) {
 					nodes += 1
-					snodeHash := storageIter.Hash()
+					nodeblob := storageIter.NodeBlob()
+					if nodeblob == nil {
+						log.Warn("trie node(storage) with node blob empty")
+						embeddedNode++
+						continue
+					}
 
-					if snodeHash == (common.Hash{}) {
-						storageEmptyHash++
+					h := rawdb.NewSha256Hasher()
+					hash := h.Hash(nodeblob)
+					h.Release()
+
+					key := storageTrieNodeKey(ownerHash, storageIter.Path())
+
+					compareValue2, err := restorer.db.Get(key)
+					if err == nil && bytes.Compare(compareValue2, nodeblob) == 0 {
+						log.Info("compare value in db same", "key", common.Bytes2Hex(key))
 					} else {
-						nodeblob, _ := reader.Node(ownerHash, storageIter.Path(), snodeHash)
-						if len(nodeblob) == 0 {
-							//	log.Error(""+
-							//		"Missing trie node(storage)", "hash", snodeHash)
-							//	return errors.New("missing storage")
-							emptyBlobNodes++
-						} else {
-							h := rawdb.NewSha256Hasher()
-							hash := h.Hash(nodeblob)
-							h.Release()
+						log.Info("compare value in db not same", "err", err.Error(),
+							"key", common.Bytes2Hex(key), "node blob", common.Bytes2Hex(nodeblob), ""+
+								"db value", common.Bytes2Hex(compareValue2))
+					}
 
-							key := storageTrieNodeKey(ownerHash, storageIter.Path())
-							// write storage  node
-							//if err := batch.Put(key, nodeblob); err != nil {
-							//	return err
-							//}
-							// check if is full short node inside full node
-							shortnodeList, err := checkIfContainShortNode(hash.Bytes(), key, nodeblob, restorer.stat)
-							if err != nil {
-								log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
-								return err
-							}
-
-							// find shorNode inside the fullnode
-							if len(shortnodeList) > 0 {
-								if len(shortnodeList) > 1 {
-									log.Info("fullnode contain more than 1 short node", "short node num", len(shortnodeList))
-								}
-								for _, snode := range shortnodeList {
-									if rawdb.IsStorageTrieNode(key) {
-										storageEmbeddedNode++
-										fullNodePath := key[1+common.HashLength:]
-										newKey := append(key, byte(snode.Idx))
-										log.Info("embedded storage shortNode info", "trie key", common.Bytes2Hex(key),
-											"fullNode path", common.Bytes2Hex(fullNodePath),
-											"new node key", common.Bytes2Hex(newKey), "new node value", common.Bytes2Hex(snode.NodeBytes))
-										// batch write
-										//	if err := batch.Put(newKey, snode.NodeBytes); err != nil {
-										//		return err
-									}
-
-								}
+					// write storage  node
+					//if err := batch.Put(key, nodeblob); err != nil {
+					//	return err
+					//}
+					// check if is full short node inside full node
+					shortnodeList, err := checkIfContainShortNode(hash.Bytes(), key, nodeblob, restorer.stat)
+					if err != nil {
+						log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
+						return err
+					}
+					// find shorNode inside the fullnode
+					if len(shortnodeList) > 0 {
+						if len(shortnodeList) > 1 {
+							log.Info("fullnode contain more than 1 short node", "short node num", len(shortnodeList))
+						}
+						for _, snode := range shortnodeList {
+							if rawdb.IsStorageTrieNode(key) {
+								storageEmbeddedNode++
+								fullNodePath := key[1+common.HashLength:]
+								newKey := append(key, byte(snode.Idx))
+								log.Info("embedded storage shortNode info", "trie key", common.Bytes2Hex(key),
+									"fullNode path", common.Bytes2Hex(fullNodePath),
+									"new node key", common.Bytes2Hex(newKey), "new node value", common.Bytes2Hex(snode.NodeBytes))
+								// batch write
+								//	if err := batch.Put(newKey, snode.NodeBytes); err != nil {
+								//		return err
 							}
 
 						}
-						/*
-							keccakStateHasher.Reset()
-							keccakStateHasher.Write(nodeblob)
-							keccakStateHasher.Read(got)
-							if !bytes.Equal(got, snodeHash.Bytes()) {
-								log.Error("Invalid trie node(storage)", "hash", nodeHash.Hex(), "value", nodeblob)
-								invalidNode++
-							}
-						*/
 					}
 					// Bump the counter if it's leaf node.
 					if storageIter.Leaf() {
