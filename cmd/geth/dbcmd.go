@@ -640,14 +640,16 @@ func dbTrieSplit(ctx *cli.Context) error {
 	db := utils.MakeChainDatabase(ctx, stack, false, false)
 	defer db.Close()
 
-	if stack.Config().TrieDir == "" {
-		return fmt.Errorf("trie dir must be set")
+	destDir := ctx.Args().Get(0)
+
+	if !filepath.IsAbs(destDir) {
+		// force absolute paths, which often fail due to the splicing of relative paths
+		fmt.Println("datadir not abs path" + destDir)
 	}
 
-	seprateDB := utils.SplitTrieDatabase(ctx, stack, false, false)
-	defer seprateDB.Close()
+	fmt.Println("dest dir", destDir)
 
-	err := rawdb.SplitDatabase(db, seprateDB)
+	err := rawdb.SplitDatabase(db, destDir)
 	if err != nil {
 		return err
 	}
@@ -657,20 +659,22 @@ func dbTrieSplit(ctx *cli.Context) error {
 
 // dbTrieSplit split the trie related data to separated dir
 func dbBlockSplit(ctx *cli.Context) error {
-	stack, _ := makeConfigNode(ctx)
-	defer stack.Close()
+	/*
+		stack, _ := makeConfigNode(ctx)
+		defer stack.Close()
 
-	db := utils.MakeChainDatabase(ctx, stack, false, false)
-	defer db.Close()
+		db := utils.MakeChainDatabase(ctx, stack, false, false)
+		defer db.Close()
 
-	blockStore := utils.SplitBlockDatabase(ctx, stack, false, false)
-	defer blockStore.Close()
+		blockStore := utils.SplitBlockDatabase(ctx, stack, false, false)
+		defer blockStore.Close()
 
-	err := rawdb.SplitBlockDatabaseV2(db, blockStore)
-	if err != nil {
-		return err
-	}
-
+		/
+		err := rawdb.SplitBlockDatabase(db, blockStore)
+		if err != nil {
+			return err
+		}
+	*/
 	return nil
 }
 

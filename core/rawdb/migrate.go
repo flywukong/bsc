@@ -7,11 +7,13 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/ethdb"
+	ethpebble "github.com/ethereum/go-ethereum/ethdb/pebble"
 )
 
 var (
 	originDB        ethdb.Database
 	triedbInstance  ethdb.Database
+	pebbleDB        *ethpebble.Database
 	blockStore      ethdb.KeyValueStore
 	migrateType     int64
 	createErr       error
@@ -29,10 +31,21 @@ const (
 
 var ctx = context.Background()
 
+/*
 func InitDb(db ethdb.Database, trieDB ethdb.Database) {
 	originDB = db
 	triedbInstance = trieDB
 	migrateType = tiredbType
+}
+*/
+
+func InitDb(addr string) *ethpebble.Database {
+	pebbleDB, createErr = ethpebble.New(addr, 4000, 65536, "eth/db/chaindata/", false)
+	if createErr != nil {
+		fmt.Println("create pebble err", createErr.Error())
+		panic("create err")
+	}
+	return pebbleDB
 }
 
 func InitBlockStore(db ethdb.Database, block ethdb.KeyValueStore) {
@@ -43,13 +56,7 @@ func InitBlockStore(db ethdb.Database, block ethdb.KeyValueStore) {
 
 func (job *Job) MigrateKv() error {
 	if len(job.Kvbuffer) > 0 {
-		var kvBatch ethdb.Batch
-		if migrateType == tiredbType {
-			kvBatch = triedbInstance.NewBatch()
-		} else {
-			kvBatch = blockStore.NewBatch()
-		}
-
+		kvBatch := pebbleDB.NewBatch()
 		for key, value := range job.Kvbuffer {
 			batchErr := kvBatch.Put([]byte(key), value)
 			if batchErr != nil {
@@ -61,19 +68,7 @@ func (job *Job) MigrateKv() error {
 			fmt.Println("send kv rocks error", err.Error())
 			return err
 		}
-
-		for delKey, _ := range job.Kvbuffer {
-			k := []byte(delKey)
-			if err := originDB.Delete(k); err != nil {
-				// try again
-				if delErr := originDB.Delete(k); delErr != nil {
-					fmt.Println("delete kv rocks error", err.Error())
-					return delErr
-				}
-			}
-		}
 	}
-
 	return nil
 }
 

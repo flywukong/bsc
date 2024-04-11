@@ -824,21 +824,9 @@ func ReadChainMetadata(db ethdb.KeyValueStore) [][]string {
 
 func isTrieKey(key, value []byte) bool {
 	switch {
-	case IsLegacyTrieNode(key, value):
-		return true
-	case bytes.HasPrefix(key, stateIDPrefix) && len(key) == len(stateIDPrefix)+common.HashLength:
-		return true
 	case IsAccountTrieNode(key):
 		return true
 	case IsStorageTrieNode(key):
-		return true
-	case bytes.HasPrefix(key, PreimagePrefix) && len(key) == (len(PreimagePrefix)+common.HashLength):
-		return true
-	case bytes.Equal(key, fastTrieProgressKey):
-		return true
-	case bytes.Equal(key, trieJournalKey):
-		return true
-	case bytes.Equal(key, persistentStateIDKey):
 		return true
 	default:
 		return false
@@ -879,7 +867,7 @@ func isBlockKey(key, value []byte) bool {
 	}
 }
 
-func SplitDatabase(db ethdb.Database, trieDB ethdb.Database) error {
+func SplitDatabase(db ethdb.Database, addr string) error {
 	fmt.Println("begin migrate")
 
 	// get startKey from db if exist
@@ -963,7 +951,7 @@ func SplitDatabase(db ethdb.Database, trieDB ethdb.Database) error {
 		snapcount   uint64
 	)
 	// init remote db for data sending
-	InitDb(db, trieDB)
+	InitDb(addr)
 
 	count = 0
 	snapcount = 0
@@ -1012,7 +1000,7 @@ func SplitDatabase(db ethdb.Database, trieDB ethdb.Database) error {
 			}
 			// print cost time every 50000000 keys
 			if batch_count%500000 == 0 {
-				fmt.Println("finish level db k,v num:", batch_count*100,
+				fmt.Println("finish write db k,v num:", batch_count*100,
 					"cost time:", time.Since(start).Nanoseconds()/1000000000, "s")
 			}
 			isbatchFirstKey = true
@@ -1042,6 +1030,7 @@ func SplitDatabase(db ethdb.Database, trieDB ethdb.Database) error {
 	return nil
 }
 
+/*
 func SplitDatabaseV2(db ethdb.Database, blockdb ethdb.Database) error {
 	fmt.Println("begin migrate")
 
@@ -1367,3 +1356,4 @@ func SplitBlockDatabaseV2(db ethdb.Database, blockdb ethdb.KeyValueStore) error 
 
 	return nil
 }
+*/
