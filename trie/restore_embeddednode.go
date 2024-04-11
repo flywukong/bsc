@@ -279,7 +279,7 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		lastReport          time.Time
 		start               = time.Now()
 		emptyBlobNodes      int
-		CA_account          = uint64(0)
+		CA_account          int
 		embeddedCount       = 0
 		keccakStateHasher   = crypto.NewKeccakState()
 		got                 = make([]byte, 32)
@@ -287,6 +287,7 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		storageEmbeddedNode int
 		storageEmptyHash    int
 	)
+
 	accIter, err := t.NodeIterator(nil)
 	if err != nil {
 		log.Error("Failed to open iterator", "root", diskRoot, "err", err)
@@ -391,6 +392,7 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 					// Bump the counter if it's leaf node.
 					if storageIter.Leaf() {
 						CA_account++
+						slots++
 					}
 
 					if storageIter.NodeBlob() == nil {
@@ -399,7 +401,8 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 
 					if time.Since(lastReport) > time.Second*3 {
 						log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "CA account", CA_account,
-							"embedded", embeddedCount, "invalid", invalidNode, "empty hash", storageEmptyHash, "elapsed",
+							"embedded", embeddedCount, "storage embedded node", storageEmbeddedNode,
+							"invalid", invalidNode, "empty hash", storageEmptyHash, "slot", slots, "elapsed",
 							common.PrettyDuration(time.Since(start)))
 						lastReport = time.Now()
 					}
@@ -413,7 +416,8 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 
 			if time.Since(lastReport) > time.Second*8 {
 				log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "CA account", CA_account,
-					"embedded", embeddedCount, "invalid", invalidNode, "empty hash", storageEmptyHash, "elapsed",
+					"embedded", embeddedCount, "storage embedded node", storageEmbeddedNode, "invalid", invalidNode,
+					"slot", slots, "empty hash", storageEmptyHash, "elapsed",
 					common.PrettyDuration(time.Since(start)))
 				lastReport = time.Now()
 			}
