@@ -1255,6 +1255,15 @@ func refactorEmbeddedNode(ctx *cli.Context) error {
 	if rawdb.ReadStateScheme(chaindb) != rawdb.PathScheme {
 		log.Crit("refactor emedded node is not required for hash scheme")
 	}
+	/*
+		var destDir string
+		if !ctx.GlobalIsSet(utils.DataDirFlag.Name) {
+			return errors.New("datadir must be set")
+		}
+	*/
+	// destDir := ctx.Args().Get(0)
+
+	//	pebbleDB, createErr := pebble.New(destDir, 5000, 60000, "eth/db/chaindata/", false)
 
 	embeddedNodesStorer := trie.NewEmbeddedNodeRestorer(chaindb)
 	triedb := triedb.NewDatabase(chaindb, &triedb.Config{

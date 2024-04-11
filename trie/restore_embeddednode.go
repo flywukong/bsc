@@ -32,11 +32,11 @@ type dbNodeStat struct {
 	EmbeddedNodeCnt uint64
 }
 
-func NewEmbeddedNodeRestorer(chaindb ethdb.Database, targetDB ethdb.Database) *EmbeddedNodeRestorer {
+func NewEmbeddedNodeRestorer(chaindb ethdb.Database) *EmbeddedNodeRestorer {
 	return &EmbeddedNodeRestorer{
-		db:    chaindb,
-		newDB: targetDB,
-		stat:  &dbNodeStat{0, 0, 0, 0},
+		db: chaindb,
+		//newDB: targetDB,
+		stat: &dbNodeStat{0, 0, 0, 0},
 	}
 }
 
@@ -285,7 +285,7 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		embeddedCount  = 0
 		//keccakStateHasher   = crypto.NewKeccakState()
 		//got                 = make([]byte, 32)
-		batch               = restorer.newDB.NewBatch()
+		// batch               = restorer.newDB.NewBatch()
 		invalidNode         = 0
 		storageEmbeddedNode int
 		storageEmptyHash    int
@@ -306,16 +306,20 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		nodes += 1
 		nodeHash := accIter.Hash()
 		if nodeHash != (common.Hash{}) {
-			accKey := accountTrieNodeKey(accIter.Path())
-			accValue, _ := reader.Node(common.Hash{}, accIter.Path(), nodeHash)
-			if len(accValue) == 0 {
-				log.Error("Missing trie node(account)", "hash", nodeHash)
-				return errors.New("missing account")
-			}
-			// write
-			if err := batch.Put(accKey, accValue); err != nil {
-				return err
-			}
+			/*
+				accKey := accountTrieNodeKey(accIter.Path())
+				accValue, _ := reader.Node(common.Hash{}, accIter.Path(), nodeHash)
+				if len(accValue) == 0 {
+					log.Error("Missing trie node(account)", "hash", nodeHash)
+					return errors.New("missing account")
+				}
+				log.Info("write key", "account", accKey)
+				// write
+				if err := batch.Put(accKey, accValue); err != nil {
+					return err
+				}
+
+			*/
 		}
 
 		// If it's a leaf node, yes we are touching an account,
@@ -364,9 +368,9 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 
 							key := storageTrieNodeKey(ownerHash, storageIter.Path())
 							// write storage  node
-							if err := batch.Put(key, nodeblob); err != nil {
-								return err
-							}
+							//if err := batch.Put(key, nodeblob); err != nil {
+							//	return err
+							//}
 							// check if is full short node inside full node
 							shortnodeList, err := checkIfContainShortNode(hash.Bytes(), key, nodeblob, restorer.stat)
 							if err != nil {
