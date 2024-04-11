@@ -1257,8 +1257,16 @@ func refactorEmbeddedNode(ctx *cli.Context) error {
 	}
 
 	embeddedNodesStorer := trie.NewEmbeddedNodeRestorer(chaindb)
+	triedb := triedb.NewDatabase(chaindb, &triedb.Config{
+		Preimages: false,
+		PathDB:    pathdb.Defaults,
+	})
+	embeddedNodesStorer.Triedb = triedb
+	defer triedb.Close()
 
-	return embeddedNodesStorer.Run()
+	destDir := ctx.Args().Get(0)
+
+	return embeddedNodesStorer.WriteNewTrie(destDir)
 }
 
 func deleteStaleTrie(ctx *cli.Context) error {
