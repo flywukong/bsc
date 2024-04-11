@@ -980,7 +980,7 @@ func SplitDatabase(db ethdb.Database, trieDB ethdb.Database) error {
 		value := make([]byte, len(v))
 		copy(value, v)
 
-		if !isTrieKey(key, value) {
+		if isTrieKey(key, value) {
 			continue
 		}
 		// push the first key of batch into queue,
