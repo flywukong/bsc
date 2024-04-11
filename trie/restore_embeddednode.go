@@ -314,7 +314,8 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 
 			// if it is a CA account , iterator the storage trie to find embedded node
 			if acc.Root != types.EmptyRootHash {
-				id := StorageTrieID(diskRoot, common.BytesToHash(accIter.LeafKey()), acc.Root)
+				ownerHash := common.BytesToHash(accIter.LeafKey())
+				id := StorageTrieID(diskRoot, ownerHash, acc.Root)
 				storageTrie, err := NewStateTrie(id, restorer.Triedb)
 				if err != nil {
 					log.Error("Failed to open storage trie", "root", acc.Root, "err", err)
@@ -330,15 +331,17 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 				for storageIter.Next(true) {
 					nodes += 1
 					snodeHash := storageIter.Hash()
-					if snodeHash == (common.Hash{}) {
-						storageEmptyHash++
-						continue
-					}
-					ownerHash := common.BytesToHash(accIter.LeafKey())
+					/*
+						if snodeHash == (common.Hash{}) {
+							storageEmptyHash++
+							continue
+						}
+
+					*/
 					nodeblob, _ := reader.Node(ownerHash, storageIter.Path(), snodeHash)
 					if len(nodeblob) == 0 {
 						log.Error(""+
-							"Missing trie node(storage)", "hash", nodeHash)
+							"Missing trie node(storage)", "hash", snodeHash)
 						//	return errors.New("missing storage")
 						emptyBlobNodes++
 						continue
