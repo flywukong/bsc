@@ -8,7 +8,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/ethdb"
 	ethpebble "github.com/ethereum/go-ethereum/ethdb/pebble"
-	"github.com/ethereum/go-ethereum/log"
 )
 
 var (
@@ -68,7 +67,7 @@ func (job *Job) MigrateKv() error {
 			fmt.Println("send kv rocks error", err.Error())
 			return err
 		}
-		log.Info("write batch finish")
+		//	log.Info("write batch finish")
 	}
 	return nil
 }
