@@ -285,6 +285,7 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		got                 = make([]byte, 32)
 		invalidNode         = 0
 		storageEmbeddedNode int
+		storageEmptyHash    int
 	)
 	accIter, err := t.NodeIterator(nil)
 	if err != nil {
@@ -329,10 +330,15 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 				for storageIter.Next(true) {
 					nodes += 1
 					snodeHash := storageIter.Hash()
+					if snodeHash == (common.Hash{}) {
+						storageEmptyHash++
+						continue
+					}
 					ownerHash := common.BytesToHash(accIter.LeafKey())
 					nodeblob, _ := reader.Node(ownerHash, storageIter.Path(), snodeHash)
 					if len(nodeblob) == 0 {
-						log.Error("Missing trie node(storage)", "hash", nodeHash)
+						log.Error(""+
+							"Missing trie node(storage)", "hash", nodeHash)
 						//	return errors.New("missing storage")
 						emptyBlobNodes++
 						continue
@@ -411,7 +417,7 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		return accIter.Error()
 	}
 
-	log.Info("embedded node info", "storage embedded node", storageEmbeddedNode)
+	log.Info("embedded node info", "storage embedded node", storageEmbeddedNode, "storage empty", storageEmptyHash)
 
 	log.Info("State is complete", "nodes", nodes, "accounts", accounts, "slots", slots, "elapsed", common.PrettyDuration(time.Since(start)))
 	return nil
