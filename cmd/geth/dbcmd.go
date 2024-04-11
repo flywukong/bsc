@@ -1242,23 +1242,29 @@ func hbss2pbss(ctx *cli.Context) error {
 }
 
 func refactorEmbeddedNode(ctx *cli.Context) error {
-	if ctx.NArg() > 0 {
-		return fmt.Errorf("no arguments required")
-	}
-
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
-	chaindb := utils.MakeChainDatabase(ctx, stack, false, false)
+	chaindb := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer chaindb.Close()
 
+	log.Info("open chain db finish")
 	if rawdb.ReadStateScheme(chaindb) != rawdb.PathScheme {
 		log.Crit("refactor emedded node is not required for hash scheme")
 	}
 
 	embeddedNodesStorer := trie.NewEmbeddedNodeRestorer(chaindb)
 
-	return embeddedNodesStorer.Run()
+	triedb := utils.MakeTrieDatabase(ctx, chaindb, false, true, false)
+	defer triedb.Close()
+	log.Info("open trie db finish")
+
+	embeddedNodesStorer.Triedb = triedb
+	defer triedb.Close()
+
+	destDir := ctx.Args().Get(0)
+
+	return embeddedNodesStorer.WriteNewTrie(destDir)
 }
 
 func deleteStaleTrie(ctx *cli.Context) error {
