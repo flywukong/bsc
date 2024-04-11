@@ -331,13 +331,13 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 				for storageIter.Next(true) {
 					nodes += 1
 					snodeHash := storageIter.Hash()
-					/*
-						if snodeHash == (common.Hash{}) {
-							storageEmptyHash++
-							continue
-						}
 
-					*/
+					if snodeHash == (common.Hash{}) {
+						storageEmptyHash++
+						//log.Info("empty hash")
+						continue
+					}
+
 					nodeblob, _ := reader.Node(ownerHash, storageIter.Path(), snodeHash)
 					if len(nodeblob) == 0 {
 						log.Error(""+
@@ -346,6 +346,7 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 						emptyBlobNodes++
 						continue
 					}
+
 					keccakStateHasher.Reset()
 					keccakStateHasher.Write(nodeblob)
 					keccakStateHasher.Read(got)
@@ -396,9 +397,10 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 						embeddedCount++
 					}
 
-					if time.Since(lastReport) > time.Second*8 {
-						log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "slots", slots,
-							"embedded", embeddedCount, "invalid", invalidNode, "elapsed", common.PrettyDuration(time.Since(start)))
+					if time.Since(lastReport) > time.Second*3 {
+						log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "CA account", CA_account,
+							"embedded", embeddedCount, "invalid", invalidNode, "empty hash", storageEmptyHash, "elapsed",
+							common.PrettyDuration(time.Since(start)))
 						lastReport = time.Now()
 					}
 				}
@@ -410,7 +412,9 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 			}
 
 			if time.Since(lastReport) > time.Second*8 {
-				log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "slots", slots, "elapsed", common.PrettyDuration(time.Since(start)))
+				log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "CA account", CA_account,
+					"embedded", embeddedCount, "invalid", invalidNode, "empty hash", storageEmptyHash, "elapsed",
+					common.PrettyDuration(time.Since(start)))
 				lastReport = time.Now()
 			}
 		}
