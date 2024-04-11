@@ -335,67 +335,66 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 
 					if snodeHash == (common.Hash{}) {
 						storageEmptyHash++
-					}
-
-					nodeblob, _ := reader.Node(ownerHash, storageIter.Path(), snodeHash)
-					if len(nodeblob) == 0 {
-						//	log.Error(""+
-						//		"Missing trie node(storage)", "hash", snodeHash)
-						//	return errors.New("missing storage")
-						emptyBlobNodes++
 					} else {
-						keccakStateHasher.Reset()
-						keccakStateHasher.Write(nodeblob)
-						keccakStateHasher.Read(got)
-						if !bytes.Equal(got, snodeHash.Bytes()) {
-							log.Error("Invalid trie node(storage)", "hash", snodeHash.Hex(), "value", nodeblob)
-							invalidNode++
-						}
-
-						h := rawdb.NewSha256Hasher()
-						hash := h.Hash(nodeblob)
-						h.Release()
-
-						key := storageTrieNodeKey(ownerHash, storageIter.Path())
-						// check if is full short node inside full node
-						shortnodeList, err := checkIfContainShortNode(hash.Bytes(), key, nodeblob, restorer.stat)
-						if err != nil {
-							log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
-							return err
-						}
-
-						// find shorNode inside the fullnode
-						if len(shortnodeList) > 0 {
-							if len(shortnodeList) > 1 {
-								log.Info("fullnode contain more than 1 short node", "short node num", len(shortnodeList))
+						nodeblob, _ := reader.Node(ownerHash, storageIter.Path(), snodeHash)
+						if len(nodeblob) == 0 {
+							//	log.Error(""+
+							//		"Missing trie node(storage)", "hash", snodeHash)
+							//	return errors.New("missing storage")
+							emptyBlobNodes++
+						} else {
+							keccakStateHasher.Reset()
+							keccakStateHasher.Write(nodeblob)
+							keccakStateHasher.Read(got)
+							if !bytes.Equal(got, snodeHash.Bytes()) {
+								log.Error("Invalid trie node(storage)", "hash", snodeHash.Hex(), "value", nodeblob)
+								invalidNode++
 							}
-							for _, snode := range shortnodeList {
-								if rawdb.IsStorageTrieNode(key) {
-									storageEmbeddedNode++
-									fullNodePath := key[1+common.HashLength:]
-									newKey := append(key, byte(snode.Idx))
-									log.Info("embedded storage shortNode info", "trie key", common.Bytes2Hex(key),
-										"fullNode path", common.Bytes2Hex(fullNodePath),
-										"new node key", common.Bytes2Hex(newKey), "new node value", common.Bytes2Hex(snode.NodeBytes))
-									// batch write
-									//	if err := batch.Put(newKey, snode.NodeBytes); err != nil {
-									//		return err
+
+							h := rawdb.NewSha256Hasher()
+							hash := h.Hash(nodeblob)
+							h.Release()
+
+							key := storageTrieNodeKey(ownerHash, storageIter.Path())
+							// check if is full short node inside full node
+							shortnodeList, err := checkIfContainShortNode(hash.Bytes(), key, nodeblob, restorer.stat)
+							if err != nil {
+								log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
+								return err
+							}
+
+							// find shorNode inside the fullnode
+							if len(shortnodeList) > 0 {
+								if len(shortnodeList) > 1 {
+									log.Info("fullnode contain more than 1 short node", "short node num", len(shortnodeList))
 								}
+								for _, snode := range shortnodeList {
+									if rawdb.IsStorageTrieNode(key) {
+										storageEmbeddedNode++
+										fullNodePath := key[1+common.HashLength:]
+										newKey := append(key, byte(snode.Idx))
+										log.Info("embedded storage shortNode info", "trie key", common.Bytes2Hex(key),
+											"fullNode path", common.Bytes2Hex(fullNodePath),
+											"new node key", common.Bytes2Hex(newKey), "new node value", common.Bytes2Hex(snode.NodeBytes))
+										// batch write
+										//	if err := batch.Put(newKey, snode.NodeBytes); err != nil {
+										//		return err
+									}
 
+								}
 							}
-						}
 
+						}
+						/*
+							keccakStateHasher.Reset()
+							keccakStateHasher.Write(nodeblob)
+							keccakStateHasher.Read(got)
+							if !bytes.Equal(got, snodeHash.Bytes()) {
+								log.Error("Invalid trie node(storage)", "hash", nodeHash.Hex(), "value", nodeblob)
+								invalidNode++
+							}
+						*/
 					}
-					/*
-						keccakStateHasher.Reset()
-						keccakStateHasher.Write(nodeblob)
-						keccakStateHasher.Read(got)
-						if !bytes.Equal(got, snodeHash.Bytes()) {
-							log.Error("Invalid trie node(storage)", "hash", nodeHash.Hex(), "value", nodeblob)
-							invalidNode++
-						}
-					*/
-
 					// Bump the counter if it's leaf node.
 					if storageIter.Leaf() {
 						CA_account += 1
