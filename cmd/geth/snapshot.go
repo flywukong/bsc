@@ -720,7 +720,7 @@ func traverseRawState(ctx *cli.Context) error {
 	diskRoot = types.TrieRootHash(diskRoot)
 	log.Info("disk root info", "hash", diskRoot)
 	root = diskRoot
-	
+
 	t, err := trie.NewStateTrie(trie.StateTrieID(root), triedb)
 	if err != nil {
 		log.Error("Failed to open trie", "root", root, "err", err)
@@ -765,6 +765,8 @@ func traverseRawState(ctx *cli.Context) error {
 				log.Error("Invalid trie node(account)", "hash", node.Hex(), "value", blob)
 				return errors.New("invalid account node")
 			}
+		} else {
+			log.Info("empty hash node", "hash", node)
 		}
 		// If it's a leaf node, yes we are touching an account,
 		// dig into the storage trie further.

@@ -20,6 +20,7 @@ const ExpectLeafNodeLen = 32
 
 type EmbeddedNodeRestorer struct {
 	db     ethdb.Database
+	newDB  ethdb.Database
 	Triedb Database
 	stat   *dbNodeStat
 }
@@ -31,10 +32,11 @@ type dbNodeStat struct {
 	EmbeddedNodeCnt uint64
 }
 
-func NewEmbeddedNodeRestorer(chaindb ethdb.Database) *EmbeddedNodeRestorer {
+func NewEmbeddedNodeRestorer(chaindb ethdb.Database, targetDB ethdb.Database) *EmbeddedNodeRestorer {
 	return &EmbeddedNodeRestorer{
-		db:   chaindb,
-		stat: &dbNodeStat{0, 0, 0, 0},
+		db:    chaindb,
+		newDB: targetDB,
+		stat:  &dbNodeStat{0, 0, 0, 0},
 	}
 }
 
@@ -273,16 +275,17 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		return err
 	}
 	var (
-		nodes               int
-		accounts            int
-		slots               int
-		lastReport          time.Time
-		start               = time.Now()
-		emptyBlobNodes      int
-		CA_account          int
-		embeddedCount       = 0
-		keccakStateHasher   = crypto.NewKeccakState()
-		got                 = make([]byte, 32)
+		nodes          int
+		accounts       int
+		slots          int
+		lastReport     time.Time
+		start          = time.Now()
+		emptyBlobNodes int
+		CA_account     int
+		embeddedCount  = 0
+		//keccakStateHasher   = crypto.NewKeccakState()
+		//got                 = make([]byte, 32)
+		batch               = restorer.newDB.NewBatch()
 		invalidNode         = 0
 		storageEmbeddedNode int
 		storageEmptyHash    int
@@ -301,7 +304,19 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 
 	for accIter.Next(true) {
 		nodes += 1
-		//	nodeHash := accIter.Hash()
+		nodeHash := accIter.Hash()
+		if nodeHash != (common.Hash{}) {
+			accKey := accountTrieNodeKey(accIter.Path())
+			accValue, _ := reader.Node(common.Hash{}, accIter.Path(), nodeHash)
+			if len(accValue) == 0 {
+				log.Error("Missing trie node(account)", "hash", nodeHash)
+				return errors.New("missing account")
+			}
+			// write
+			if err := batch.Put(accKey, accValue); err != nil {
+				return err
+			}
+		}
 
 		// If it's a leaf node, yes we are touching an account,
 		// dig into the storage trie further.
@@ -343,19 +358,15 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 							//	return errors.New("missing storage")
 							emptyBlobNodes++
 						} else {
-							keccakStateHasher.Reset()
-							keccakStateHasher.Write(nodeblob)
-							keccakStateHasher.Read(got)
-							if !bytes.Equal(got, snodeHash.Bytes()) {
-								log.Error("Invalid trie node(storage)", "hash", snodeHash.Hex(), "value", nodeblob)
-								invalidNode++
-							}
-
 							h := rawdb.NewSha256Hasher()
 							hash := h.Hash(nodeblob)
 							h.Release()
 
 							key := storageTrieNodeKey(ownerHash, storageIter.Path())
+							// write storage  node
+							if err := batch.Put(key, nodeblob); err != nil {
+								return err
+							}
 							// check if is full short node inside full node
 							shortnodeList, err := checkIfContainShortNode(hash.Bytes(), key, nodeblob, restorer.stat)
 							if err != nil {
@@ -398,11 +409,6 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 					// Bump the counter if it's leaf node.
 					if storageIter.Leaf() {
 						CA_account += 1
-						slots += 1
-					}
-
-					if storageIter.NodeBlob() == nil {
-						embeddedCount += 1
 					}
 
 					if time.Since(lastReport) > time.Second*3 {
