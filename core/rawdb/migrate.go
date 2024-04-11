@@ -8,6 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/ethdb"
 	ethpebble "github.com/ethereum/go-ethereum/ethdb/pebble"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 var (
@@ -40,7 +41,7 @@ func InitDb(db ethdb.Database, trieDB ethdb.Database) {
 */
 
 func InitDb(addr string) *ethpebble.Database {
-	pebbleDB, createErr = ethpebble.New(addr, 4000, 65536, "eth/db/chaindata/", false)
+	pebbleDB, createErr = ethpebble.New(addr, 400, 65536, "eth/db/chaindata/", false)
 	if createErr != nil {
 		fmt.Println("create pebble err", createErr.Error())
 		panic("create err")
@@ -63,11 +64,11 @@ func (job *Job) MigrateKv() error {
 				return batchErr
 			}
 		}
-
 		if err := kvBatch.Write(); err != nil {
 			fmt.Println("send kv rocks error", err.Error())
 			return err
 		}
+		log.Info("write batch finish")
 	}
 	return nil
 }

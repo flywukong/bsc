@@ -822,7 +822,7 @@ func ReadChainMetadata(db ethdb.KeyValueStore) [][]string {
 	return data
 }
 
-func isTrieKey(key, value []byte) bool {
+func isTrieKey(key []byte) bool {
 	switch {
 	case IsAccountTrieNode(key):
 		return true
@@ -965,12 +965,12 @@ func SplitDatabase(db ethdb.Database, addr string) error {
 			key = it.Key()
 			v   = it.Value()
 		)
-		value := make([]byte, len(v))
-		copy(value, v)
 
-		if isTrieKey(key, value) {
+		if isTrieKey(key) {
 			continue
 		}
+		value := make([]byte, len(v))
+		copy(value, v)
 		// push the first key of batch into queue,
 		// if migrate error happen, key of queue head will store into kvstore before panic
 		if isbatchFirstKey {
@@ -999,7 +999,7 @@ func SplitDatabase(db ethdb.Database, addr string) error {
 				time.Sleep(5 * time.Second)
 			}
 			// print cost time every 50000000 keys
-			if batch_count%500000 == 0 {
+			if batch_count%500 == 0 {
 				fmt.Println("finish write db k,v num:", batch_count*100,
 					"cost time:", time.Since(start).Nanoseconds()/1000000000, "s")
 			}
