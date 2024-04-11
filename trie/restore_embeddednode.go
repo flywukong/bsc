@@ -20,7 +20,7 @@ const ExpectLeafNodeLen = 32
 
 type EmbeddedNodeRestorer struct {
 	db     ethdb.Database
-	triedb Database
+	Triedb Database
 	stat   *dbNodeStat
 }
 
@@ -267,7 +267,7 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 	diskRoot = types.TrieRootHash(diskRoot)
 	log.Info("disk root info", "hash", diskRoot)
 
-	t, err := NewStateTrie(StateTrieID(diskRoot), restorer.triedb)
+	t, err := NewStateTrie(StateTrieID(diskRoot), restorer.Triedb)
 	if err != nil {
 		log.Error("Failed to open trie", "root", diskRoot, "err", err)
 		return err
@@ -291,7 +291,7 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		log.Error("Failed to open iterator", "root", diskRoot, "err", err)
 		return err
 	}
-	reader, err := restorer.triedb.Reader(diskRoot)
+	reader, err := restorer.Triedb.Reader(diskRoot)
 	if err != nil {
 		log.Error("State is non-existent", "root", diskRoot)
 		return nil
@@ -314,7 +314,7 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 			// if it is a CA account , iterator the storage trie to find embedded node
 			if acc.Root != types.EmptyRootHash {
 				id := StorageTrieID(diskRoot, common.BytesToHash(accIter.LeafKey()), acc.Root)
-				storageTrie, err := NewStateTrie(id, restorer.triedb)
+				storageTrie, err := NewStateTrie(id, restorer.Triedb)
 				if err != nil {
 					log.Error("Failed to open storage trie", "root", acc.Root, "err", err)
 					return errors.New("missing storage trie")
