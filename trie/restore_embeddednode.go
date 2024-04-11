@@ -273,16 +273,16 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		return err
 	}
 	var (
-		nodes               int
-		accounts            int
-		slots               int
-		lastReport          time.Time
-		start               = time.Now()
-		emptyBlobNodes      int
-		CA_account          int
-		embeddedCount       = 0
-		keccakStateHasher   = crypto.NewKeccakState()
-		got                 = make([]byte, 32)
+		nodes          int
+		accounts       int
+		slots          int
+		lastReport     time.Time
+		start          = time.Now()
+		emptyBlobNodes int
+		CA_account     int
+		embeddedCount  = 0
+		//	keccakStateHasher   = crypto.NewKeccakState()
+		//	got                 = make([]byte, 32)
 		invalidNode         = 0
 		storageEmbeddedNode int
 		storageEmptyHash    int
@@ -301,7 +301,7 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 
 	for accIter.Next(true) {
 		nodes += 1
-		nodeHash := accIter.Hash()
+		//	nodeHash := accIter.Hash()
 
 		// If it's a leaf node, yes we are touching an account,
 		// dig into the storage trie further.
