@@ -83,15 +83,28 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 		// find shortNode inside full node
 		for i := 0; i < 17; i++ {
 			child := fn.Children[i]
-			if sn, ok := child.(*shortNode); ok {
-				if i == 16 {
-					panic("should not exist child[17] in secure trie")
-				}
-				if vn, ok := sn.Val.(valueNode); ok {
-					log.Info("found short leaf Node inside full node", "full node info", fn, "child idx", i,
-						"child", child, "value", vn)
-				}
+			switch sn := child.(type) {
+			case *shortNode:
+				log.Info("child account shortnode", "key ", common.Bytes2Hex(sn.Key), "sn", child)
+			case *fullNode:
+				log.Info("child account fullnode", "node ", child)
+			default:
+				log.Info("child account node", "info", child)
 			}
+			/*
+				if sn, ok := child.(*shortNode); ok {
+					log.Info("found short  Node inside full node2", "full node info", fn, "child idx", i,
+						"child", child, "short node", sn)
+					if i == 16 {
+						panic("should not exist child[17] in secure trie")
+					}
+					if vn, ok := sn.Val.(valueNode); ok {
+						log.Info("found short leaf Node inside full node", "full node info", fn, "child idx", i,
+							"child", child, "value", vn)
+					}
+				}
+
+			*/
 		}
 		return shortNodeInfoList, nil
 	} else if sn, ok := n.(*shortNode); ok {
