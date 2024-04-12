@@ -65,6 +65,7 @@ type shorNodeInfo struct {
 func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNodeInfo, error) {
 	n, err := decodeNode(hash, buf)
 	if err != nil {
+		log.Error("decode err", "decode node key", common.Bytes2Hex(key))
 		return nil, err
 	}
 
@@ -83,13 +84,15 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 		// find shortNode inside full node
 		for i := 0; i < 17; i++ {
 			child := fn.Children[i]
-			switch sn := child.(type) {
-			case *shortNode:
-				log.Info("child account shortnode", "key ", common.Bytes2Hex(sn.Key), "sn", child)
-			case *fullNode:
-				log.Info("child account fullnode", "node ", child)
-			default:
-				log.Info("child account node", "info", child)
+			if child != nil {
+				switch sn := child.(type) {
+				case *shortNode:
+					log.Info("child account shortnode", "key ", common.Bytes2Hex(sn.Key), "sn", child)
+				case *fullNode:
+					log.Info("child account fullnode", "node ", child)
+				default:
+					log.Info("child account node", "info", child)
+				}
 			}
 			/*
 				if sn, ok := child.(*shortNode); ok {
@@ -313,6 +316,17 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		accKey := accountTrieNodeKey(accIter.Path())
 		accValue := accIter.NodeBlob()
 
+		if accValue == nil {
+			log.Warn("trie node(account) with node blob empty")
+			compareValue, err := restorer.db.Get(accKey)
+			if compareValue != nil {
+				log.Info("compare value in db not same", "err", err.Error(),
+					"key", common.Bytes2Hex(accKey), "node blob", common.Bytes2Hex(accValue), ""+
+						"db value", common.Bytes2Hex(compareValue))
+			}
+			continue
+			embeddedNode++
+		}
 		h := rawdb.NewSha256Hasher()
 		hash := h.Hash(accValue)
 		h.Release()
@@ -338,18 +352,6 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		}
 		// find shorNode inside the fullnode
 		if len(shortnodeList) > 0 {
-		}
-
-		if accValue == nil {
-			log.Warn("trie node(account) with node blob empty")
-			compareValue, err := restorer.db.Get(accKey)
-			if compareValue != nil {
-				log.Info("compare value in db not same", "err", err.Error(),
-					"key", common.Bytes2Hex(accKey), "node blob", common.Bytes2Hex(accValue), ""+
-						"db value", common.Bytes2Hex(compareValue))
-			}
-			continue
-			embeddedNode++
 		}
 
 		compareValue, err := restorer.db.Get(accKey)
