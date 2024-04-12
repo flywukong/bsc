@@ -324,26 +324,12 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 					"key", common.Bytes2Hex(accKey), "node blob", common.Bytes2Hex(accValue), ""+
 						"db value", common.Bytes2Hex(compareValue))
 			}
-			continue
+			//continue
 			embeddedNode++
 		}
 		h := rawdb.NewSha256Hasher()
 		hash := h.Hash(accValue)
 		h.Release()
-		/*
-			n, err := decodeNode(hash.Bytes(), accValue)
-			if err != nil {
-				log.Info("decode account node err", "err", err)
-			}
-
-			switch sn := n.(type) {
-			case *shortNode:
-				log.Info("shortnode", "key ", sn.Key, "sn", sn)
-			case *fullNode:
-				log.Info("fullnode", "node ", n)
-			default:
-				log.Info("node", "info", n)
-			} */
 
 		shortnodeList, err := checkIfContainShortNode(hash.Bytes(), accKey, accValue, restorer.stat)
 		if err != nil {
