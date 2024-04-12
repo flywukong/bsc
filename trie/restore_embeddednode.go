@@ -2,7 +2,6 @@ package trie
 
 import (
 	"bytes"
-	"errors"
 	"sync"
 	"time"
 
@@ -12,7 +11,6 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/rlp"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -72,11 +70,11 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 
 	switch sn := n.(type) {
 	case *shortNode:
-		log.Info("shortnode", "key ", sn.Key, "sn", sn)
+		log.Info("account shortnode", "key ", sn.Key, "sn", sn)
 	case *fullNode:
-		log.Info("fullnode", "node ", n)
+		log.Info("account fullnode", "node ", n)
 	default:
-		log.Info("node", "info", n)
+		log.Info("account node", "info", n)
 	}
 
 	shortNodeInfoList := make([]shorNodeInfo, 0)
@@ -354,108 +352,114 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		// dig into the storage trie further.
 		if accIter.Leaf() {
 			accounts += 1
-			var acc types.StateAccount
-			if err := rlp.DecodeBytes(accIter.LeafBlob(), &acc); err != nil {
-				log.Error("Invalid account encountered during traversal", "err", err)
-				return errors.New("invalid account")
-			}
-
-			// if it is a CA account , iterator the storage trie to find embedded node
-			if acc.Root != types.EmptyRootHash {
-				ownerHash := common.BytesToHash(accIter.LeafKey())
-				id := StorageTrieID(diskRoot, ownerHash, acc.Root)
-				storageTrie, err := NewStateTrie(id, restorer.Triedb)
-				if err != nil {
-					log.Error("Failed to open storage trie", "root", acc.Root, "err", err)
-					return errors.New("missing storage trie")
+			/*
+				var acc types.StateAccount
+				if err := rlp.DecodeBytes(accIter.LeafBlob(), &acc); err != nil {
+					log.Error("Invalid account encountered during traversal", "err", err)
+					return errors.New("invalid account")
 				}
 
-				storageIter, err := storageTrie.NodeIterator(nil)
-				if err != nil {
-					log.Error("Failed to open storage iterator", "root", acc.Root, "err", err)
-					return err
-				}
-				// iterator the storage trie
-				for storageIter.Next(true) {
-					nodes += 1
-					nodeblob := storageIter.NodeBlob()
-					if nodeblob == nil {
-						log.Warn("trie node(storage) with node blob empty")
-						embeddedNode++
-						continue
+				// if it is a CA account , iterator the storage trie to find embedded node
+				if acc.Root != types.EmptyRootHash {
+					/*
+					ownerHash := common.BytesToHash(accIter.LeafKey())
+					id := StorageTrieID(diskRoot, ownerHash, acc.Root)
+					storageTrie, err := NewStateTrie(id, restorer.Triedb)
+					if err != nil {
+						log.Error("Failed to open storage trie", "root", acc.Root, "err", err)
+						return errors.New("missing storage trie")
 					}
 
-					/*
-						h := rawdb.NewSha256Hasher()
-						hash := h.Hash(nodeblob)
-						h.Release()
-					*/
-					key := storageTrieNodeKey(ownerHash, storageIter.Path())
-
-					compareValue2, err := restorer.db.Get(key)
-					if err == nil && bytes.Compare(compareValue2, nodeblob) == 0 {
-						log.Info("compare value in db same", "key", common.Bytes2Hex(key))
-					} else {
-						log.Info("compare value in db not same", "err", err.Error(),
-							"key", common.Bytes2Hex(key), "node blob", common.Bytes2Hex(nodeblob), ""+
-								"db value", common.Bytes2Hex(compareValue2))
+					storageIter, err := storageTrie.NodeIterator(nil)
+					if err != nil {
+						log.Error("Failed to open storage iterator", "root", acc.Root, "err", err)
+						return err
 					}
-
-					// write storage  node
-					//if err := batch.Put(key, nodeblob); err != nil {
-					//	return err
-					//}
-					// check if is full short node inside full node
-					/*
-						shortnodeList, err := checkIfContainShortNode(hash.Bytes(), key, nodeblob, restorer.stat)
-						if err != nil {
-							log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
-							return err
+					// iterator the storage trie
+					for storageIter.Next(true) {
+						nodes += 1
+						nodeblob := storageIter.NodeBlob()
+						if nodeblob == nil {
+							log.Warn("trie node(storage) with node blob empty")
+							embeddedNode++
+							continue
 						}
-						// find shorNode inside the fullnode
-						if len(shortnodeList) > 0 {
-							if len(shortnodeList) > 1 {
-								log.Info("fullnode contain more than 1 short node", "short node num", len(shortnodeList))
+
+
+							h := rawdb.NewSha256Hasher()
+							hash := h.Hash(nodeblob)
+							h.Release()
+
+						key := storageTrieNodeKey(ownerHash, storageIter.Path())
+
+						compareValue2, err := restorer.db.Get(key)
+						if err == nil && bytes.Compare(compareValue2, nodeblob) == 0 {
+							log.Info("compare value in db same", "key", common.Bytes2Hex(key))
+						} else {
+							log.Info("compare value in db not same", "err", err.Error(),
+								"key", common.Bytes2Hex(key), "node blob", common.Bytes2Hex(nodeblob), ""+
+									"db value", common.Bytes2Hex(compareValue2))
+						}
+
+						// write storage  node
+						//if err := batch.Put(key, nodeblob); err != nil {
+						//	return err
+						//}
+						// check if is full short node inside full node
+
+							shortnodeList, err := checkIfContainShortNode(hash.Bytes(), key, nodeblob, restorer.stat)
+							if err != nil {
+								log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
+								return err
 							}
-							for _, snode := range shortnodeList {
-								if rawdb.IsStorageTrieNode(key) {
-									storageEmbeddedNode++
-									fullNodePath := key[1+common.HashLength:]
-									newKey := append(key, byte(snode.Idx))
-									log.Info("embedded storage shortNode info", "trie key", common.Bytes2Hex(key),
-										"fullNode path", common.Bytes2Hex(fullNodePath),
-										"new node key", common.Bytes2Hex(newKey), "new node value", common.Bytes2Hex(snode.NodeBytes))
-									// batch write
-									//	if err := batch.Put(newKey, snode.NodeBytes); err != nil {
-									//		return err
+							// find shorNode inside the fullnode
+							if len(shortnodeList) > 0 {
+								if len(shortnodeList) > 1 {
+									log.Info("fullnode contain more than 1 short node", "short node num", len(shortnodeList))
+								}
+								for _, snode := range shortnodeList {
+									if rawdb.IsStorageTrieNode(key) {
+										storageEmbeddedNode++
+										fullNodePath := key[1+common.HashLength:]
+										newKey := append(key, byte(snode.Idx))
+										log.Info("embedded storage shortNode info", "trie key", common.Bytes2Hex(key),
+											"fullNode path", common.Bytes2Hex(fullNodePath),
+											"new node key", common.Bytes2Hex(newKey), "new node value", common.Bytes2Hex(snode.NodeBytes))
+										// batch write
+										//	if err := batch.Put(newKey, snode.NodeBytes); err != nil {
+										//		return err
+									}
+
 								}
 
+
 							}
 
 
+						// Bump the counter if it's leaf node.
+						if storageIter.Leaf() {
+							CA_account += 1
 						}
-					
-					*/
-					// Bump the counter if it's leaf node.
-					if storageIter.Leaf() {
-						CA_account += 1
+
+						if time.Since(lastReport) > time.Second*3 {
+							log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "CA account", CA_account,
+								"embedded", embeddedCount, "storage embedded node", storageEmbeddedNode,
+								"invalid", invalidNode, "empty hash", storageEmptyHash, "empty blob", emptyBlobNodes, "elapsed",
+								common.PrettyDuration(time.Since(start)))
+							lastReport = time.Now()
+						}
+
+
 					}
 
-					if time.Since(lastReport) > time.Second*3 {
-						log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "CA account", CA_account,
-							"embedded", embeddedCount, "storage embedded node", storageEmbeddedNode,
-							"invalid", invalidNode, "empty hash", storageEmptyHash, "empty blob", emptyBlobNodes, "elapsed",
-							common.PrettyDuration(time.Since(start)))
-						lastReport = time.Now()
+					if storageIter.Error() != nil {
+						log.Error("Failed to traverse storage trie", "root", acc.Root, "err", storageIter.Error())
+						return storageIter.Error()
 					}
-				}
 
-				if storageIter.Error() != nil {
-					log.Error("Failed to traverse storage trie", "root", acc.Root, "err", storageIter.Error())
-					return storageIter.Error()
-				}
-			}
 
+				}
+			*/
 			if time.Since(lastReport) > time.Second*8 {
 				log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "CA account", CA_account,
 					"embedded", embeddedCount, "storage embedded node", storageEmbeddedNode,
