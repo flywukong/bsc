@@ -332,11 +332,13 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		nodes += 1
 
 		// write the node into db
-		accKey := accountTrieNodeKey(accIter.Path())
+		path := accIter.Path()
+		accKey := accountTrieNodeKey(path)
 		accValue := accIter.NodeBlob()
 
 		if accValue == nil {
-			log.Warn("trie node(account) with node blob empty")
+			log.Warn("trie node(account) with node blob empty", "path", common.Bytes2Hex(path))
+			
 			compareValue, err := restorer.db.Get(accKey)
 			if compareValue != nil {
 				log.Info("compare value in db not same", "err", err.Error(),
