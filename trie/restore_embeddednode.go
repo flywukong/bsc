@@ -473,6 +473,126 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 	return nil
 }
 
+/*
+func (restorer *EmbeddedNodeRestorer) CompareTrie(newDB ethdb.Database) error {
+	_, diskRoot := rawdb.ReadAccountTrieNode(restorer.db, nil)
+	diskRoot = types.TrieRootHash(diskRoot)
+	log.Info("disk root info", "hash", diskRoot)
+
+	t, err := NewStateTrie(StateTrieID(diskRoot), restorer.Triedb)
+	if err != nil {
+		log.Error("Failed to open trie", "root", diskRoot, "err", err)
+		return err
+	}
+	accIter, err := t.NodeIterator(nil)
+	if err != nil {
+		log.Error("Failed to open iterator", "root", diskRoot, "err", err)
+		return err
+	}
+
+	_, newRoot := rawdb.ReadAccountTrieNode(newDB, nil)
+	newRoot = types.TrieRootHash(newRoot)
+
+	triedb := triedb.NewDatabase(newDB, &triedb.Config{
+		Preimages: false,
+		PathDB:    pathdb.Defaults,
+	})
+	t2, err := NewStateTrie(StateTrieID(newRoot), triedb)
+	if err != nil {
+		log.Error("Failed to open trie", "root", diskRoot, "err", err)
+		return err
+	}
+
+	accIter2, err := t2.NodeIterator(nil)
+	if err != nil {
+		log.Error("Failed to open iterator", "root", diskRoot, "err", err)
+		return err
+	}
+
+	for accIter.Next(true) {
+		accKey := accountTrieNodeKey(accIter.Path())
+		accValue := accIter.NodeBlob()
+
+		accIter2.Next(true)
+		newAccKey := accountTrieNodeKey(accIter2.Path())
+		newAccValue := accIter2.NodeBlob()
+
+		if bytes.Compare(accKey, newAccKey) != 0 && bytes.Compare(accValue, newAccValue) != 0 {
+			log.Info("compare account err", "origin key", common.Bytes2Hex(accKey),
+				"new key", common.Bytes2Hex(newAccKey), "origin value", common.Bytes2Hex(accValue),
+				"new value", common.Bytes2Hex(newAccValue))
+			return errors.New("compare err")
+		}
+		if accIter.Leaf() {
+			if !accIter2.Leaf() {
+				return errors.New("compare err not leaf")
+			}
+			var acc types.StateAccount
+			if err := rlp.DecodeBytes(accIter.LeafBlob(), &acc); err != nil {
+				log.Error("Invalid account encountered during traversal", "err", err)
+				return errors.New("invalid account")
+			}
+
+			var acc2 types.StateAccount
+			if err := rlp.DecodeBytes(accIter2.LeafBlob(), &acc2); err != nil {
+				log.Error("Invalid account encountered during traversal", "err", err)
+				return errors.New("invalid account")
+			}
+
+			// if it is a CA account , iterator the storage trie to find embedded node
+			if acc.Root != types.EmptyRootHash {
+				if acc2.Root == types.EmptyRootHash {
+					return errors.New("compare err not leaf2")
+				}
+
+				ownerHash := common.BytesToHash(accIter.LeafKey())
+				id := StorageTrieID(diskRoot, ownerHash, acc.Root)
+				storageTrie, err := NewStateTrie(id, restorer.Triedb)
+				if err != nil {
+					log.Error("Failed to open storage trie", "root", acc.Root, "err", err)
+					return errors.New("missing storage trie")
+				}
+
+				storageIter, err := storageTrie.NodeIterator(nil)
+				if err != nil {
+					log.Error("Failed to open storage iterator", "root", acc.Root, "err", err)
+					return err
+				}
+
+				ownerHash2 := common.BytesToHash(accIter2.LeafKey())
+				id2 := StorageTrieID(newRoot, ownerHash2, acc2.Root)
+				storageTrie2, err := NewStateTrie(id2, triedb)
+				if err != nil {
+					log.Error("Failed to open storage trie", "root", acc.Root, "err", err)
+					return errors.New("missing storage trie")
+				}
+
+				storageIter2, err := storageTrie2.NodeIterator(nil)
+				if err != nil {
+					log.Error("Failed to open storage iterator", "root", acc.Root, "err", err)
+					return err
+				}
+				// iterator the storage trie
+				for storageIter.Next(true) {
+					storageNodeblob := storageIter.NodeBlob()
+					storagePath := storageIter.Path()
+					key := storageTrieNodeKey(ownerHash, storagePath)
+
+					storageNodeblob2 := storageIter2.NodeBlob()
+					storagePath2 := storageIter2.Path()
+					key2 := storageTrieNodeKey(ownerHash2, storagePath2)
+					if bytes.Compare(key, key2) != 0 || bytes.Compare(storageNodeblob, storageNodeblob2) != 0 {
+						return errors.New("compare storage trie error")
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+
+*/
 // accountTrieNodeKey = TrieNodeAccountPrefix + nodePath.
 func accountTrieNodeKey(path []byte) []byte {
 	return append(rawdb.TrieNodeAccountPrefix, path...)
