@@ -71,14 +71,14 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 
 	switch sn := n.(type) {
 	case *shortNode:
-		log.Info("account shortnode", "key ", sn.Key, "sn", sn)
+		log.Info("it is a account shortnode", "key ", sn.Key, "sn", sn)
 		if vn, ok := sn.Val.(valueNode); ok {
-			log.Info("found short leaf Node inside full node1", "value", vn)
+			log.Info("it is shortnode which has value", "value", vn)
 		}
 	case *fullNode:
-		log.Info("account fullnode", "node ", n)
+		log.Info("it is account fullnode", "node ", n)
 	default:
-		log.Info("account node", "info", n)
+		log.Info("it is account node", "info", n)
 	}
 
 	shortNodeInfoList := make([]shorNodeInfo, 0)
@@ -88,16 +88,29 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 		for i := 0; i < 17; i++ {
 			child := fn.Children[i]
 			if child != nil {
-				if sn, ok := child.(*shortNode); ok {
-					log.Info("found short  Node inside full node2", "full node info", fn, "child idx", i,
-						"child", child, "short node", sn)
-					if i == 16 {
-						panic("should not exist child[17] in secure trie")
+				/*
+					if sn, ok := child.(*shortNode); ok {
+						log.Info("found short  Node inside full node", "full node info", fn, "child idx", i,
+							"child", child, "short node", sn)
+						if i == 16 {
+							panic("should not exist child[17] in secure trie")
+						}
+						if vn, ok := sn.Val.(valueNode); ok {
+							log.Info("found short leaf Node inside full node2", "full node info", fn, "child idx", i,
+								"child", child, "value", vn)
+						}
 					}
+
+				*/switch sn := child.(type) {
+				case *shortNode:
+					log.Info("child account shortnode", "key ", sn.Key, "sn", sn)
 					if vn, ok := sn.Val.(valueNode); ok {
-						log.Info("found short leaf Node inside full node1", "full node info", fn, "child idx", i,
-							"child", child, "value", vn)
+						log.Info("it is shortnode which has value", "value", vn)
 					}
+				case *fullNode:
+					log.Info("child account fullnode", "node ", n)
+				default:
+					log.Info("child account node", "info", n)
 				}
 			}
 			/*
