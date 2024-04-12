@@ -337,6 +337,9 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		hash := h.Hash(accValue)
 		h.Release()
 
+		if accIter.Leaf() {
+			log.Info("it is a leaf node")
+		}
 		shortnodeList, err := checkIfContainShortNode(hash.Bytes(), accKey, accValue, restorer.stat)
 		if err != nil {
 			log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
