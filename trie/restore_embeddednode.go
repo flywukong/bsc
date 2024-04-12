@@ -306,6 +306,13 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		accValue := accIter.NodeBlob()
 		if accValue == nil {
 			log.Warn("trie node(account) with node blob empty")
+			compareValue, err := restorer.db.Get(accKey)
+			if compareValue != nil {
+				log.Info("compare value in db not same", "err", err.Error(),
+					"key", common.Bytes2Hex(accKey), "node blob", common.Bytes2Hex(accValue), ""+
+						"db value", common.Bytes2Hex(compareValue))
+			}
+			continue
 			embeddedNode++
 		}
 		compareValue, err := restorer.db.Get(accKey)
