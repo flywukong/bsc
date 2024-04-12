@@ -72,6 +72,9 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 	switch sn := n.(type) {
 	case *shortNode:
 		log.Info("account shortnode", "key ", sn.Key, "sn", sn)
+		if vn, ok := sn.Val.(valueNode); ok {
+			log.Info("found short leaf Node inside full node1", "value", vn)
+		}
 	case *fullNode:
 		log.Info("account fullnode", "node ", n)
 	default:
@@ -85,13 +88,16 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 		for i := 0; i < 17; i++ {
 			child := fn.Children[i]
 			if child != nil {
-				switch sn := child.(type) {
-				case *shortNode:
-					log.Info("child account shortnode", "key ", common.Bytes2Hex(sn.Key), "sn", child)
-				case *fullNode:
-					log.Info("child account fullnode", "node ", child)
-				default:
-					log.Info("child account node", "info", child)
+				if sn, ok := child.(*shortNode); ok {
+					log.Info("found short  Node inside full node2", "full node info", fn, "child idx", i,
+						"child", child, "short node", sn)
+					if i == 16 {
+						panic("should not exist child[17] in secure trie")
+					}
+					if vn, ok := sn.Val.(valueNode); ok {
+						log.Info("found short leaf Node inside full node1", "full node info", fn, "child idx", i,
+							"child", child, "value", vn)
+					}
 				}
 			}
 			/*
@@ -334,7 +340,7 @@ func (restorer *EmbeddedNodeRestorer) Run2() error {
 		shortnodeList, err := checkIfContainShortNode(hash.Bytes(), accKey, accValue, restorer.stat)
 		if err != nil {
 			log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
-			return err
+			continue
 		}
 		// find shorNode inside the fullnode
 		if len(shortnodeList) > 0 {
