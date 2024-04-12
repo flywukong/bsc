@@ -434,10 +434,24 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 			}
 		}
 	}
+
 	if accIter.Error() != nil {
 		log.Error("Failed to traverse state trie", "root", diskRoot, "err", accIter.Error())
 		return accIter.Error()
 	}
+	if len(trieBatch) > 0 {
+		batch_count++
+		dispatcher.SendKv(trieBatch, batch_count)
+	}
+	fmt.Println("send batch num:", batch_count, "key num:", count)
+	dispatcher.setTaskNum(batch_count)
+
+	finish := dispatcher.WaitDbFinish()
+	if finish == false {
+		fmt.Println("leveldb key migrate fail")
+		panic("task fail")
+	}
+
 	log.Info("Traversing state finish", "nodes", nodes, "accounts", accounts, "CA account", CA_account,
 		"embedded", embeddedCount, "storage embedded node", EmbeddedshortNode,
 		"invalid", invalidNode, "empty hash", storageEmptyHash, "empty blob", emptyBlobNodes, "elapsed",
