@@ -1242,10 +1242,6 @@ func hbss2pbss(ctx *cli.Context) error {
 }
 
 func refactorEmbeddedNode(ctx *cli.Context) error {
-	if ctx.NArg() > 0 {
-		return fmt.Errorf("no arguments required")
-	}
-
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
