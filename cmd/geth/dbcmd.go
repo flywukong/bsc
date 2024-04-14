@@ -1248,15 +1248,17 @@ func refactorEmbeddedNode(ctx *cli.Context) error {
 	chaindb := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer chaindb.Close()
 
+	log.Info("open chain db finish")
 	if rawdb.ReadStateScheme(chaindb) != rawdb.PathScheme {
 		log.Crit("refactor emedded node is not required for hash scheme")
 	}
 
 	embeddedNodesStorer := trie.NewEmbeddedNodeRestorer(chaindb)
-	triedb := triedb.NewDatabase(chaindb, &triedb.Config{
-		Preimages: false,
-		PathDB:    pathdb.Defaults,
-	})
+
+	triedb := utils.MakeTrieDatabase(ctx, chaindb, false, true, false)
+	defer triedb.Close()
+	log.Info("open trie db finish")
+
 	embeddedNodesStorer.Triedb = triedb
 	defer triedb.Close()
 
