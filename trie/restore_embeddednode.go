@@ -311,7 +311,10 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 
 		// write the node into db
 		accPath := accIter.Path()
-		accKey := accountTrieNodeKey(accPath)
+
+		path := make([]byte, len(accPath))
+		copy(path, accPath)
+		accKey := accountTrieNodeKey(path)
 		accValue := accIter.NodeBlob()
 		if accValue == nil {
 			if len(hexToKeybytes(accPath)) == ExpectLeafNodeLen {
@@ -364,17 +367,19 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 					nodes += 1
 					storageNodeblob := storageIter.NodeBlob()
 					storagePath := storageIter.Path()
+					path = make([]byte, len(storagePath))
+					copy(path, storagePath)
 					if storageNodeblob == nil {
-						if len(hexToKeybytes(storagePath)) == ExpectLeafNodeLen {
+						if len(hexToKeybytes(path)) == ExpectLeafNodeLen {
 							// ignore the leaf of account shortNode
-							log.Warn("trie node(storage) with node blob empty", "path", common.Bytes2Hex(accIter.Path()))
+							log.Warn("trie node(storage) with node blob empty", "path", common.Bytes2Hex(path))
 							continue
 						} else {
-							return errors.New("empty node blob, path" + common.Bytes2Hex(accIter.Path()))
+							return errors.New("empty node blob, path" + common.Bytes2Hex(path))
 						}
 					}
 
-					key := storageTrieNodeKey(ownerHash, storagePath)
+					key := storageTrieNodeKey(ownerHash, path)
 					storageValue := make([]byte, len(storageNodeblob))
 					copy(storageValue, storageNodeblob)
 					trieBatch[string(key[:])] = storageValue

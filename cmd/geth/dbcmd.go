@@ -1245,7 +1245,7 @@ func refactorEmbeddedNode(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
-	chaindb := utils.MakeChainDatabase(ctx, stack, false, false)
+	chaindb := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer chaindb.Close()
 
 	if rawdb.ReadStateScheme(chaindb) != rawdb.PathScheme {
