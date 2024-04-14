@@ -367,6 +367,9 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 					if storageNodeblob == nil {
 						//	log.Warn("trie node(storage) with node blob empty", "path", common.Bytes2Hex(storagePath))
 						emptyStorageBlobNodes++
+						if storageIter.Leaf() && len(hexToKeybytes(storagePath)) != ExpectLeafNodeLen {
+							return errors.New("empty node blob, path" + common.Bytes2Hex(storageIter.Path()))
+						}
 						continue
 					} else {
 						key := storageTrieNodeKey(ownerHash, storagePath)
