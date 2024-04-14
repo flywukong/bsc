@@ -316,7 +316,7 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 		if accValue == nil {
 			if len(hexToKeybytes(accPath)) == ExpectLeafNodeLen {
 				// ignore the leaf of account shortNode
-				log.Info("empty blob")
+				// log.Info("empty blob")
 				continue
 			} else {
 				return errors.New("empty node blob, path" + common.Bytes2Hex(accIter.Path()))
@@ -345,6 +345,7 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 
 			// if it is a CA account , iterator the storage trie to find embedded node
 			if acc.Root != types.EmptyRootHash {
+				log.Info("find storage trie")
 				ownerHash := common.BytesToHash(accIter.LeafKey())
 				id := StorageTrieID(diskRoot, ownerHash, acc.Root)
 				storageTrie, err := NewStateTrie(id, restorer.Triedb)
@@ -376,7 +377,7 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 					key := storageTrieNodeKey(ownerHash, storagePath)
 					storageValue := make([]byte, len(storageNodeblob))
 					copy(storageValue, storageNodeblob)
-					trieBatch[string(accKey[:])] = storageValue
+					trieBatch[string(key[:])] = storageValue
 					count++
 
 					// make a batch contain 100 keys , and send job work pool
@@ -406,7 +407,6 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 								trieBatch[string(newKey[:])] = snode.NodeBytes
 								count++
 							}
-
 						}
 					}
 					// make a batch contain 100 keys , and send job work pool
