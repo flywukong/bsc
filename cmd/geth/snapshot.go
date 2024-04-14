@@ -606,7 +606,12 @@ func traverseState(ctx *cli.Context) error {
 		root = headBlock.Root()
 		log.Info("Start traversing the state", "root", root, "number", headBlock.NumberU64())
 	}
-	t, err := trie.NewStateTrie(trie.StateTrieID(root), triedb)
+
+	_, diskRoot := rawdb.ReadAccountTrieNode(chaindb, nil)
+	diskRoot = types.TrieRootHash(diskRoot)
+	log.Info("disk root info", "hash", diskRoot)
+
+	t, err := trie.NewStateTrie(trie.StateTrieID(diskRoot), triedb)
 	if err != nil {
 		log.Error("Failed to open trie", "root", root, "err", err)
 		return err
