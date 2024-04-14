@@ -18,8 +18,6 @@ package rawdb
 
 import (
 	"fmt"
-	"math/big"
-	"strings"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -79,26 +77,6 @@ func ReadAccountTrieNode(db ethdb.KeyValueReader, path []byte) ([]byte, common.H
 	return data, h.Hash(data)
 }
 
-func ReadAccountFromTrieDirectly(db ethdb.Database, key []byte) ([]byte, []byte, common.Hash) {
-	it := db.NewIterator(TrieNodeAccountPrefix, nil)
-	defer it.Release()
-
-	if it.Seek(accountTrieNodeKey(EncodeNibbles(key))) && it.Error() == nil {
-		dbKey := it.Key()
-		if strings.HasPrefix(string(accountTrieNodeKey(EncodeNibbles(key))), string(dbKey)) {
-			data := it.Value()
-			h := NewSha256Hasher()
-			defer h.Release()
-			return data, dbKey[1:], h.Hash(data)
-		} else {
-			log.Debug("ReadAccountFromTrieDirectly", "dbKey", common.Bytes2Hex(dbKey), "target key", common.Bytes2Hex(accountTrieNodeKey(EncodeNibbles(key))))
-		}
-	} else {
-		log.Error("ReadAccountFromTrieDirectly", "iterater error", it.Error())
-	}
-	return nil, nil, common.Hash{}
-}
-
 // HasAccountTrieNode checks the account trie node presence with the specified
 // node path and the associated node hash.
 func HasAccountTrieNode(db ethdb.KeyValueReader, path []byte, hash common.Hash) bool {
@@ -135,13 +113,6 @@ func DeleteAccountTrieNode(db ethdb.KeyValueWriter, path []byte) {
 	}
 }
 
-func DeleteStorageTrie(db ethdb.KeyValueWriter, accountHash common.Hash) {
-	nextAcountHash := common.BigToHash(accountHash.Big().Add(accountHash.Big(), big.NewInt(1)))
-	if err := db.DeleteRange(storageTrieNodeKey(accountHash, nil), storageTrieNodeKey(nextAcountHash, nil)); err != nil {
-		log.Crit("Failed to delete storage trie", "err", err)
-	}
-}
-
 // ReadStorageTrieNode retrieves the storage trie node and the associated node
 // hash with the specified node path.
 func ReadStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path []byte) ([]byte, common.Hash) {
@@ -152,22 +123,6 @@ func ReadStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path 
 	h := NewSha256Hasher()
 	defer h.Release()
 	return data, h.Hash(data)
-}
-
-func ReadStorageFromTrieDirectly(db ethdb.Database, accountHash common.Hash, key []byte) ([]byte, []byte, common.Hash) {
-	it := db.NewIterator(TrieNodeStoragePrefix, nil)
-	defer it.Release()
-
-	if it.Seek(storageTrieNodeKey(accountHash, EncodeNibbles(key))) && it.Error() == nil {
-		dbKey := it.Key()
-		if strings.HasPrefix(string(storageTrieNodeKey(accountHash, EncodeNibbles(key))), string(dbKey)) {
-			data := it.Value()
-			h := NewSha256Hasher()
-			defer h.Release()
-			return data, dbKey[1:], h.Hash(data)
-		}
-	}
-	return nil, nil, common.Hash{}
 }
 
 // HasStorageTrieNode checks the storage trie node presence with the provided

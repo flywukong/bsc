@@ -276,16 +276,16 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 		return err
 	}
 	var (
-		nodes          int
-		accounts       int
-		lastReport     = time.Now()
-		start          = time.Now()
-		emptyBlobNodes int
-		CA_account     int
-		embeddedCount  = 0
+		nodes                 = 0
+		accounts              = 0
+		lastReport            = time.Now()
+		start                 = time.Now()
+		emptyStorageBlobNodes int
+		slots                 = 0
+		CAaccounts            = 0
+		embeddedCount         = 0
 
 		EmbeddedshortNode int
-		storageEmptyHash  int
 	)
 
 	accIter, err := t.NodeIterator(nil)
@@ -309,19 +309,11 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 	for accIter.Next(true) {
 		nodes += 1
 
-		// write the node into db
 		accPath := accIter.Path()
-
-		path := make([]byte, len(accPath))
-		copy(path, accPath)
-		accKey := accountTrieNodeKey(path)
+		accKey := accountTrieNodeKey(accPath)
 		accValue := accIter.NodeBlob()
 		if accValue == nil {
-			if len(hexToKeybytes(accPath)) == ExpectLeafNodeLen {
-				// ignore the leaf of account shortNode
-				// log.Info("empty blob")
-				continue
-			} else {
+			if len(hexToKeybytes(accPath)) != ExpectLeafNodeLen {
 				return errors.New("empty node blob, path" + common.Bytes2Hex(accIter.Path()))
 			}
 		}
@@ -348,7 +340,7 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 
 			// if it is a CA account , iterator the storage trie to find embedded node
 			if acc.Root != types.EmptyRootHash {
-				log.Info("find storage trie")
+				CAaccounts++
 				ownerHash := common.BytesToHash(accIter.LeafKey())
 				id := StorageTrieID(diskRoot, ownerHash, acc.Root)
 				storageTrie, err := NewStateTrie(id, restorer.Triedb)
@@ -367,42 +359,39 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 					nodes += 1
 					storageNodeblob := storageIter.NodeBlob()
 					storagePath := storageIter.Path()
-					path = make([]byte, len(storagePath))
-					copy(path, storagePath)
+
+					// Bump the counter if it's leaf node.
+					if storageIter.Leaf() {
+						slots++
+					}
 					if storageNodeblob == nil {
-						if len(hexToKeybytes(path)) == ExpectLeafNodeLen {
-							// ignore the leaf of account shortNode
-							log.Warn("trie node(storage) with node blob empty", "path", common.Bytes2Hex(path))
-							continue
-						} else {
-							return errors.New("empty node blob, path" + common.Bytes2Hex(path))
+						log.Warn("trie node(storage) with node blob empty", "path", common.Bytes2Hex(storagePath))
+						emptyStorageBlobNodes++
+						continue
+					} else {
+						key := storageTrieNodeKey(ownerHash, storagePath)
+						storageValue := make([]byte, len(storageNodeblob))
+						copy(storageValue, storageNodeblob)
+						trieBatch[string(key[:])] = storageValue
+						count++
+
+						// make a batch contain 100 keys , and send job work pool
+						if count >= 1 && count%100 == 0 {
+							sendBatch(&batch_count, dispatcher, trieBatch, start)
+							trieBatch = make(map[string][]byte)
 						}
-					}
-
-					key := storageTrieNodeKey(ownerHash, path)
-					storageValue := make([]byte, len(storageNodeblob))
-					copy(storageValue, storageNodeblob)
-					trieBatch[string(key[:])] = storageValue
-					count++
-
-					// make a batch contain 100 keys , and send job work pool
-					if count >= 1 && count%100 == 0 {
-						sendBatch(&batch_count, dispatcher, trieBatch, start)
-						trieBatch = make(map[string][]byte)
-					}
-					// find shorNode inside the fullnode
-					h := rawdb.NewSha256Hasher()
-					hash := h.Hash(storageValue)
-					h.Release()
-					shortnodeList, err := checkIfContainShortNode(hash.Bytes(), key, storageValue, restorer.stat)
-					if err != nil {
-						log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
-						return err
-					}
-					// found short leaf Node inside full node
-					if len(shortnodeList) > 0 {
-						for _, snode := range shortnodeList {
-							if rawdb.IsStorageTrieNode(key) {
+						// find shorNode inside the fullnode
+						h := rawdb.NewSha256Hasher()
+						hash := h.Hash(storageValue)
+						h.Release()
+						shortnodeList, err := checkIfContainShortNode(hash.Bytes(), key, storageValue, restorer.stat)
+						if err != nil {
+							log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
+							return err
+						}
+						// found short leaf Node inside full node
+						if len(shortnodeList) > 0 {
+							for _, snode := range shortnodeList {
 								EmbeddedshortNode++
 								fullNodePath := key[1+common.HashLength:]
 								newKey := append(key, byte(snode.Idx))
@@ -411,24 +400,20 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 									"new node key", common.Bytes2Hex(newKey), "new node value", common.Bytes2Hex(snode.NodeBytes))
 								trieBatch[string(newKey[:])] = snode.NodeBytes
 								count++
+								// make a batch contain 100 keys , and send job work pool
+								if count >= 1 && count%100 == 0 {
+									sendBatch(&batch_count, dispatcher, trieBatch, start)
+									trieBatch = make(map[string][]byte)
+								}
 							}
 						}
-					}
-					// make a batch contain 100 keys , and send job work pool
-					if count >= 1 && count%100 == 0 {
-						sendBatch(&batch_count, dispatcher, trieBatch, start)
-						trieBatch = make(map[string][]byte)
-					}
 
-					// Bump the counter if it's leaf node.
-					if storageIter.Leaf() {
-						CA_account += 1
 					}
 
 					if time.Since(lastReport) > time.Second*3 {
-						log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "CA account", CA_account,
+						log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "CA account", CAaccounts,
 							"send batch num", batch_count, "storage embedded node", EmbeddedshortNode,
-							"empty hash", storageEmptyHash, "empty blob", emptyBlobNodes, "elapsed",
+							"slots", slots, "empty blob", emptyStorageBlobNodes, "elapsed",
 							common.PrettyDuration(time.Since(start)))
 						lastReport = time.Now()
 					}
@@ -440,10 +425,10 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 				}
 			}
 
-			if time.Since(lastReport) > time.Second*8 {
-				log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "CA account", CA_account,
+			if time.Since(lastReport) > time.Second*3 {
+				log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "CA account", CAaccounts,
 					"send batch num", batch_count, "storage embedded node", EmbeddedshortNode,
-					"empty hash", storageEmptyHash, "empty blob", emptyBlobNodes, "elapsed",
+					"slots", slots, "empty blob", emptyStorageBlobNodes, "elapsed",
 					common.PrettyDuration(time.Since(start)))
 				lastReport = time.Now()
 			}
@@ -454,6 +439,9 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 		log.Error("Failed to traverse state trie", "root", diskRoot, "err", accIter.Error())
 		return accIter.Error()
 	}
+	log.Info("Traversing state finish", "nodes", nodes, "accounts", accounts, "CA account", CAaccounts,
+		"embedded", embeddedCount, "storage embedded node", EmbeddedshortNode, "slots", slots, "empty blob", emptyStorageBlobNodes, "elapsed",
+		common.PrettyDuration(time.Since(start)))
 
 	log.Info(" total node info", "fullnode count", restorer.stat.FullNodeCnt,
 		"short node count", restorer.stat.ShortNodeCnt, "value node", restorer.stat.ValueNodeCnt,
@@ -463,8 +451,12 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 		batch_count++
 		dispatcher.SendKv(trieBatch, batch_count)
 	}
-	fmt.Println("send batch num:", batch_count, "key num:", count)
+
 	dispatcher.setTaskNum(batch_count)
+
+	if slots+EmbeddedshortNode != emptyStorageBlobNodes {
+		panic("task fail")
+	}
 
 	finish := dispatcher.WaitDbFinish()
 	if finish == false {
@@ -472,9 +464,6 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 		panic("task fail")
 	}
 
-	log.Info("Traversing state finish", "nodes", nodes, "accounts", accounts, "CA account", CA_account,
-		"embedded", embeddedCount, "storage embedded node", EmbeddedshortNode, "empty hash", storageEmptyHash, "empty blob", emptyBlobNodes, "elapsed",
-		common.PrettyDuration(time.Since(start)))
 	return nil
 }
 
@@ -627,7 +616,7 @@ func sendBatch(batch_count *uint64, dispatcher *Dispatcher, batch map[string][]b
 		time.Sleep(5 * time.Second)
 	}
 	// print cost time every 50000000 keys
-	if *batch_count%500 == 0 {
+	if *batch_count%5000 == 0 {
 		log.Info("finish write batch  ", "k,v num:", *batch_count*100,
 			"cost time:", time.Since(start).Nanoseconds()/1000000000)
 	}
