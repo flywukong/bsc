@@ -414,17 +414,18 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 					h := rawdb.NewSha256Hasher()
 					hash := h.Hash(storageValue)
 					h.Release()
+					log.Warn("node path", "path", common.Bytes2Hex((storagePath)))
 					_, err := checkIfContainShortNode(hash.Bytes(), key, storageValue, restorer.stat)
 					if err != nil {
 						log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
-						continue
+						//continue
 					}
 
 					if storageNodeblob == nil {
 						//	log.Warn("trie node(storage) with node blob empty", "path", common.Bytes2Hex(storagePath))
 						emptyStorageBlobNodes++
 						if storageIter.Leaf() {
-							log.Warn("empty blob", "path", hexToKeybytes(storagePath))
+							log.Warn("empty blob", "path", common.Bytes2Hex((storagePath)))
 						}
 						if storageIter.Leaf() && len(hexToKeybytes(storagePath)) != ExpectLeafNodeLen {
 							return errors.New("empty node blob, path" + common.Bytes2Hex(storageIter.Path()))
