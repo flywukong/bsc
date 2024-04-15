@@ -92,6 +92,7 @@ Remove blockchain and state databases`,
 			dbTrieGetCmd,
 			dbTrieDeleteCmd,
 			dbStoreEmbeddedCmd,
+			dbCompareEmbeddedCmd,
 			dbDeleteStableTrieCmd,
 		},
 	}
@@ -120,6 +121,16 @@ Remove blockchain and state databases`,
 	dbStoreEmbeddedCmd = &cli.Command{
 		Action: refactorEmbeddedNode,
 		Name:   "add-embedded",
+		Usage:  "Add the embedded shortNode",
+		Flags: flags.Merge([]cli.Flag{
+			utils.SyncModeFlag,
+		}, utils.NetworkFlags, utils.DatabaseFlags),
+		Description: `This command redundancy store store the embedded shortNode.`,
+	}
+
+	dbCompareEmbeddedCmd = &cli.Command{
+		Action: compareMPT,
+		Name:   "compare-mpt",
 		Usage:  "Add the embedded shortNode",
 		Flags: flags.Merge([]cli.Flag{
 			utils.SyncModeFlag,
@@ -1259,12 +1270,40 @@ func refactorEmbeddedNode(ctx *cli.Context) error {
 	defer triedb.Close()
 	log.Info("open trie db finish")
 
-	embeddedNodesStorer.Triedb = triedb
+	embeddedNodesStorer.TrieDB = triedb
 	defer triedb.Close()
 
 	destDir := ctx.Args().Get(0)
 
 	return embeddedNodesStorer.WriteNewTrie(destDir)
+}
+
+func compareMPT(ctx *cli.Context) error {
+	stack, _ := makeConfigNode(ctx)
+	defer stack.Close()
+
+	chaindb := utils.MakeChainDatabase(ctx, stack, true, false)
+	defer chaindb.Close()
+
+	log.Info("open chain db finish")
+	if rawdb.ReadStateScheme(chaindb) != rawdb.PathScheme {
+		log.Crit("refactor emedded node is not required for hash scheme")
+	}
+	embeddedNodesStorer := trie.NewEmbeddedNodeRestorer(chaindb)
+	triedb := utils.MakeTrieDatabase(ctx, chaindb, false, true, false)
+	defer triedb.Close()
+	log.Info("open trie db finish")
+	embeddedNodesStorer.TrieDB = triedb
+
+	destDir := ctx.Args().Get(0)
+	newDB := utils.MakeNewDBDatabase(ctx, stack, true, false, destDir)
+	embeddedNodesStorer.NewDB = newDB
+	defer newDB.Close()
+	newTrieDB := utils.MakeTrieDatabase(ctx, newDB, false, true, false)
+	embeddedNodesStorer.NewTrieDB = newTrieDB
+
+	defer newTrieDB.Close()
+	return embeddedNodesStorer.CompareTrie()
 }
 
 func deleteStaleTrie(ctx *cli.Context) error {

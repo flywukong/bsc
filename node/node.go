@@ -857,6 +857,38 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
 	return db, err
 }
 
+func (n *Node) OpenDatabaseForNewDB(path string, cache, handles int, ancient, namespace string, readonly, disableFreeze, isLastOffset, pruneAncientData bool) (ethdb.Database, error) {
+	n.lock.Lock()
+	defer n.lock.Unlock()
+	if n.state == closedState {
+		return nil, ErrNodeStopped
+	}
+	var db ethdb.Database
+	var err error
+	if n.config.DataDir == "" {
+		db = rawdb.NewMemoryDatabase()
+	} else {
+		direcrory := filepath.Join(path, "chaindata")
+		db, err = rawdb.Open(rawdb.OpenOptions{
+			Type:              n.config.DBEngine,
+			Directory:         direcrory,
+			AncientsDirectory: filepath.Join(direcrory, "ancient"),
+			Namespace:         namespace,
+			Cache:             cache,
+			Handles:           handles,
+			ReadOnly:          readonly,
+			DisableFreeze:     disableFreeze,
+			IsLastOffset:      isLastOffset,
+			PruneAncientData:  pruneAncientData,
+		})
+	}
+
+	if err == nil {
+		db = n.wrapDatabase(db)
+	}
+	return db, err
+}
+
 // IsSeparatedDB check the state subdirectory of db, if subdirectory exists, return true
 func (n *Node) IsSeparatedDB() bool {
 	separateDir := filepath.Join(n.ResolvePath("chaindata"), "state")
