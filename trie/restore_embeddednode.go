@@ -70,6 +70,17 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 	if err != nil {
 		return nil, err
 	}
+	switch sn := n.(type) {
+	case *shortNode:
+		log.Info("it is a account shortnode", "key ", sn.Key, "sn", sn)
+		if vn, ok := sn.Val.(valueNode); ok {
+			log.Info("it is shortnode which has value", "value", vn)
+		}
+	case *fullNode:
+		log.Info("it is account fullnode", "node ", n)
+	default:
+		log.Info("it is account node", "info", n)
+	}
 
 	shortNodeInfoList := make([]shorNodeInfo, 0)
 	if fn, ok := n.(*fullNode); ok {
@@ -77,27 +88,56 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 		// find shortNode inside full node
 		for i := 0; i < 17; i++ {
 			child := fn.Children[i]
-			if sn, ok := child.(*shortNode); ok {
-				if i == 16 {
-					panic("should not exist child[17] in secure trie")
+			if child != nil {
+				/*
+				   if sn, ok := child.(*shortNode); ok {
+				           log.Info("found short  Node inside full node", "full node info", fn, "child idx", i,
+				                   "child", child, "short node", sn)
+				           if i == 16 {
+				                   panic("should not exist child[17] in secure trie")
+				           }
+				           if vn, ok := sn.Val.(valueNode); ok {
+				                   log.Info("found short leaf Node inside full node2", "full node info", fn, "child idx", i,
+				                           "child", child, "value", vn)
+				           }
+				   }
+
+				*/switch sn := child.(type) {
+				case *shortNode:
+					log.Info("child account shortnode", "key ", sn.Key, "sn", sn)
+					if vn, ok := sn.Val.(valueNode); ok {
+						log.Info("it is shortnode which has value", "value", vn)
+					}
+				case *fullNode:
+					log.Info("child account fullnode", "node ", n)
+				default:
+					log.Info("child account node", "info", n)
 				}
-				if vn, ok := sn.Val.(valueNode); ok {
-					if rawdb.IsStorageTrieNode(key) {
-						// full node path
-						valueNodePath := key[1+common.HashLength:]
-						// add node index to path
-						valueNodePath = append(valueNodePath, byte(i))
-						// check the length of node path
-						if len(hexToKeybytes(append(valueNodePath, sn.Key...))) == ExpectLeafNodeLen {
-							log.Info("found short leaf Node inside full node", "full node info", fn, "child idx", i,
-								"child", child, "value", vn)
-							stat.EmbeddedNodeCnt++
-							shortNodeInfoList = append(shortNodeInfoList,
-								shorNodeInfo{NodeBytes: nodeToBytes(child), Idx: i})
+			}
+			/*
+				if sn, ok := child.(*shortNode); ok {
+					if i == 16 {
+						panic("should not exist child[17] in secure trie")
+					}
+					if vn, ok := sn.Val.(valueNode); ok {
+						if rawdb.IsStorageTrieNode(key) {
+							// full node path
+							valueNodePath := key[1+common.HashLength:]
+							// add node index to path
+							valueNodePath = append(valueNodePath, byte(i))
+							// check the length of node path
+							if len(hexToKeybytes(append(valueNodePath, sn.Key...))) == ExpectLeafNodeLen {
+								log.Info("found short leaf Node inside full node", "full node info", fn, "child idx", i,
+									"child", child, "value", vn)
+								stat.EmbeddedNodeCnt++
+								shortNodeInfoList = append(shortNodeInfoList,
+									shorNodeInfo{NodeBytes: nodeToBytes(child), Idx: i})
+							}
 						}
 					}
 				}
-			}
+
+			*/
 		}
 		return shortNodeInfoList, nil
 	} else if sn, ok := n.(*shortNode); ok {
@@ -364,61 +404,32 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 					if storageIter.Leaf() {
 						slots++
 					}
+
+					key := storageTrieNodeKey(ownerHash, storagePath)
+					storageValue := make([]byte, len(storageNodeblob))
+					copy(storageValue, storageNodeblob)
+					trieBatch[string(key[:])] = storageValue
+					count++
+
+					h := rawdb.NewSha256Hasher()
+					hash := h.Hash(storageValue)
+					h.Release()
+					_, err := checkIfContainShortNode(hash.Bytes(), key, storageValue, restorer.stat)
+					if err != nil {
+						log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
+						continue
+					}
+
 					if storageNodeblob == nil {
 						//	log.Warn("trie node(storage) with node blob empty", "path", common.Bytes2Hex(storagePath))
 						emptyStorageBlobNodes++
+						if storageIter.Leaf() {
+							log.Warn("empty blob", "path", hexToKeybytes(storagePath))
+						}
 						if storageIter.Leaf() && len(hexToKeybytes(storagePath)) != ExpectLeafNodeLen {
 							return errors.New("empty node blob, path" + common.Bytes2Hex(storageIter.Path()))
 						}
 						continue
-					} else {
-						key := storageTrieNodeKey(ownerHash, storagePath)
-						storageValue := make([]byte, len(storageNodeblob))
-						copy(storageValue, storageNodeblob)
-						trieBatch[string(key[:])] = storageValue
-						count++
-
-						// make a batch contain 100 keys , and send job work pool
-						if count >= 1 && count%100 == 0 {
-							sendBatch(&batch_count, dispatcher, trieBatch, start)
-							trieBatch = make(map[string][]byte)
-						}
-						// find shorNode inside the fullnode
-						h := rawdb.NewSha256Hasher()
-						hash := h.Hash(storageValue)
-						h.Release()
-						shortnodeList, err := checkIfContainShortNode(hash.Bytes(), key, storageValue, restorer.stat)
-						if err != nil {
-							log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
-							return err
-						}
-						// found short leaf Node inside full node
-						if len(shortnodeList) > 0 {
-							for _, snode := range shortnodeList {
-								EmbeddedshortNode++
-								fullNodePath := key[1+common.HashLength:]
-								newKey := append(key, byte(snode.Idx))
-								log.Info("embedded storage shortNode info", "trie key", common.Bytes2Hex(key),
-									"fullNode path", common.Bytes2Hex(fullNodePath),
-									"new node key", common.Bytes2Hex(newKey), "new node value", common.Bytes2Hex(snode.NodeBytes))
-								trieBatch[string(newKey[:])] = snode.NodeBytes
-								count++
-								// make a batch contain 100 keys , and send job work pool
-								if count >= 1 && count%100 == 0 {
-									sendBatch(&batch_count, dispatcher, trieBatch, start)
-									trieBatch = make(map[string][]byte)
-								}
-							}
-						}
-
-					}
-
-					if time.Since(lastReport) > time.Second*10 {
-						log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "CA account", CAaccounts,
-							"send batch num", batch_count, "storage embedded node", EmbeddedshortNode,
-							"slots", slots, "empty blob", emptyStorageBlobNodes, "elapsed",
-							common.PrettyDuration(time.Since(start)))
-						lastReport = time.Now()
 					}
 				}
 
