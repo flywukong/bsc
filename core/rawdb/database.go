@@ -1035,7 +1035,7 @@ func DeleteDatabase(db ethdb.Database) error {
 		fmt.Println("get first key error", err.Error())
 	}
 
-	it := db.NewIterator([]byte(SnapshotAccountPrefix), startKey)
+	it := db.NewIterator([]byte(SnapshotStoragePrefix), startKey)
 
 	// taskCache store recent 15000 batch info,
 	// only store the first key of batch as the startKey if task fail
