@@ -828,6 +828,10 @@ func isTrieKey(key []byte) bool {
 		return true
 	case IsStorageTrieNode(key):
 		return true
+	case bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength):
+		return true
+	case bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength):
+		return true
 	default:
 		return false
 	}
