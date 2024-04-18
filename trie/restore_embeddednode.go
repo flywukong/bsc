@@ -65,6 +65,7 @@ func (h *dbhasher) release() {
 type shorNodeInfo struct {
 	NodeBytes []byte
 	Idx       int
+	HashBytes []byte
 }
 
 func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNodeInfo, error) {
@@ -89,10 +90,13 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 						valueNodePath := key[1+common.HashLength:]
 						// add node index to path
 						valueNodePath = append(valueNodePath, byte(i))
+						hashBytes := hexToKeybytes(append(valueNodePath, sn.Key...))
 						// check the length of node path
-						if len(hexToKeybytes(append(valueNodePath, sn.Key...))) == ExpectLeafNodeLen {
+						if len(hashBytes) == ExpectLeafNodeLen {
 							log.Info("found short leaf Node inside full node", "full node info", fn, "child idx", i,
 								"child", child, "value", vn)
+							//	shortNodeInfoList = append(shortNodeInfoList,
+							//		shorNodeInfo{NodeBytes: nodeToBytes(child), Idx: i, HashBytes: hashBytes})
 							stat.EmbeddedNodeCnt++
 
 							newnode := &shortNode{
@@ -100,7 +104,7 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 								Val: vn,
 							}
 							shortNodeInfoList = append(shortNodeInfoList,
-								shorNodeInfo{NodeBytes: nodeToBytes(newnode), Idx: i})
+								shorNodeInfo{NodeBytes: nodeToBytes(newnode), Idx: i, HashBytes: hashBytes})
 						}
 					}
 				}
@@ -387,6 +391,7 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 			if acc.Root != types.EmptyRootHash {
 				CAaccounts++
 				ownerHash := common.BytesToHash(accIter.LeafKey())
+
 				id := StorageTrieID(diskRoot, ownerHash, acc.Root)
 				storageTrie, err := NewStateTrie(id, restorer.TrieDB)
 				if err != nil {
@@ -443,16 +448,45 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 								EmbeddedshortNode++
 								fullNodePath := key[1+common.HashLength:]
 								newKey := append(key, byte(snode.Idx))
+								//newHash := append(fullNodePath, byte(snode.Idx))
 								log.Info("embedded storage shortNode info", "trie key", common.Bytes2Hex(key),
 									"fullNode path", common.Bytes2Hex(fullNodePath),
 									"new node key", common.Bytes2Hex(newKey), "new node value", common.Bytes2Hex(snode.NodeBytes))
-								trieBatch[string(newKey[:])] = snode.NodeBytes
-								count++
-								// make a batch contain 100 keys , and send job work pool
-								if count >= 1 && count%100 == 0 {
-									sendBatch(&batch_count, dispatcher, trieBatch, start)
-									trieBatch = make(map[string][]byte)
+
+								//	trieBatch[string(newKey[:])] = snode.NodeBytes
+								/*
+									count++
+									// make a batch contain 100 keys , and send job work pool
+									if count >= 1 && count%100 == 0 {
+										sendBatch(&batch_count, dispatcher, trieBatch, start)
+										trieBatch = make(map[string][]byte)
+									}
+
+								*/
+
+								err := restorer.db.Put(newKey, snode.NodeBytes)
+								if err != nil {
+									return err
 								}
+								//	diskBlob, err := restorer.db.Get()
+								nBlob, path, nHash := rawdb.ReadStorageFromTrieDirectly(restorer.db, ownerHash, snode.HashBytes)
+								if nBlob == nil {
+									fmt.Println("nil leaf", "path", common.Bytes2Hex(path), "owner hash", ownerHash,
+										"storage hash", common.BytesToHash(snode.HashBytes))
+									return nil
+								}
+								val, _ := DecodeLeafNode(nHash.Bytes(), path[common.HashLength:], nBlob)
+								fmt.Println("decode leaf ", "hash", fmt.Sprintf("node %x: %v", hash, nBlob))
+								fmt.Println("decode leaf", "path", common.Bytes2Hex(path), "owner hash", ownerHash,
+									"storage hash", common.BytesToHash(snode.HashBytes), "val", common.Bytes2Hex(val))
+
+								dbValue, err := restorer.db.Get(newKey)
+								if err != nil {
+									return err
+								}
+								fmt.Println("read value from db", "value", common.Bytes2Hex(dbValue))
+								//	storageTrie.trie.GetDirectly(newKey)
+								panic("expect error")
 							}
 						}
 
@@ -810,23 +844,24 @@ func storageTrieNodeKey(accountHash common.Hash, path []byte) []byte {
 }
 
 func sendBatch(batch_count *uint64, dispatcher *Dispatcher, batch map[string][]byte, start time.Time) {
-
-	// make a batch as a job, send it to worker pool
-	*batch_count++
-	dispatcher.SendKv(batch, *batch_count)
-	// if producer much faster than workers(more than 8000 jobs), make it slower
-	distance := *batch_count - GetDoneTaskNum()
-	if distance > 8000 {
-		if distance > 12000 {
-			fmt.Println("worker lag too much", distance)
-			time.Sleep(1 * time.Minute)
+	return
+	/*
+		// make a batch as a job, send it to worker pool
+		*batch_count++
+		dispatcher.SendKv(batch, *batch_count)
+		// if producer much faster than workers(more than 8000 jobs), make it slower
+		distance := *batch_count - GetDoneTaskNum()
+		if distance > 8000 {
+			if distance > 12000 {
+				fmt.Println("worker lag too much", distance)
+				time.Sleep(1 * time.Minute)
+			}
+			time.Sleep(5 * time.Second)
 		}
-		time.Sleep(5 * time.Second)
-	}
-	// print cost time every 50000000 keys
-	if *batch_count%500000 == 0 {
-		log.Info("finish write batch  ", "k,v num:", *batch_count*100,
-			"cost time:", time.Since(start).Nanoseconds()/1000000000)
-	}
+		// print cost time every 50000000 keys
+		if *batch_count%500000 == 0 {
+			log.Info("finish write batch  ", "k,v num:", *batch_count*100,
+				"cost time:", time.Since(start).Nanoseconds()/1000000000)
+		} */
 
 }
