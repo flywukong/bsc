@@ -916,8 +916,8 @@ func DeleteTrieState(db ethdb.Database) error {
 	)
 
 	prefixKeys := map[string]func([]byte) bool{
-		string(trieNodeAccountPrefix): IsAccountTrieNode,
-		string(trieNodeStoragePrefix): IsStorageTrieNode,
+		string(TrieNodeAccountPrefix): IsAccountTrieNode,
+		string(TrieNodeStoragePrefix): IsStorageTrieNode,
 		string(stateIDPrefix):         func(key []byte) bool { return len(key) == len(stateIDPrefix)+common.HashLength },
 	}
 
