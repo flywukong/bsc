@@ -94,6 +94,11 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 							log.Info("found short leaf Node inside full node", "full node info", fn, "child idx", i,
 								"child", child, "value", vn)
 							stat.EmbeddedNodeCnt++
+							/*
+								blob := nodeToBytes(child)
+								value := make([]byte, len(blob))
+								copy(value, blob)
+							*/
 							shortNodeInfoList = append(shortNodeInfoList,
 								shorNodeInfo{NodeBytes: nodeToBytes(child), Idx: i})
 						}
@@ -442,6 +447,10 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 									"fullNode path", common.Bytes2Hex(fullNodePath),
 									"new node key", common.Bytes2Hex(newKey), "new node value", common.Bytes2Hex(snode.NodeBytes))
 								trieBatch[string(newKey[:])] = snode.NodeBytes
+								log.Info("embedded storage shortNode value", "value len:", len(snode.NodeBytes) == 1)
+								if len(snode.NodeBytes) == 1 {
+									panic("err node bytes ")
+								}
 								count++
 								// make a batch contain 100 keys , and send job work pool
 								if count >= 1 && count%100 == 0 {
