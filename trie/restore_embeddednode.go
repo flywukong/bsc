@@ -446,8 +446,21 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 								log.Info("embedded storage shortNode info", "trie key", common.Bytes2Hex(key),
 									"fullNode path", common.Bytes2Hex(fullNodePath),
 									"new node key", common.Bytes2Hex(newKey), "new node value", common.Bytes2Hex(snode.NodeBytes))
+
+								fmt.Println("embedded storage shortNode info",
+									"new node key", common.Bytes2Hex(newKey), "new node value", common.Bytes2Hex(snode.NodeBytes))
+								// get directy
+								dbValue, dberr := restorer.NewDB.Get(newKey)
+								if dberr != nil {
+									return errors.New("get embedded node from new db error" + dberr.Error())
+								}
+								fmt.Println("db read info",
+									"new node key", common.Bytes2Hex(newKey), "new node value", common.Bytes2Hex(dbValue))
+
+								panic("11")
 								trieBatch[string(newKey[:])] = snode.NodeBytes
-								log.Info("embedded storage shortNode value", "value len:", len(snode.NodeBytes) == 1)
+								log.Info("embedded storage shortNode value", "value len:", len(snode.NodeBytes),
+									"path")
 								if len(snode.NodeBytes) == 1 {
 									panic("err node bytes ")
 								}
@@ -815,22 +828,24 @@ func storageTrieNodeKey(accountHash common.Hash, path []byte) []byte {
 
 func sendBatch(batch_count *uint64, dispatcher *Dispatcher, batch map[string][]byte, start time.Time) {
 
-	// make a batch as a job, send it to worker pool
-	*batch_count++
-	dispatcher.SendKv(batch, *batch_count)
-	// if producer much faster than workers(more than 8000 jobs), make it slower
-	distance := *batch_count - GetDoneTaskNum()
-	if distance > 8000 {
-		if distance > 12000 {
-			fmt.Println("worker lag too much", distance)
-			time.Sleep(1 * time.Minute)
+	return
+	/*
+		// make a batch as a job, send it to worker pool
+		*batch_count++
+		dispatcher.SendKv(batch, *batch_count)
+		// if producer much faster than workers(more than 8000 jobs), make it slower
+		distance := *batch_count - GetDoneTaskNum()
+		if distance > 8000 {
+			if distance > 12000 {
+				fmt.Println("worker lag too much", distance)
+				time.Sleep(1 * time.Minute)
+			}
+			time.Sleep(5 * time.Second)
 		}
-		time.Sleep(5 * time.Second)
-	}
-	// print cost time every 50000000 keys
-	if *batch_count%500000 == 0 {
-		log.Info("finish write batch  ", "k,v num:", *batch_count*100,
-			"cost time:", time.Since(start).Nanoseconds()/1000000000)
-	}
-
+		// print cost time every 50000000 keys
+		if *batch_count%500000 == 0 {
+			log.Info("finish write batch  ", "k,v num:", *batch_count*100,
+				"cost time:", time.Since(start).Nanoseconds()/1000000000)
+		}
+	*/
 }
