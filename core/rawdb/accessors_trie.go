@@ -80,16 +80,16 @@ func ReadAccountTrieNode(db ethdb.KeyValueReader, path []byte) ([]byte, common.H
 }
 
 func ReadAccountFromTrieDirectly(db ethdb.Database, key []byte) ([]byte, []byte, common.Hash) {
-	it := db.NewIterator(trieNodeAccountPrefix, nil)
+	it := db.NewIterator(TrieNodeAccountPrefix, nil)
 	defer it.Release()
 
 	if it.Seek(accountTrieNodeKey(EncodeNibbles(key))) && it.Error() == nil {
 		dbKey := common.CopyBytes(it.Key())
 		if strings.HasPrefix(string(accountTrieNodeKey(EncodeNibbles(key))), string(dbKey)) {
 			data := common.CopyBytes(it.Value())
-			h := newHasher()
-			defer h.release()
-			return data, dbKey[1:], h.hash(data)
+			h := NewSha256Hasher()
+			defer h.Release()
+			return data, dbKey[1:], h.Hash(data)
 		} else {
 			log.Debug("ReadAccountFromTrieDirectly", "dbKey", common.Bytes2Hex(dbKey), "target key", common.Bytes2Hex(accountTrieNodeKey(EncodeNibbles(key))))
 		}
@@ -155,16 +155,16 @@ func ReadStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path 
 }
 
 func ReadStorageFromTrieDirectly(db ethdb.Database, accountHash common.Hash, key []byte) ([]byte, []byte, common.Hash) {
-	it := db.NewIterator(trieNodeStoragePrefix, nil)
+	it := db.NewIterator(TrieNodeStoragePrefix, nil)
 	defer it.Release()
 
 	if it.Seek(storageTrieNodeKey(accountHash, EncodeNibbles(key))) && it.Error() == nil {
 		dbKey := common.CopyBytes(it.Key())
 		if strings.HasPrefix(string(storageTrieNodeKey(accountHash, EncodeNibbles(key))), string(dbKey)) {
 			data := common.CopyBytes(it.Value())
-			h := newHasher()
-			defer h.release()
-			return data, dbKey[1:], h.hash(data)
+			h := NewSha256Hasher()
+			defer h.Release()
+			return data, dbKey[1:], h.Hash(data)
 		}
 	}
 	return nil, nil, common.Hash{}

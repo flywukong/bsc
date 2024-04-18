@@ -94,7 +94,6 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 							log.Info("found short leaf Node inside full node", "full node info", fn, "child idx", i,
 								"child", child, "value", vn)
 							stat.EmbeddedNodeCnt++
-
 							newnode := &shortNode{
 								Key: hexToCompact(sn.Key),
 								Val: vn,
@@ -446,6 +445,7 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 								log.Info("embedded storage shortNode info", "trie key", common.Bytes2Hex(key),
 									"fullNode path", common.Bytes2Hex(fullNodePath),
 									"new node key", common.Bytes2Hex(newKey), "new node value", common.Bytes2Hex(snode.NodeBytes))
+
 								trieBatch[string(newKey[:])] = snode.NodeBytes
 								count++
 								// make a batch contain 100 keys , and send job work pool
@@ -810,7 +810,6 @@ func storageTrieNodeKey(accountHash common.Hash, path []byte) []byte {
 }
 
 func sendBatch(batch_count *uint64, dispatcher *Dispatcher, batch map[string][]byte, start time.Time) {
-
 	// make a batch as a job, send it to worker pool
 	*batch_count++
 	dispatcher.SendKv(batch, *batch_count)
@@ -828,5 +827,4 @@ func sendBatch(batch_count *uint64, dispatcher *Dispatcher, batch map[string][]b
 		log.Info("finish write batch  ", "k,v num:", *batch_count*100,
 			"cost time:", time.Since(start).Nanoseconds()/1000000000)
 	}
-
 }
