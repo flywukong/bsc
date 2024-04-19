@@ -477,7 +477,7 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 								}
 								val, _ := DecodeLeafNode(nHash.Bytes(), path[common.HashLength:], nBlob)
 								fmt.Println("decode leaf ", "hash", fmt.Sprintf("node %x: %v", hash, nBlob))
-								fmt.Println("decode leaf", "path", common.Bytes2Hex(path), "owner hash", ownerHash,
+								fmt.Println("decode leaf", "hash", nHash, "path", common.Bytes2Hex(path), "owner hash", ownerHash,
 									"storage hash", common.BytesToHash(snode.HashBytes), "val", common.Bytes2Hex(val))
 
 								dbValue, err := restorer.db.Get(newKey)
