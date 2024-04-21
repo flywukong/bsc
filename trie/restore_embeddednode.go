@@ -144,7 +144,7 @@ func checkIfContainShortNodeV2(hash, key, buf []byte) ([]shorNodeInfo, error) {
 				if i == 16 {
 					panic("should not exist child[17] in secure trie")
 				}
-				if _, ok := sn.Val.(valueNode); ok {
+				if vn, ok := sn.Val.(valueNode); ok {
 					if rawdb.IsStorageTrieNode(key) {
 						// full node path
 						valueNodePath := key[1+common.HashLength:]
@@ -154,8 +154,12 @@ func checkIfContainShortNodeV2(hash, key, buf []byte) ([]shorNodeInfo, error) {
 						if len(hexToKeybytes(append(valueNodePath, sn.Key...))) == ExpectLeafNodeLen {
 							//	log.Info("found short leaf Node inside full node", "full node info", fn, "child idx", i,
 							//	"child", child, "value", vn)
+							newnode := &shortNode{
+								Key: hexToCompact(sn.Key),
+								Val: vn,
+							}
 							shortNodeInfoList = append(shortNodeInfoList,
-								shorNodeInfo{NodeBytes: nodeToBytes(child), Idx: i})
+								shorNodeInfo{NodeBytes: nodeToBytes(newnode), Idx: i})
 						}
 					}
 				}
