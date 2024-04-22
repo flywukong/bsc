@@ -1350,7 +1350,7 @@ func refactorEmbeddedNode(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
-	chaindb := utils.MakeChainDatabase(ctx, stack, false, false)
+	chaindb := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer chaindb.Close()
 
 	log.Info("open chain db finish")
@@ -1360,7 +1360,7 @@ func refactorEmbeddedNode(ctx *cli.Context) error {
 
 	embeddedNodesStorer := trie.NewEmbeddedNodeRestorer(chaindb)
 
-	triedb := utils.MakeTrieDatabase(ctx, chaindb, false, false, false)
+	triedb := utils.MakeTrieDatabase(ctx, chaindb, false, true, false)
 	defer triedb.Close()
 	log.Info("open trie db finish")
 
