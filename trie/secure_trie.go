@@ -22,6 +22,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/ethereum/go-ethereum/triedb/database"
@@ -154,6 +155,8 @@ func (t *StateTrie) GetAccount(address common.Address, direct bool) (*types.Stat
 			ret := new(types.StateAccount)
 			err = rlp.DecodeBytes(res, ret)
 			if err != nil {
+				log.Error("Account mismatch", "account address ", common.Bytes2Hex(address.Bytes()),
+					"hash ", common.Bytes2Hex(t.hashKey(address.Bytes())))
 				panic(fmt.Sprintf("Account mismatch, len(res): %d, len(res1): %d, err: %v", len(res), len(res1), err))
 			}
 			ret1 := new(types.StateAccount)
