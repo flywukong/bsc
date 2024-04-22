@@ -1367,9 +1367,9 @@ func refactorEmbeddedNode(ctx *cli.Context) error {
 	embeddedNodesStorer.TrieDB = triedb
 	defer triedb.Close()
 
-	destDir := ctx.Args().Get(0)
+	//destDir := ctx.Args().Get(0)
 
-	return embeddedNodesStorer.WriteNewTrie(destDir)
+	return embeddedNodesStorer.WriteNewTrie2()
 }
 
 func compareMPT(ctx *cli.Context) error {

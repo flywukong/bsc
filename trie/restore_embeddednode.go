@@ -364,16 +364,16 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 			if len(hexToKeybytes(accPath)) != ExpectLeafNodeLen {
 				return errors.New("empty node blob, path" + common.Bytes2Hex(accIter.Path()))
 			}
-		}
-
-		value := make([]byte, len(accValue))
-		copy(value, accValue)
-		trieBatch[string(accKey[:])] = value
-		count++
-		// make a batch contain 100 keys , and send job work pool
-		if count >= 1 && count%100 == 0 {
-			sendBatch(&batch_count, dispatcher, trieBatch, start)
-			trieBatch = make(map[string][]byte)
+		} else {
+			value := make([]byte, len(accValue))
+			copy(value, accValue)
+			trieBatch[string(accKey[:])] = value
+			count++
+			// make a batch contain 100 keys , and send job work pool
+			if count >= 1 && count%100 == 0 {
+				sendBatch(&batch_count, dispatcher, trieBatch, start)
+				trieBatch = make(map[string][]byte)
+			}
 		}
 
 		// If it's a leaf node, yes we are touching an account,
@@ -519,6 +519,116 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 	return nil
 }
 
+func (restorer *EmbeddedNodeRestorer) WriteNewTrie2() error {
+	_, diskRoot := rawdb.ReadAccountTrieNode(restorer.db, nil)
+	diskRoot = types.TrieRootHash(diskRoot)
+	log.Info("disk root info", "hash", diskRoot)
+
+	t, err := NewStateTrie(StateTrieID(diskRoot), restorer.TrieDB)
+	if err != nil {
+		log.Error("Failed to open trie", "root", diskRoot, "err", err)
+		return err
+	}
+	var (
+		nodes                 = 0
+		accounts              = 0
+		lastReport            = time.Now()
+		start                 = time.Now()
+		emptyStorageBlobNodes int
+		slots                 = 0
+		CAaccounts            = 0
+		emptyAccount          = 0
+		//embeddedCount         = 0
+
+		EmbeddedshortNode int
+	)
+
+	accIter, err := t.NodeIterator(nil)
+	if err != nil {
+		log.Error("Failed to open iterator", "root", diskRoot, "err", err)
+		return err
+	}
+
+	// start a task dispatcher with 2000 threads
+	dispatcher := MigrateStart(2000)
+
+	var (
+		count       uint64
+		batch_count uint64
+	)
+	// init remote db for data sending
+	InitDb2(restorer.db)
+	count = 0
+	trieBatch := make(map[string][]byte)
+
+	for accIter.Next(true) {
+		nodes += 1
+
+		accPath := accIter.Path()
+		accKey := accountTrieNodeKey(accPath)
+		accValue := accIter.NodeBlob()
+		if accValue == nil {
+			if len(hexToKeybytes(accPath)) != ExpectLeafNodeLen {
+				return errors.New("empty node blob, path" + common.Bytes2Hex(accIter.Path()))
+			}
+			emptyAccount++
+			value := make([]byte, len(accValue))
+			copy(value, accValue)
+			trieBatch[string(accKey[:])] = value
+			count++
+			// make a batch contain 100 keys , and send job work pool
+			if count >= 1 && count%100 == 0 {
+				sendBatch(&batch_count, dispatcher, trieBatch, start)
+				trieBatch = make(map[string][]byte)
+			}
+		}
+
+		// If it's a leaf node, yes we are touching an account,
+		// dig into the storage trie further.
+		if accIter.Leaf() {
+			accounts += 1
+
+		}
+
+		if time.Since(lastReport) > time.Second*10 {
+			log.Info("Traversing state", "nodes", nodes, "accounts", accounts, "CA account", CAaccounts,
+				"send batch num", batch_count, "storage embedded node", EmbeddedshortNode,
+				"slots", slots, "empty blob", emptyStorageBlobNodes, "elapsed",
+				common.PrettyDuration(time.Since(start)))
+			lastReport = time.Now()
+		}
+	}
+
+	if accIter.Error() != nil {
+		log.Error("Failed to traverse state trie", "root", diskRoot, "err", accIter.Error())
+		return accIter.Error()
+	}
+	log.Info("Traversing state finish", "nodes", nodes, "accounts", accounts, "emptyAccount ", emptyAccount, "elapsed",
+		common.PrettyDuration(time.Since(start)))
+
+	log.Info(" total node info", "fullnode count", restorer.stat.FullNodeCnt,
+		"short node count", restorer.stat.ShortNodeCnt, "value node", restorer.stat.ValueNodeCnt,
+		"embedded node", restorer.stat.EmbeddedNodeCnt)
+
+	if len(trieBatch) > 0 {
+		batch_count++
+		dispatcher.SendKv(trieBatch, batch_count)
+	}
+
+	dispatcher.setTaskNum(batch_count)
+
+	if slots+EmbeddedshortNode != emptyStorageBlobNodes {
+		panic("task fail")
+	}
+
+	finish := dispatcher.WaitDbFinish()
+	if finish == false {
+		fmt.Println("leveldb key migrate fail")
+		panic("task fail")
+	}
+
+	return nil
+}
 func (restorer *EmbeddedNodeRestorer) CompareTrie() error {
 	var (
 		nodes1     = 0

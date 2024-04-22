@@ -6,12 +6,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum/ethdb"
 	ethpebble "github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/log"
 )
 
 var (
 	pebbleDB        *ethpebble.Database
+	deleteDB        ethdb.Database
 	createErr       error
 	DoneTaskNum     uint64
 	SuccTaskNum     uint64
@@ -30,12 +32,15 @@ func InitDb(addr string) *ethpebble.Database {
 	}
 	return pebbleDB
 }
+func InitDb2(db ethdb.Database) {
+	deleteDB = db
+}
 
 func (job *Job) WriteBatchToPebble() error {
 	if len(job.Kvbuffer) > 0 {
-		kvBatch := pebbleDB.NewBatch()
-		for key, value := range job.Kvbuffer {
-			batchErr := kvBatch.Put([]byte(key), value)
+		kvBatch := deleteDB.NewBatch()
+		for key, _ := range job.Kvbuffer {
+			batchErr := kvBatch.Delete([]byte(key))
 			if batchErr != nil {
 				return batchErr
 			}
