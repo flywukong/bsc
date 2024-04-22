@@ -155,12 +155,14 @@ func (t *StateTrie) GetAccount(address common.Address, direct bool) (*types.Stat
 		if bytes.Compare(res, res1) != 0 {
 			ret := new(types.StateAccount)
 			err = rlp.DecodeBytes(res, ret)
+			hashKey := t.hashKey(address.Bytes())
 			if err != nil {
 				log.Error("Account mismatch", "account address ", common.Bytes2Hex(address.Bytes()),
-					"hash ", common.Bytes2Hex(t.hashKey(address.Bytes())))
+					"hash ", common.Bytes2Hex(hashKey), "path", keybytesToHex(hashKey))
 				time.Sleep(2 * time.Second)
 				fmt.Println("Account mismatch", "account address ", common.Bytes2Hex(address.Bytes()),
 					"hash ", common.Bytes2Hex(t.hashKey(address.Bytes())))
+
 				panic(fmt.Sprintf("Account mismatch, len(res): %d, len(res1): %d, err: %v", len(res), len(res1), err))
 			}
 			ret1 := new(types.StateAccount)
