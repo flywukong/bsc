@@ -566,10 +566,14 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie2() error {
 
 		accPath := accIter.Path()
 		accKey := accountTrieNodeKey(accPath)
+
 		accValue := accIter.NodeBlob()
 		if accValue == nil {
 			if len(hexToKeybytes(accPath)) != ExpectLeafNodeLen {
 				return errors.New("empty node blob, path" + common.Bytes2Hex(accIter.Path()))
+			}
+			if rawdb.IsAccountTrieNode(accKey) {
+				return errors.New("should not be db key")
 			}
 			emptyAccount++
 			value := make([]byte, len(accValue))
