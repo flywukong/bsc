@@ -19,6 +19,7 @@ package trie
 import (
 	"bytes"
 	"fmt"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -156,6 +157,9 @@ func (t *StateTrie) GetAccount(address common.Address, direct bool) (*types.Stat
 			err = rlp.DecodeBytes(res, ret)
 			if err != nil {
 				log.Error("Account mismatch", "account address ", common.Bytes2Hex(address.Bytes()),
+					"hash ", common.Bytes2Hex(t.hashKey(address.Bytes())))
+				time.Sleep(2 * time.Second)
+				fmt.Println("Account mismatch", "account address ", common.Bytes2Hex(address.Bytes()),
 					"hash ", common.Bytes2Hex(t.hashKey(address.Bytes())))
 				panic(fmt.Sprintf("Account mismatch, len(res): %d, len(res1): %d, err: %v", len(res), len(res1), err))
 			}
