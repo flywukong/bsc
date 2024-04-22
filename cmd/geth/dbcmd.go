@@ -690,15 +690,27 @@ func dbTrieGet(ctx *cli.Context) error {
 				log.Info("Could not decode the value", "error", err)
 				return err
 			}
-			nodeVal, hash := rawdb.ReadAccountTrieNode(db, pathKey)
-			log.Info("TrieGet result ", "PathKey", common.Bytes2Hex(pathKey), "Hash: ", hash, "node: ", trie.NodeString(hash.Bytes(), nodeVal))
-
-			val, _ := trie.DecodeLeafNode(hash.Bytes(), pathKey, nodeVal)
+			//	nodeVal, hash := rawdb.ReadAccountTrieNode(db, pathKey)
+			nBlob, path, nHash := rawdb.ReadAccountFromTrieDirectly(db, pathKey)
+			log.Info("TrieGet result ", "PathKey", common.Bytes2Hex(pathKey),
+				"Hash: ", nHash, "node: ", trie.NodeString(nHash.Bytes(), nBlob))
+			val, _ := trie.DecodeLeafNode(nHash.Bytes(), path, nBlob)
 			if val != nil {
 				ret := new(types.StateAccount)
 				err = rlp.DecodeBytes(val, ret)
 				log.Info("TrieGet Account", "StateAcocunt", ret)
+			} else {
+				fmt.Println("val empty")
 			}
+			/*
+				val, _ := trie.DecodeLeafNode(hash.Bytes(), pathKey, nodeVal)
+				if val != nil {
+					ret := new(types.StateAccount)
+					err = rlp.DecodeBytes(val, ret)
+					log.Info("TrieGet Account", "StateAcocunt", ret)
+				}
+
+			*/
 		} else if ctx.NArg() == 2 {
 			owner, err = hexutil.Decode(ctx.Args().Get(0))
 			if err != nil {
