@@ -575,6 +575,9 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie2() error {
 			if rawdb.IsAccountTrieNode(accKey) {
 				return errors.New("should not be db key")
 			}
+			if !accIter.Leaf() {
+				log.Error("empty node blob not leaf ")
+			}
 			emptyAccount++
 			value := make([]byte, len(accValue))
 			copy(value, accValue)
@@ -627,10 +630,11 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie2() error {
 
 	finish := dispatcher.WaitDbFinish()
 	if finish == false {
-		fmt.Println("leveldb key migrate fail")
+		fmt.Println("delete empty leaf fail")
 		panic("task fail")
 	}
 
+	fmt.Println("delete empty leaf finish")
 	return nil
 }
 func (restorer *EmbeddedNodeRestorer) CompareTrie() error {
