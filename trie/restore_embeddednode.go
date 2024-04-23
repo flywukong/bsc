@@ -129,7 +129,7 @@ func checkIfContainShortNode(hash, key, buf []byte, stat *dbNodeStat) ([]shorNod
 	return nil, nil
 }
 
-func checkIfContainShortNodeV2(hash, key, buf []byte) ([]shorNodeInfo, error) {
+func checkShortNodeForCompare(hash, key, buf []byte) ([]shorNodeInfo, error) {
 	n, err := decodeNode(hash, buf)
 	if err != nil {
 		return nil, err
@@ -522,7 +522,7 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 	return nil
 }
 
-func (restorer *EmbeddedNodeRestorer) WriteNewTrie2() error {
+func (restorer *EmbeddedNodeRestorer) DeleteEmptyBlob() error {
 	_, diskRoot := rawdb.ReadAccountTrieNode(restorer.db, nil)
 	diskRoot = types.TrieRootHash(diskRoot)
 	log.Info("disk root info", "hash", diskRoot)
@@ -745,7 +745,7 @@ func (restorer *EmbeddedNodeRestorer) CompareTrie() error {
 					return errors.New("missing storage trie")
 				}
 
-				storageIter2, err := storageTrie2.NodeIterator(nil)
+				newStorageIter, err := storageTrie2.NodeIterator(nil)
 				if err != nil {
 					log.Error("Failed to open storage iterator", "root", acc.Root, "err", err)
 					return err
@@ -763,17 +763,17 @@ func (restorer *EmbeddedNodeRestorer) CompareTrie() error {
 						slots1++
 					}
 
-					if !storageIter2.Next(true) {
+					if !newStorageIter.Next(true) {
 						log.Error("compare err", "origin path", common.Bytes2Hex(storagePath))
 						return errors.New("compare storage iter error length")
 					}
 
-					if storageIter2.Leaf() {
+					if newStorageIter.Leaf() {
 						slots2++
 					}
 
-					newStorageNodeblob := storageIter2.NodeBlob()
-					storagePath2 := storageIter2.Path()
+					newStorageNodeblob := newStorageIter.NodeBlob()
+					storagePath2 := newStorageIter.Path()
 					newkey := storageTrieNodeKey(ownerHash2, storagePath2)
 
 					newValue := make([]byte, len(newStorageNodeblob))
@@ -806,7 +806,7 @@ func (restorer *EmbeddedNodeRestorer) CompareTrie() error {
 					}
 				}
 
-				if storageIter2.Next(true) {
+				if newStorageIter.Next(true) {
 					return errors.New("storage new db iterator should over")
 				}
 
@@ -814,6 +814,7 @@ func (restorer *EmbeddedNodeRestorer) CompareTrie() error {
 					log.Error("Failed to traverse storage trie", "root", acc.Root, "err", storageIter.Error())
 					return storageIter.Error()
 				}
+
 				if time.Since(lastReport) > time.Second*50 {
 					log.Info("Traversing state", "nodes1", nodes1, "accounts1", accounts1, "CA account1", CAaccounts1,
 						"slots1", slots1, "nodes2", nodes2, "accounts2", accounts2, "CA account2", CAaccounts2,
@@ -844,7 +845,12 @@ func (restorer *EmbeddedNodeRestorer) CompareTrie() error {
 		"slots1", slots1, "nodes2", nodes2, "accounts2", accounts2, "CA account2", CAaccounts2,
 		"slots2", slots2, "elapsed",
 		common.PrettyDuration(time.Since(start)))
-	log.Info("compare finish")
+
+	if nodes1 == nodes2 && accounts1 == accounts2 && CAaccounts1 == CAaccounts2 && slots1 == slots2 {
+		log.Info("compare finish")
+	} else {
+		log.Info("compare not same")
+	}
 	return nil
 }
 
@@ -881,7 +887,8 @@ func (restorer *EmbeddedNodeRestorer) compareEmbedded(originBlob, newBlob, origi
 	h := rawdb.NewSha256Hasher()
 	hash := h.Hash(originBlob)
 	h.Release()
-	nodeList, err := checkIfContainShortNodeV2(hash.Bytes(), originKey, originBlob)
+	// get the embedded node info in origin db MPT
+	nodeList, err := checkShortNodeForCompare(hash.Bytes(), originKey, originBlob)
 	if err != nil {
 		log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
 		return err
@@ -891,7 +898,8 @@ func (restorer *EmbeddedNodeRestorer) compareEmbedded(originBlob, newBlob, origi
 		h = rawdb.NewSha256Hasher()
 		hash = h.Hash(newBlob)
 		h.Release()
-		newNodeList, err := checkIfContainShortNodeV2(hash.Bytes(), newKey, newBlob)
+		// get the embedded node info in new db MPT
+		newNodeList, err := checkShortNodeForCompare(hash.Bytes(), newKey, newBlob)
 		if err != nil {
 			log.Error("decode trie shortnode inside fullnode err:", "err", err.Error())
 			return err
@@ -902,6 +910,7 @@ func (restorer *EmbeddedNodeRestorer) compareEmbedded(originBlob, newBlob, origi
 			return errors.New("embedded node list length not same")
 		}
 
+		// check the redundancy stored embedded node kv in new db
 		for i := 0; i < nodesNum; i++ {
 			if nodeList[i].Idx != newNodeList[i].Idx || bytes.Compare(nodeList[i].NodeBytes, newNodeList[i].NodeBytes) != 0 {
 				return errors.New("compare embedded node err")
