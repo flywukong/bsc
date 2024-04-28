@@ -215,6 +215,7 @@ func TestGet(t *testing.T) {
 		db.Update(root, types.EmptyRootHash, trienode.NewWithNodeSet(nodes))
 		trie, _ = New(TrieID(root), db)
 	}
+
 }
 
 func TestDelete(t *testing.T) {

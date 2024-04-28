@@ -99,19 +99,20 @@ func (t *StateTrie) GetStorage(_ common.Address, key []byte, direct bool) ([]byt
 	if direct {
 		enc, err = t.trie.GetDirectly(t.hashKey(key))
 		enc1, err1 := t.trie.Get(t.hashKey(key))
+
 		if (err == nil && err1 != nil) || (err != nil && err1 != nil) {
 			panic(fmt.Errorf("err: %v, err1%v", err, err1))
 		} else if err != nil && err1 != nil {
 			return nil, fmt.Errorf("err: %v, err1%v", err, err1)
 		}
 
-		if enc == nil && enc1 == nil {
+		if len(enc) == 0 && len(enc1) == 0 {
 			return nil, nil
-		} else if (enc == nil && enc1 != nil) || (enc != nil && enc1 == nil) {
-			if enc == nil && enc1 != nil {
+		} else if (len(enc) == 0 && len(enc1) != 0) || (len(enc) != 0 && len(enc1) == 0) {
+			if len(enc) == 0 && len(enc1) != 0 {
 				log.Error("compare storage not same1", "len enc1", len(enc1), "enc1", common.Bytes2Hex(enc1))
 			}
-			if enc != nil && enc1 == nil {
+			if len(enc) != 0 && len(enc1) == 0 {
 				log.Error("compare storage not same1", "len enc", len(enc), "enc", common.Bytes2Hex(enc))
 			}
 			time.Sleep(time.Second)
