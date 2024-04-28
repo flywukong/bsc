@@ -314,8 +314,11 @@ func (dl *diskLayer) readAccountTrie(hash common.Hash) []byte {
 	start := time.Now()
 	var endDBtime time.Time
 	findValue := false
+	finishDecode := false
 	defer func() {
-		readAndDecodeAccountTimer.UpdateSince(start)
+		if finishDecode {
+			readAndDecodeAccountTimer.UpdateSince(start)
+		}
 		if findValue {
 			diskExistAccountTimer.Update(endDBtime.Sub(start))
 		} else {
@@ -333,6 +336,7 @@ func (dl *diskLayer) readAccountTrie(hash common.Hash) []byte {
 	dl.cleans.nodes.Set(cacheKey(common.Hash{}, path[:]), nBlob)
 
 	val, key := trie.DecodeLeafNode(nHash.Bytes(), path, nBlob)
+	finishDecode = true
 	if bytes.Compare(key, hash.Bytes()) == 0 {
 		findValue = true
 		return val
@@ -348,8 +352,11 @@ func (dl *diskLayer) readStorageTrie(accountHash, storageHash common.Hash) []byt
 	start := time.Now()
 	var endDBtime time.Time
 	findValue := false
+	finishDecode := false
 	defer func() {
-		readAndDecodeStorageTimer.UpdateSince(start)
+		if finishDecode {
+			readAndDecodeStorageTimer.UpdateSince(start)
+		}
 		if findValue {
 			diskExistStorageTimer.Update(endDBtime.Sub(start))
 		} else {
@@ -367,6 +374,7 @@ func (dl *diskLayer) readStorageTrie(accountHash, storageHash common.Hash) []byt
 	}
 	dl.cleans.nodes.Set(cacheKey(accountHash, path[common.HashLength:]), nBlob)
 	val, key := trie.DecodeLeafNode(nHash.Bytes(), path[common.HashLength:], nBlob)
+	finishDecode = true
 	if bytes.Compare(storageHash.Bytes(), key) == 0 {
 		findValue = true
 		return val
