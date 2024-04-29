@@ -2,8 +2,11 @@ package trie
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -15,6 +18,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/triedb/database"
+	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -26,6 +30,45 @@ type EmbeddedNodeRestorer struct {
 	TrieDB    database.Database
 	NewTrieDB database.Database
 	stat      *dbNodeStat
+	fileter   *bloomfilter.Filter
+}
+
+var (
+	aggregatorMemoryLimit = uint64(4 * 1024 * 1024)
+	aggregatorItemLimit   = aggregatorMemoryLimit / 42
+
+	bloomTargetError = 0.02
+
+	bloomSize                 = math.Ceil(float64(aggregatorItemLimit) * math.Log(bloomTargetError) / math.Log(1/math.Pow(2, math.Log(2))))
+	bloomFuncs                = math.Round((bloomSize / float64(aggregatorItemLimit)) * math.Log(2))
+	bloomDestructHasherOffset = 0
+	bloomAccountHasherOffset  = 0
+	bloomStorageHasherOffset  = 0
+)
+
+// accountBloomHash is used to convert an account hash into a 64 bit mini hash.
+func accountBloomHash(h common.Hash) uint64 {
+	return binary.BigEndian.Uint64(h[bloomAccountHasherOffset : bloomAccountHasherOffset+8])
+}
+
+// storageBloomHash is used to convert an account hash and a storage hash into a 64 bit mini hash.
+func storageBloomHash(h0, h1 common.Hash) uint64 {
+	return binary.BigEndian.Uint64(h0[bloomStorageHasherOffset:bloomStorageHasherOffset+8]) ^
+		binary.BigEndian.Uint64(h1[bloomStorageHasherOffset:bloomStorageHasherOffset+8])
+}
+
+func init() {
+	// Init the bloom offsets in the range [0:24] (requires 8 bytes)
+	bloomDestructHasherOffset = rand.Intn(25)
+	bloomAccountHasherOffset = rand.Intn(25)
+	bloomStorageHasherOffset = rand.Intn(25)
+
+	// The destruct and account blooms must be different, as the storage slots
+	// will check for destruction too for every bloom miss. It should not collide
+	// with modified accounts.
+	for bloomAccountHasherOffset == bloomDestructHasherOffset {
+		bloomAccountHasherOffset = rand.Intn(25)
+	}
 }
 
 type dbNodeStat struct {
@@ -36,10 +79,15 @@ type dbNodeStat struct {
 }
 
 func NewEmbeddedNodeRestorer(chaindb ethdb.Database) *EmbeddedNodeRestorer {
+	bloomFilter, err := bloomfilter.New(uint64(bloomSize), uint64(bloomFuncs))
+	if err != nil {
+		panic("Failed to create bloom filter" + err.Error())
+	}
 	return &EmbeddedNodeRestorer{
 		db: chaindb,
 		//NewDB: targetDB,
-		stat: &dbNodeStat{0, 0, 0, 0},
+		stat:    &dbNodeStat{0, 0, 0, 0},
+		fileter: bloomFilter,
 	}
 }
 
@@ -368,6 +416,8 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 				return errors.New("empty node blob, path" + common.Bytes2Hex(accIter.Path()))
 			}
 		} else {
+			restorer.fileter.AddHash(accountBloomHash(common.BytesToHash(accPath)))
+
 			value := make([]byte, len(accValue))
 			copy(value, accValue)
 			trieBatch[string(accKey[:])] = value
@@ -405,11 +455,18 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 					log.Error("Failed to open storage iterator", "root", acc.Root, "err", err)
 					return err
 				}
+				var storageBloomFilter *bloomfilter.Filter
 				// iterator the storage trie
 				for storageIter.Next(true) {
+					storageBloomFilter, err = bloomfilter.New(uint64(bloomSize), uint64(bloomFuncs))
+					if err != nil {
+						panic("Failed to create bloom filter" + err.Error())
+					}
 					nodes += 1
 					storageNodeblob := storageIter.NodeBlob()
 					storagePath := storageIter.Path()
+					storageBloomFilter.AddHash(storageBloomHash(common.BytesToHash(accPath),
+						common.BytesToHash(storagePath)))
 
 					// Bump the counter if it's leaf node.
 					if storageIter.Leaf() {
@@ -473,6 +530,14 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 						lastReport = time.Now()
 					}
 				}
+				// to do write bloom filter of the storage trie
+				bloomfilteKey := append(rawdb.BloomTriePrefix, accPath...)
+				bloomFuncsValue, err := storageBloomFilter.MarshalJSON()
+				if err != nil {
+					panic("bloom filter marhasl" + err.Error())
+				}
+				trieBatch[string(bloomfilteKey[:])] = bloomFuncsValue
+				count++
 
 				if storageIter.Error() != nil {
 					log.Error("Failed to traverse storage trie", "root", acc.Root, "err", storageIter.Error())
@@ -489,6 +554,15 @@ func (restorer *EmbeddedNodeRestorer) WriteNewTrie(newDBAddress string) error {
 			}
 		}
 	}
+
+	// to do write bloom filter of the account trie
+	bloomfilteKey := append(rawdb.BloomTriePrefix, accPath...)
+	bloomFuncsValue, err := restorer.fileter.MarshalJSON()
+	if err != nil {
+		panic("bloom filter marhasl" + err.Error())
+	}
+	trieBatch[string(bloomfilteKey[:])] = bloomFuncsValue
+	count++
 
 	if accIter.Error() != nil {
 		log.Error("Failed to traverse state trie", "root", diskRoot, "err", accIter.Error())
