@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -150,6 +151,10 @@ type StateDB struct {
 	SnapshotStorageReads time.Duration
 	SnapshotCommits      time.Duration
 	TrieDBCommits        time.Duration
+	ReadAccountNum       int
+	ReadStorageNum       int
+	SetStateNum          int
+	SetAccountNum        int
 
 	AccountUpdated int
 	StorageUpdated int
@@ -529,6 +534,10 @@ func (s *StateDB) HasSelfDestructed(addr common.Address) bool {
 func (s *StateDB) AddBalance(addr common.Address, amount *uint256.Int) {
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.SetAccountNum++
+		}
 		stateObject.AddBalance(amount)
 	}
 }
@@ -537,6 +546,10 @@ func (s *StateDB) AddBalance(addr common.Address, amount *uint256.Int) {
 func (s *StateDB) SubBalance(addr common.Address, amount *uint256.Int) {
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.SetAccountNum++
+		}
 		stateObject.SubBalance(amount)
 	}
 }
@@ -544,6 +557,10 @@ func (s *StateDB) SubBalance(addr common.Address, amount *uint256.Int) {
 func (s *StateDB) SetBalance(addr common.Address, amount *uint256.Int) {
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.SetAccountNum++
+		}
 		stateObject.SetBalance(amount)
 	}
 }
@@ -551,6 +568,10 @@ func (s *StateDB) SetBalance(addr common.Address, amount *uint256.Int) {
 func (s *StateDB) SetNonce(addr common.Address, nonce uint64) {
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.SetAccountNum++
+		}
 		stateObject.SetNonce(nonce)
 	}
 }
@@ -558,6 +579,10 @@ func (s *StateDB) SetNonce(addr common.Address, nonce uint64) {
 func (s *StateDB) SetCode(addr common.Address, code []byte) {
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.SetAccountNum++
+		}
 		stateObject.SetCode(crypto.Keccak256Hash(code), code)
 	}
 }
@@ -566,6 +591,10 @@ func (s *StateDB) SetState(addr common.Address, key, value common.Hash) {
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetState(key, value)
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.SetStateNum++
+		}
 	}
 }
 
@@ -587,6 +616,10 @@ func (s *StateDB) SetStorage(addr common.Address, storage map[common.Hash]common
 	stateObject := s.getOrNewStateObject(addr)
 	for k, v := range storage {
 		stateObject.SetState(k, v)
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.SetStateNum++
+		}
 	}
 }
 
@@ -723,6 +756,10 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 		acc, err := s.snap.Account(crypto.HashData(s.hasher, addr.Bytes()))
 		if metrics.EnabledExpensive {
 			s.SnapshotAccountReads += time.Since(start)
+		}
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.ReadAccountNum++
 		}
 		if err == nil {
 			if acc == nil {

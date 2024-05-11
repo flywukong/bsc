@@ -29,6 +29,7 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	exlru "github.com/hashicorp/golang-lru"
 	"golang.org/x/crypto/sha3"
 
@@ -95,6 +96,11 @@ var (
 	blockValidationTimer = metrics.NewRegisteredTimer("chain/validation", nil)
 	blockExecutionTimer  = metrics.NewRegisteredTimer("chain/execution", nil)
 	blockWriteTimer      = metrics.NewRegisteredTimer("chain/write", nil)
+	blockGetAccountGauge = metrics.NewRegisteredGauge("chain/get/account", nil)
+	blockGetStorageGauge = metrics.NewRegisteredGauge("chain/get/storage", nil)
+	blockSetAccountGauge = metrics.NewRegisteredGauge("chain/set/account", nil)
+	blockSetStorageGauge = metrics.NewRegisteredGauge("chain/set/storage", nil)
+	blockTxnNumGauge     = metrics.NewRegisteredGauge("chain/txn", nil)
 
 	blockReorgMeter     = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
 	blockReorgAddMeter  = metrics.NewRegisteredMeter("chain/reorg/add", nil)
@@ -2034,6 +2040,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 	signer := types.MakeSigner(bc.chainConfig, chain[0].Number(), chain[0].Time())
 	go SenderCacher.RecoverFromBlocks(signer, chain)
 
+	goid := cachemetrics.Goid()
+	cachemetrics.UpdateSyncingRoutineID(goid)
+
 	var (
 		stats     = insertStats{startTime: mclock.Now()}
 		lastCanon *types.Block
@@ -2307,6 +2316,11 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 		blockWriteTimer.Update(time.Since(wstart) - statedb.AccountCommits - statedb.StorageCommits - statedb.SnapshotCommits - statedb.TrieDBCommits)
 		blockInsertTimer.UpdateSince(start)
+
+		blockGetAccountGauge.Update(int64(statedb.ReadAccountNum))
+		blockGetStorageGauge.Update(int64(statedb.ReadStorageNum))
+		blockSetStorageGauge.Update(int64(statedb.SetStateNum))
+		blockTxnNumGauge.Update(int64(len(block.Transactions())))
 
 		// Report the import stats before returning the various results
 		stats.processed++
