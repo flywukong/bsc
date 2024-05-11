@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -47,6 +48,13 @@ const (
 	// storageDeleteLimit denotes the highest permissible memory allocation
 	// employed for contract storage deletion.
 	storageDeleteLimit = 512 * 1024 * 1024
+)
+
+var (
+	blockSetAccountGauge3 = metrics.NewRegisteredGauge("chain/set/account3", nil)
+	//blockGetAccountGauge = metrics.NewRegisteredGauge("chain/get/account", nil)
+	blockSetStorageGauge3     = metrics.NewRegisteredGauge("chain/set/storage3", nil)
+	blockSetTotalStorageGauge = metrics.NewRegisteredGauge("chain/set/totalstorage3", nil)
 )
 
 type revision struct {
@@ -150,6 +158,10 @@ type StateDB struct {
 	SnapshotStorageReads time.Duration
 	SnapshotCommits      time.Duration
 	TrieDBCommits        time.Duration
+	ReadAccountNum       int
+	ReadStorageNum       int
+	SetStateNum          int
+	SetAccountNum        int
 
 	AccountUpdated int
 	StorageUpdated int
@@ -529,6 +541,10 @@ func (s *StateDB) HasSelfDestructed(addr common.Address) bool {
 func (s *StateDB) AddBalance(addr common.Address, amount *uint256.Int) {
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.SetAccountNum++
+		}
 		stateObject.AddBalance(amount)
 	}
 }
@@ -537,6 +553,10 @@ func (s *StateDB) AddBalance(addr common.Address, amount *uint256.Int) {
 func (s *StateDB) SubBalance(addr common.Address, amount *uint256.Int) {
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.SetAccountNum++
+		}
 		stateObject.SubBalance(amount)
 	}
 }
@@ -544,6 +564,10 @@ func (s *StateDB) SubBalance(addr common.Address, amount *uint256.Int) {
 func (s *StateDB) SetBalance(addr common.Address, amount *uint256.Int) {
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.SetAccountNum++
+		}
 		stateObject.SetBalance(amount)
 	}
 }
@@ -551,6 +575,10 @@ func (s *StateDB) SetBalance(addr common.Address, amount *uint256.Int) {
 func (s *StateDB) SetNonce(addr common.Address, nonce uint64) {
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.SetAccountNum++
+		}
 		stateObject.SetNonce(nonce)
 	}
 }
@@ -558,6 +586,10 @@ func (s *StateDB) SetNonce(addr common.Address, nonce uint64) {
 func (s *StateDB) SetCode(addr common.Address, code []byte) {
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.SetAccountNum++
+		}
 		stateObject.SetCode(crypto.Keccak256Hash(code), code)
 	}
 }
@@ -566,6 +598,10 @@ func (s *StateDB) SetState(addr common.Address, key, value common.Hash) {
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetState(key, value)
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.SetStateNum++
+		}
 	}
 }
 
@@ -587,6 +623,10 @@ func (s *StateDB) SetStorage(addr common.Address, storage map[common.Hash]common
 	stateObject := s.getOrNewStateObject(addr)
 	for k, v := range storage {
 		stateObject.SetState(k, v)
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.SetStateNum++
+		}
 	}
 }
 
@@ -723,6 +763,10 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 		acc, err := s.snap.Account(crypto.HashData(s.hasher, addr.Bytes()))
 		if metrics.EnabledExpensive {
 			s.SnapshotAccountReads += time.Since(start)
+		}
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.ReadAccountNum++
 		}
 		if err == nil {
 			if acc == nil {
@@ -1773,6 +1817,9 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 			Blob:    account,
 		})
 	}
+	blockSetAccountGauge3.Update(int64(len(s.accounts)))
+
+	num := int64(0)
 	storages := make([]types.DiffStorage, 0, len(s.storages))
 	for accountHash, storage := range s.storages {
 		keys := make([]common.Hash, 0, len(storage))
@@ -1780,6 +1827,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 		for k, v := range storage {
 			keys = append(keys, k)
 			values = append(values, v)
+			num++
 		}
 		storages = append(storages, types.DiffStorage{
 			Account: accountHash,
@@ -1787,6 +1835,8 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 			Vals:    values,
 		})
 	}
+	blockSetStorageGauge3.Update(int64(len(s.storages)))
+	blockSetTotalStorageGauge.Update(int64(num))
 	return destructs, accounts, storages
 }
 
