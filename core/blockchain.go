@@ -95,6 +95,10 @@ var (
 	blockValidationTimer = metrics.NewRegisteredTimer("chain/validation", nil)
 	blockExecutionTimer  = metrics.NewRegisteredTimer("chain/execution", nil)
 	blockWriteTimer      = metrics.NewRegisteredTimer("chain/write", nil)
+	blockGetAccountCount = metrics.NewRegisteredGauge("chain/get/account", nil)
+	blockGetStorageCount = metrics.NewRegisteredGauge("chain/get/account", nil)
+	blockSetAccountCount = metrics.NewRegisteredGauge("chain/get/account", nil)
+	blockSetStorageCount = metrics.NewRegisteredGauge("chain/get/account", nil)
 
 	blockReorgMeter     = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
 	blockReorgAddMeter  = metrics.NewRegisteredMeter("chain/reorg/add", nil)
