@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -151,7 +152,8 @@ type StateDB struct {
 	SnapshotCommits      time.Duration
 	TrieDBCommits        time.Duration
 	ReadAccountNum       int
-	ReadStorageNUm       int
+	ReadStorageNum       int
+	SetStateNum          int
 
 	AccountUpdated int
 	StorageUpdated int
@@ -568,6 +570,10 @@ func (s *StateDB) SetState(addr common.Address, key, value common.Hash) {
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetState(key, value)
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.SetStateNum++
+		}
 	}
 }
 
@@ -589,6 +595,10 @@ func (s *StateDB) SetStorage(addr common.Address, storage map[common.Hash]common
 	stateObject := s.getOrNewStateObject(addr)
 	for k, v := range storage {
 		stateObject.SetState(k, v)
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.SetStateNum++
+		}
 	}
 }
 
@@ -725,6 +735,10 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 		acc, err := s.snap.Account(crypto.HashData(s.hasher, addr.Bytes()))
 		if metrics.EnabledExpensive {
 			s.SnapshotAccountReads += time.Since(start)
+		}
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.ReadAccountNum++
 		}
 		if err == nil {
 			if acc == nil {

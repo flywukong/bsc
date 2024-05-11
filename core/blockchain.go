@@ -29,6 +29,7 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	exlru "github.com/hashicorp/golang-lru"
 	"golang.org/x/crypto/sha3"
 
@@ -96,9 +97,9 @@ var (
 	blockExecutionTimer  = metrics.NewRegisteredTimer("chain/execution", nil)
 	blockWriteTimer      = metrics.NewRegisteredTimer("chain/write", nil)
 	blockGetAccountCount = metrics.NewRegisteredGauge("chain/get/account", nil)
-	blockGetStorageCount = metrics.NewRegisteredGauge("chain/get/account", nil)
-	blockSetAccountCount = metrics.NewRegisteredGauge("chain/get/account", nil)
-	blockSetStorageCount = metrics.NewRegisteredGauge("chain/get/account", nil)
+	blockGetStorageCount = metrics.NewRegisteredGauge("chain/get/storage", nil)
+	blockSetAccountCount = metrics.NewRegisteredGauge("chain/set/account", nil)
+	blockSetStorageCount = metrics.NewRegisteredGauge("chain/set/storage", nil)
 
 	blockReorgMeter     = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
 	blockReorgAddMeter  = metrics.NewRegisteredMeter("chain/reorg/add", nil)
@@ -2037,6 +2038,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
 	signer := types.MakeSigner(bc.chainConfig, chain[0].Number(), chain[0].Time())
 	go SenderCacher.RecoverFromBlocks(signer, chain)
+
+	goid := cachemetrics.Goid()
+	cachemetrics.UpdateSyncingRoutineID(goid)
 
 	var (
 		stats     = insertStats{startTime: mclock.Now()}
