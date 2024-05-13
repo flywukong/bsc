@@ -2317,11 +2317,10 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		blockWriteTimer.Update(time.Since(wstart) - statedb.AccountCommits - statedb.StorageCommits - statedb.SnapshotCommits - statedb.TrieDBCommits)
 		blockInsertTimer.UpdateSince(start)
 
-		transactions := block.Transactions()
 		blockGetAccountGauge.Update(int64(statedb.ReadAccountNum))
 		blockGetStorageGauge.Update(int64(statedb.ReadStorageNum))
 		blockSetStorageGauge.Update(int64(statedb.SetStateNum))
-		blockTxnNumGauge.Update(int64(transactions.Len()))
+		blockTxnNumGauge.Update(int64(len(block.Transactions())))
 
 		// Report the import stats before returning the various results
 		stats.processed++
