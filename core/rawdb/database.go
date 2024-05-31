@@ -807,10 +807,11 @@ func MigrateDatabase(db ethdb.Database, addr string) error {
 			key = it.Key()
 			v   = it.Value()
 		)
+	     /*
 		if isTrieKey(key) {
 			continue
 		}
-		
+	      */	
 		value := make([]byte, len(v))
 		copy(value, v)
 
