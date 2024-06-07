@@ -611,74 +611,51 @@ func traverseState(ctx *cli.Context) error {
 	diskRoot = types.TrieRootHash(diskRoot)
 	log.Info("disk root info", "hash", diskRoot)
 
-	t, err := trie.NewStateTrie(trie.StateTrieID(diskRoot), triedb)
-	if err != nil {
-		log.Error("Failed to open trie", "root", root, "err", err)
-		return err
-	}
+	/*
+		t, err := trie.NewStateTrie(trie.StateTrieID(diskRoot), triedb)
+		if err != nil {
+			log.Error("Failed to open trie", "root", root, "err", err)
+			return err
+		}
+
+	*/
 	var (
-		accounts   int
-		slots      int
-		codes      int
 		lastReport time.Time
 		start      = time.Now()
 	)
-	acctIt, err := t.NodeIterator(nil)
+	ownerHash := common.HexToHash("0xe9dae3d797a6bf53395810df9d7048f18ac98f1bd211dc87dfad3532aa88d237")
+	accRoot := common.HexToHash("0xbe7a0c23642a13e42c3b640fe3f161be037a81a79448fcfc6a8120c872d253bd")
+	id := trie.StorageTrieID(diskRoot, ownerHash, accRoot)
+	storageTrie, err := trie.NewStateTrie(id, triedb)
 	if err != nil {
-		log.Error("Failed to open iterator", "root", root, "err", err)
+		log.Error("Failed to open storage trie", "root", accRoot, "err", err)
 		return err
 	}
-	accIter := trie.NewIterator(acctIt)
-	for accIter.Next() {
-		accounts += 1
-		var acc types.StateAccount
-		if err := rlp.DecodeBytes(accIter.Value, &acc); err != nil {
-			log.Error("Invalid account encountered during traversal", "err", err)
-			return err
-		}
-		if acc.Root != types.EmptyRootHash {
-			id := trie.StorageTrieID(root, common.BytesToHash(accIter.Key), acc.Root)
-			storageTrie, err := trie.NewStateTrie(id, triedb)
-			if err != nil {
-				log.Error("Failed to open storage trie", "root", acc.Root, "err", err)
-				return err
-			}
-			storageIt, err := storageTrie.NodeIterator(nil)
-			if err != nil {
-				log.Error("Failed to open storage iterator", "root", acc.Root, "err", err)
-				return err
-			}
-			storageIter := trie.NewIterator(storageIt)
-			for storageIter.Next() {
-				slots += 1
+	storageIt, err := storageTrie.NodeIterator(nil)
+	if err != nil {
+		log.Error("Failed to open storage iterator", "root", accRoot, "err", err)
+		return err
+	}
+	nodes := uint64(0)
+	storageIter := trie.NewIterator(storageIt)
 
-				if time.Since(lastReport) > time.Second*8 {
-					log.Info("Traversing state", "accounts", accounts, "slots", slots, "codes", codes, "elapsed", common.PrettyDuration(time.Since(start)))
-					lastReport = time.Now()
-				}
-			}
-			if storageIter.Err != nil {
-				log.Error("Failed to traverse storage trie", "root", acc.Root, "err", storageIter.Err)
-				return storageIter.Err
-			}
-		}
-		if !bytes.Equal(acc.CodeHash, types.EmptyCodeHash.Bytes()) {
-			if !rawdb.HasCode(chaindb, common.BytesToHash(acc.CodeHash)) {
-				log.Error("Code is missing", "hash", common.BytesToHash(acc.CodeHash))
-				return errors.New("missing code")
-			}
-			codes += 1
-		}
+	start = time.Now()
+	for storageIter.Next() {
+		nodes += 1
+
 		if time.Since(lastReport) > time.Second*8 {
-			log.Info("Traversing state", "accounts", accounts, "slots", slots, "codes", codes, "elapsed", common.PrettyDuration(time.Since(start)))
+			log.Info("Traversing state", "nodes", nodes, "elapsed", common.PrettyDuration(time.Since(start)))
 			lastReport = time.Now()
 		}
 	}
-	if accIter.Err != nil {
-		log.Error("Failed to traverse state trie", "root", root, "err", accIter.Err)
-		return accIter.Err
+	if storageIter.Err != nil {
+		log.Error("Failed to traverse storage trie", "root", accRoot, "err", storageIter.Err)
+		return storageIter.Err
 	}
-	log.Info("State is complete", "accounts", accounts, "slots", slots, "codes", codes, "elapsed", common.PrettyDuration(time.Since(start)))
+
+	fmt.Println("cost time", time.Since(start).Seconds(), "s")
+	log.Info("State is complete", "nodes", nodes,
+		"elapsed", common.PrettyDuration(time.Since(start)))
 	return nil
 }
 
