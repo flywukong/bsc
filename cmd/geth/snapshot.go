@@ -630,7 +630,7 @@ func traverseState(ctx *cli.Context) error {
 	//	accRoot := common.HexToHash("0xbe7a0c23642a13e42c3b640fe3f161be037a81a79448fcfc6a8120c872d253bd")
 
 	ownerHash := common.HexToHash("0xe3ee5c338fb03ba97621fbf6b62c153a7a9b3c4dc567d43368d31a1ae9a2d6b5")
-	accRoot := common.HexToHash("0x2f55b569f989acc23c0d1388591cf6aa17538a26877af12711034d27a5299af5")
+	accRoot := common.HexToHash("0xe43a37ef65cbe09e3af8bf2aa11e9c6820cf7aed04f83b173cc460ae8b02cc20")
 
 	id := trie.StorageTrieID(diskRoot, ownerHash, accRoot)
 	storageTrie, err := trie.NewStateTrie(id, triedb)
