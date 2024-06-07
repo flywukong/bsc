@@ -607,11 +607,10 @@ func traverseState(ctx *cli.Context) error {
 		log.Info("Start traversing the state", "root", root, "number", headBlock.NumberU64())
 	}
 
-	/*
-		_, diskRoot := rawdb.ReadAccountTrieNode(chaindb, nil)
-		diskRoot = types.TrieRootHash(diskRoot)
-		log.Info("disk root info", "hash", diskRoot)
-	*/
+	_, diskRoot := rawdb.ReadAccountTrieNode(chaindb, nil)
+	diskRoot = types.TrieRootHash(diskRoot)
+	log.Info("disk root info", "hash", diskRoot)
+
 	/*
 		t, err := trie.NewStateTrie(trie.StateTrieID(diskRoot), triedb)
 		if err != nil {
@@ -630,7 +629,8 @@ func traverseState(ctx *cli.Context) error {
 	//ownerHash := common.HexToHash("0xe3ee5c338fb03ba97621fbf6b62c153a7a9b3c4dc567d43368d31a1ae9a2d6b5")
 	//accRoot := common.HexToHash("0xe43a37ef65cbe09e3af8bf2aa11e9c6820cf7aed04f83b173cc460ae8b02cc20")
 
-	id := trie.StorageTrieID(root, ownerHash, accRoot)
+	//	id := trie.StorageTrieID(root, ownerHash, accRoot)
+	id := trie.StorageTrieID(diskRoot, ownerHash, accRoot)
 	storageTrie, err := trie.NewStateTrie(id, triedb)
 	if err != nil {
 		log.Error("Failed to open storage trie", "root", accRoot, "err", err)
