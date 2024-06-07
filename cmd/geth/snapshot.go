@@ -581,32 +581,35 @@ func traverseState(ctx *cli.Context) error {
 
 	triedb := utils.MakeTrieDatabase(ctx, chaindb, false, true, false)
 	defer triedb.Close()
+	/*
+		headBlock := rawdb.ReadHeadBlock(chaindb)
+		if headBlock == nil {
+			log.Error("Failed to load head block")
+			return errors.New("no head block")
+		}
+		if ctx.NArg() > 1 {
+			log.Error("Too many arguments given")
+			return errors.New("too many arguments")
+		}
 
-	headBlock := rawdb.ReadHeadBlock(chaindb)
-	if headBlock == nil {
-		log.Error("Failed to load head block")
-		return errors.New("no head block")
-	}
-	if ctx.NArg() > 1 {
-		log.Error("Too many arguments given")
-		return errors.New("too many arguments")
-	}
+	*/
 	var (
 		root common.Hash
 		err  error
 	)
-	if ctx.NArg() == 1 {
-		root, err = parseRoot(ctx.Args().First())
-		if err != nil {
-			log.Error("Failed to resolve state root", "err", err)
-			return err
+	/*
+		if ctx.NArg() == 1 {
+			root, err = parseRoot(ctx.Args().First())
+			if err != nil {
+				log.Error("Failed to resolve state root", "err", err)
+				return err
+			}
+			log.Info("Start traversing the state", "root", root)
+		} else {
+			root = headBlock.Root()
+			log.Info("Start traversing the state", "root", root, "number", headBlock.NumberU64())
 		}
-		log.Info("Start traversing the state", "root", root)
-	} else {
-		root = headBlock.Root()
-		log.Info("Start traversing the state", "root", root, "number", headBlock.NumberU64())
-	}
-
+	*/
 	_, diskRoot := rawdb.ReadAccountTrieNode(chaindb, nil)
 	diskRoot = types.TrieRootHash(diskRoot)
 	log.Info("disk root info", "hash", diskRoot)
