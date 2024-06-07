@@ -581,39 +581,37 @@ func traverseState(ctx *cli.Context) error {
 
 	triedb := utils.MakeTrieDatabase(ctx, chaindb, false, true, false)
 	defer triedb.Close()
-	/*
-		headBlock := rawdb.ReadHeadBlock(chaindb)
-		if headBlock == nil {
-			log.Error("Failed to load head block")
-			return errors.New("no head block")
-		}
-		if ctx.NArg() > 1 {
-			log.Error("Too many arguments given")
-			return errors.New("too many arguments")
-		}
 
-	*/
+	headBlock := rawdb.ReadHeadBlock(chaindb)
+	if headBlock == nil {
+		log.Error("Failed to load head block")
+		return errors.New("no head block")
+	}
+	if ctx.NArg() > 1 {
+		log.Error("Too many arguments given")
+		return errors.New("too many arguments")
+	}
 	var (
-		//root common.Hash
-		err error
+		root common.Hash
+		err  error
 	)
-	/*
-		if ctx.NArg() == 1 {
-			root, err = parseRoot(ctx.Args().First())
-			if err != nil {
-				log.Error("Failed to resolve state root", "err", err)
-				return err
-			}
-			log.Info("Start traversing the state", "root", root)
-		} else {
-			root = headBlock.Root()
-			log.Info("Start traversing the state", "root", root, "number", headBlock.NumberU64())
+	if ctx.NArg() == 1 {
+		root, err = parseRoot(ctx.Args().First())
+		if err != nil {
+			log.Error("Failed to resolve state root", "err", err)
+			return err
 		}
-	*/
-	_, diskRoot := rawdb.ReadAccountTrieNode(chaindb, nil)
-	diskRoot = types.TrieRootHash(diskRoot)
-	log.Info("disk root info", "hash", diskRoot)
+		log.Info("Start traversing the state", "root", root)
+	} else {
+		root = headBlock.Root()
+		log.Info("Start traversing the state", "root", root, "number", headBlock.NumberU64())
+	}
 
+	/*
+		_, diskRoot := rawdb.ReadAccountTrieNode(chaindb, nil)
+		diskRoot = types.TrieRootHash(diskRoot)
+		log.Info("disk root info", "hash", diskRoot)
+	*/
 	/*
 		t, err := trie.NewStateTrie(trie.StateTrieID(diskRoot), triedb)
 		if err != nil {
@@ -626,13 +624,13 @@ func traverseState(ctx *cli.Context) error {
 		lastReport time.Time
 		start      = time.Now()
 	)
-	//	ownerHash := common.HexToHash("0xe9dae3d797a6bf53395810df9d7048f18ac98f1bd211dc87dfad3532aa88d237")
-	//	accRoot := common.HexToHash("0xbe7a0c23642a13e42c3b640fe3f161be037a81a79448fcfc6a8120c872d253bd")
+	ownerHash := common.HexToHash("0xe9dae3d797a6bf53395810df9d7048f18ac98f1bd211dc87dfad3532aa88d237")
+	accRoot := common.HexToHash("0xbe7a0c23642a13e42c3b640fe3f161be037a81a79448fcfc6a8120c872d253bd")
 
-	ownerHash := common.HexToHash("0xe3ee5c338fb03ba97621fbf6b62c153a7a9b3c4dc567d43368d31a1ae9a2d6b5")
-	accRoot := common.HexToHash("0xe43a37ef65cbe09e3af8bf2aa11e9c6820cf7aed04f83b173cc460ae8b02cc20")
+	//ownerHash := common.HexToHash("0xe3ee5c338fb03ba97621fbf6b62c153a7a9b3c4dc567d43368d31a1ae9a2d6b5")
+	//accRoot := common.HexToHash("0xe43a37ef65cbe09e3af8bf2aa11e9c6820cf7aed04f83b173cc460ae8b02cc20")
 
-	id := trie.StorageTrieID(diskRoot, ownerHash, accRoot)
+	id := trie.StorageTrieID(root, ownerHash, accRoot)
 	storageTrie, err := trie.NewStateTrie(id, triedb)
 	if err != nil {
 		log.Error("Failed to open storage trie", "root", accRoot, "err", err)
