@@ -594,8 +594,8 @@ func traverseState(ctx *cli.Context) error {
 
 	*/
 	var (
-		root common.Hash
-		err  error
+		//root common.Hash
+		err error
 	)
 	/*
 		if ctx.NArg() == 1 {
