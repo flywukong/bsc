@@ -664,17 +664,15 @@ func PruneHashTrieNodeInDataBase(db ethdb.Database) error {
 // InspectDatabase traverses the entire database and checks the size
 // of all different categories of data.
 func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
-	/*
-		buf := make([]byte, len(SnapshotAccountPrefix)+common.HashLength)
-		//n := copy(buf, SnapshotAccountPrefix)
-		//n += copy(buf[n:], common.HexToHash("0xe9dae3d797a6bf53395810df9d7048f18ac98f1bd211dc87dfad3532aa88d237").Bytes())
+	buf := make([]byte, len(SnapshotAccountPrefix)+common.HashLength)
+	n := copy(buf, SnapshotAccountPrefix)
+	n += copy(buf[n:], common.HexToHash("0xe9dae3d797a6bf53395810df9d7048f18ac98f1bd211dc87dfad3532aa88d237").Bytes())
 
-		keyPrefix = buf
-		keyPrefixLen := len(buf)
-		fmt.Println("contract prefix len:", keyPrefixLen)
+	keyPrefix = buf
+	keyPrefixLen := len(buf)
+	fmt.Println("contract prefix len:", keyPrefixLen)
 
-	*/
-	it := db.NewIterator(SnapshotStoragePrefix, keyStart)
+	it := db.NewIterator(keyPrefix, keyStart)
 
 	defer it.Release()
 
