@@ -666,7 +666,7 @@ func PruneHashTrieNodeInDataBase(db ethdb.Database) error {
 func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	buf := make([]byte, len(SnapshotStoragePrefix)+common.HashLength)
 	n := copy(buf, SnapshotStoragePrefix)
-	n += copy(buf[n:], common.HexToHash("0xe9dae3d797a6bf53395810df9d7048f18ac98f1bd211dc87dfad3532aa88d237").Bytes())
+	n += copy(buf[n:], common.HexToHash("0xbe09a843e96d820323ffaac74f0f119734db1f158ac0d0d5b627ac7f3bcc82c2").Bytes())
 
 	keyPrefix = buf
 	keyPrefixLen := len(buf)
