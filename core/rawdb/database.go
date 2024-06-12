@@ -666,7 +666,7 @@ func PruneHashTrieNodeInDataBase(db ethdb.Database) error {
 func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	buf := make([]byte, len(SnapshotStoragePrefix)+common.HashLength)
 	n := copy(buf, SnapshotStoragePrefix)
-	n += copy(buf[n:], common.HexToHash("0xe3ee5c338fb03ba97621fbf6b62c153a7a9b3c4dc567d43368d31a1ae9a2d6b5").Bytes())
+	n += copy(buf[n:], common.HexToHash("0xe9dae3d797a6bf53395810df9d7048f18ac98f1bd211dc87dfad3532aa88d237").Bytes())
 
 	keyPrefix = buf
 	keyPrefixLen := len(buf)
@@ -745,8 +745,9 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 				len(accountKey) != (len(SnapshotAccountPrefix)+common.HashLength) {
 				panic("err account Hash2")
 			}
-			_, err := db.Get(accountKey)
-			if err == nil {
+
+			content := ReadAccountSnapshot(db, common.BytesToHash(storageHash))
+			if len(content) != 0 {
 				log.Info("find account hash in account snap", "account", common.Bytes2Hex(accountKey))
 				accMap[common.Bytes2Hex(accountKey)] += 1
 			}
