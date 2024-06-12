@@ -736,14 +736,15 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 				log.Info("it is large hash")
 			}
 			accountHash := key[1 : common.HashLength+1]
-			if len(accountHash) != common.HashLength {
+			if len(storageHash) != common.HashLength {
 				fmt.Println("len acount hash", len(accountHash))
 				panic("err account Hash")
 			}
 
 			accountKey := make([]byte, len(SnapshotAccountPrefix)+common.HashLength)
 			n1 := copy(accountKey, SnapshotAccountPrefix)
-			n1 += copy(accountKey[n1:], accountHash)
+			//n1 += copy(accountKey[n1:], accountHash)
+			n1 += copy(accountKey[n1:], storageHash)
 			_, err := db.Get(accountKey)
 			if err == nil {
 				log.Info("find account hash in account snap", "account", common.Bytes2Hex(accountKey))
