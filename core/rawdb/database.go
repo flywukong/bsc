@@ -731,8 +731,9 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 
 		if bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength) {
 			//	storageHash := key[len(SnapshotStoragePrefix)+1*common.HashLength:]
-			accountHash := key[len(SnapshotStoragePrefix) : len(SnapshotStoragePrefix)+1*common.HashLength+1]
+			accountHash := key[1 : common.HashLength+2]
 			if len(accountHash) != common.HashLength {
+				fmt.Println("len acount hash", len(accountHash))
 				panic("err account Hash")
 			}
 
