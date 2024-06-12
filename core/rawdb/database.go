@@ -746,7 +746,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			n1 += copy(accountKey[n1:], accountHash)
 			_, err := db.Get(accountKey)
 			if err == nil {
-				log.Info("find account hash in account snap")
+				log.Info("find account hash in account snap", "account", common.Bytes2Hex(accountKey))
 				accMap[common.Bytes2Hex(accountKey)] += 1
 			}
 		} else {
