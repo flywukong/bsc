@@ -720,6 +720,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		total common.StorageSize
 	)
 
+	largeHash := common.HexToHash("0xe9dae3d797a6bf53395810df9d7048f18ac98f1bd211dc87dfad3532aa88d237").Bytes()
 	var accMap map[string]int64
 	// Inspect key-value database first.
 	for it.Next() {
@@ -730,7 +731,10 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		total += size
 
 		if bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength) {
-			//	storageHash := key[len(SnapshotStoragePrefix)+1*common.HashLength:]
+			storageHash := key[len(SnapshotStoragePrefix)+1*common.HashLength:]
+			if bytes.Compare(largeHash, storageHash) == 0 {
+				log.Info("it is large hash")
+			}
 			accountHash := key[1 : common.HashLength+1]
 			if len(accountHash) != common.HashLength {
 				fmt.Println("len acount hash", len(accountHash))
