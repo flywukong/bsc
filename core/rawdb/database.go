@@ -669,6 +669,8 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	n += copy(buf[n:], common.HexToHash("0xe9dae3d797a6bf53395810df9d7048f18ac98f1bd211dc87dfad3532aa88d237").Bytes())
 
 	keyPrefix = buf
+	keyPrefixLen := len(buf)
+	fmt.Println("contract prefix len:", keyPrefixLen)
 	it := db.NewIterator(keyPrefix, keyStart)
 	defer it.Release()
 	var trieIter ethdb.Iterator
@@ -722,6 +724,13 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 
 		if !IsStorageTrieNode(key) {
 			log.Error("key is not storage", "key", common.Bytes2Hex(key))
+		} else {
+			keyLen := len(key)
+			log.Info("contract account key:", "len", keyLen-keyPrefixLen)
+			if keyPrefixLen >= 20 {
+				log.Info("contract account key:", "len", keyLen-keyPrefixLen,
+					"account key", common.Bytes2Hex(key[keyPrefixLen:]))
+			}
 		}
 
 		count++
