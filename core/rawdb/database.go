@@ -664,7 +664,18 @@ func PruneHashTrieNodeInDataBase(db ethdb.Database) error {
 // InspectDatabase traverses the entire database and checks the size
 // of all different categories of data.
 func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
-	it := db.NewIterator(keyPrefix, keyStart)
+	/*
+		buf := make([]byte, len(SnapshotAccountPrefix)+common.HashLength)
+		//n := copy(buf, SnapshotAccountPrefix)
+		//n += copy(buf[n:], common.HexToHash("0xe9dae3d797a6bf53395810df9d7048f18ac98f1bd211dc87dfad3532aa88d237").Bytes())
+
+		keyPrefix = buf
+		keyPrefixLen := len(buf)
+		fmt.Println("contract prefix len:", keyPrefixLen)
+
+	*/
+	it := db.NewIterator(SnapshotStoragePrefix, keyStart)
+
 	defer it.Release()
 
 	var trieIter ethdb.Iterator
@@ -708,6 +719,8 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		// Totals
 		total common.StorageSize
 	)
+
+	var accMap map[string]int64
 	// Inspect key-value database first.
 	for it.Next() {
 		var (
@@ -715,81 +728,34 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			size = common.StorageSize(len(key) + len(it.Value()))
 		)
 		total += size
-		switch {
-		case bytes.HasPrefix(key, headerPrefix) && len(key) == (len(headerPrefix)+8+common.HashLength):
-			headers.Add(size)
-		case bytes.HasPrefix(key, blockBodyPrefix) && len(key) == (len(blockBodyPrefix)+8+common.HashLength):
-			bodies.Add(size)
-		case bytes.HasPrefix(key, blockReceiptsPrefix) && len(key) == (len(blockReceiptsPrefix)+8+common.HashLength):
-			receipts.Add(size)
-		case IsLegacyTrieNode(key, it.Value()):
-			legacyTries.Add(size)
-		case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerTDSuffix):
-			tds.Add(size)
-		case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerHashSuffix):
-			numHashPairings.Add(size)
-		case bytes.HasPrefix(key, headerNumberPrefix) && len(key) == (len(headerNumberPrefix)+common.HashLength):
-			hashNumPairings.Add(size)
-		case bytes.HasPrefix(key, stateIDPrefix) && len(key) == len(stateIDPrefix)+common.HashLength:
-			stateLookups.Add(size)
-		case IsAccountTrieNode(key):
-			accountTries.Add(size)
-		case IsStorageTrieNode(key):
-			storageTries.Add(size)
-		case bytes.HasPrefix(key, CodePrefix) && len(key) == len(CodePrefix)+common.HashLength:
-			codes.Add(size)
-		case bytes.HasPrefix(key, txLookupPrefix) && len(key) == (len(txLookupPrefix)+common.HashLength):
-			txLookups.Add(size)
-		case bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength):
-			accountSnaps.Add(size)
-		case bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength):
-			storageSnaps.Add(size)
-		case bytes.HasPrefix(key, PreimagePrefix) && len(key) == (len(PreimagePrefix)+common.HashLength):
-			preimages.Add(size)
-		case bytes.HasPrefix(key, configPrefix) && len(key) == (len(configPrefix)+common.HashLength):
-			metadata.Add(size)
-		case bytes.HasPrefix(key, genesisPrefix) && len(key) == (len(genesisPrefix)+common.HashLength):
-			metadata.Add(size)
-		case bytes.HasPrefix(key, bloomBitsPrefix) && len(key) == (len(bloomBitsPrefix)+10+common.HashLength):
-			bloomBits.Add(size)
-		case bytes.HasPrefix(key, BloomBitsIndexPrefix):
-			bloomBits.Add(size)
-		case bytes.HasPrefix(key, CliqueSnapshotPrefix) && len(key) == 7+common.HashLength:
-			cliqueSnaps.Add(size)
-		case bytes.HasPrefix(key, ParliaSnapshotPrefix) && len(key) == 7+common.HashLength:
-			parliaSnaps.Add(size)
-		case bytes.HasPrefix(key, ChtTablePrefix) ||
-			bytes.HasPrefix(key, ChtIndexTablePrefix) ||
-			bytes.HasPrefix(key, ChtPrefix): // Canonical hash trie
-			chtTrieNodes.Add(size)
-		case bytes.HasPrefix(key, BloomTrieTablePrefix) ||
-			bytes.HasPrefix(key, BloomTrieIndexPrefix) ||
-			bytes.HasPrefix(key, BloomTriePrefix): // Bloomtrie sub
-			bloomTrieNodes.Add(size)
-		default:
-			var accounted bool
-			for _, meta := range [][]byte{
-				databaseVersionKey, headHeaderKey, headBlockKey, headFastBlockKey,
-				lastPivotKey, fastTrieProgressKey, snapshotDisabledKey, SnapshotRootKey, snapshotJournalKey,
-				snapshotGeneratorKey, snapshotRecoveryKey, txIndexTailKey, fastTxLookupLimitKey,
-				uncleanShutdownKey, badBlockKey, transitionStatusKey, skeletonSyncStatusKey,
-				persistentStateIDKey, trieJournalKey, snapshotSyncStatusKey, snapSyncStatusFlagKey,
-			} {
-				if bytes.Equal(key, meta) {
-					metadata.Add(size)
-					accounted = true
-					break
-				}
+
+		if bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength) {
+			//	storageHash := key[len(SnapshotStoragePrefix)+1*common.HashLength:]
+			accountHash := key[len(SnapshotStoragePrefix) : len(SnapshotStoragePrefix)+1*common.HashLength+1]
+			if len(accountHash) != common.HashLength {
+				panic("err account Hash")
 			}
-			if !accounted {
-				unaccounted.Add(size)
+
+			accountKey := make([]byte, len(SnapshotAccountPrefix)+common.HashLength)
+			n1 := copy(accountKey, SnapshotAccountPrefix)
+			n1 += copy(accountKey[n1:], accountHash)
+			_, err := db.Get(accountKey)
+			if err == nil {
+				log.Info("find account hash in account snap")
+				accMap[common.Bytes2Hex(accountKey)] += 1
 			}
+		} else {
+			log.Error("key is not storage", "key len", len(key), "key", common.Bytes2Hex(key))
 		}
+
 		count++
 		if count%1000 == 0 && time.Since(logged) > 8*time.Second {
 			log.Info("Inspecting database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
 			logged = time.Now()
 		}
+	}
+	for k, v := range accMap {
+		log.Info("account map info ", "account ", k, "value", v)
 	}
 	// inspect separate trie db
 	if trieIter != nil {
