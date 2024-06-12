@@ -666,7 +666,7 @@ func PruneHashTrieNodeInDataBase(db ethdb.Database) error {
 func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	buf := make([]byte, len(SnapshotStoragePrefix)+common.HashLength)
 	n := copy(buf, SnapshotStoragePrefix)
-	n += copy(buf[n:], common.HexToHash("0xe9dae3d797a6bf53395810df9d7048f18ac98f1bd211dc87dfad3532aa88d237").Bytes())
+	n += copy(buf[n:], common.HexToHash("0xe3ee5c338fb03ba97621fbf6b62c153a7a9b3c4dc567d43368d31a1ae9a2d6b5").Bytes())
 
 	keyPrefix = buf
 	keyPrefixLen := len(buf)
@@ -718,7 +718,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		total common.StorageSize
 	)
 
-	largeHash := common.HexToHash("0xe9dae3d797a6bf53395810df9d7048f18ac98f1bd211dc87dfad3532aa88d237").Bytes()
+	//largeHash := common.HexToHash("0xe9dae3d797a6bf53395810df9d7048f18ac98f1bd211dc87dfad3532aa88d237").Bytes()
 	accMap := make(map[string]int64)
 	// Inspect key-value database first.
 	for it.Next() {
@@ -730,9 +730,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 
 		if bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength) {
 			storageHash := key[len(SnapshotStoragePrefix)+1*common.HashLength:]
-			if bytes.Compare(largeHash, storageHash) == 0 {
-				log.Info("it is large hash")
-			}
+
 			accountHash := key[1 : common.HashLength+1]
 			if len(storageHash) != common.HashLength {
 				fmt.Println("len acount hash", len(accountHash))
@@ -741,8 +739,12 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 
 			accountKey := make([]byte, len(SnapshotAccountPrefix)+common.HashLength)
 			n1 := copy(accountKey, SnapshotAccountPrefix)
-			//n1 += copy(accountKey[n1:], accountHash)
 			n1 += copy(accountKey[n1:], storageHash)
+
+			if !bytes.HasPrefix(accountKey, SnapshotAccountPrefix) ||
+				len(accountKey) != (len(SnapshotAccountPrefix)+common.HashLength) {
+				panic("err account Hash2")
+			}
 			_, err := db.Get(accountKey)
 			if err == nil {
 				log.Info("find account hash in account snap", "account", common.Bytes2Hex(accountKey))
