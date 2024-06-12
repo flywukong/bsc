@@ -721,7 +721,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	)
 
 	largeHash := common.HexToHash("0xe9dae3d797a6bf53395810df9d7048f18ac98f1bd211dc87dfad3532aa88d237").Bytes()
-	var accMap map[string]int64
+	accMap := make(map[string]int64)
 	// Inspect key-value database first.
 	for it.Next() {
 		var (
