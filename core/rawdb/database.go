@@ -727,7 +727,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		} else {
 			keyLen := len(key)
 			log.Info("contract account key:", "len", keyLen-keyPrefixLen)
-			if keyPrefixLen >= 20 {
+			if keyLen-keyPrefixLen >= 20 {
 				log.Info("contract account key:", "len", keyLen-keyPrefixLen,
 					"account key", common.Bytes2Hex(key[keyPrefixLen:]))
 			}
