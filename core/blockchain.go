@@ -314,6 +314,9 @@ type BlockChain struct {
 	vmConfig   vm.Config
 	pipeCommit bool
 
+	// Cache among blocks
+	cacheAmongBlocks *state.CacheAmongBlocks
+
 	// monitor
 	doubleSignMonitor *monitor.DoubleSignMonitor
 }
@@ -579,6 +582,10 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	if txLookupLimit != nil {
 		bc.txIndexer = newTxIndexer(*txLookupLimit, bc)
 	}
+
+	// Initialise cache among blocks
+	bc.cacheAmongBlocks = state.NewCacheAmongBlocks()
+
 	return bc, nil
 }
 
@@ -2233,7 +2240,14 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			parent = bc.GetHeader(block.ParentHash(), block.NumberU64()-1)
 		}
 
-		statedb, err := state.NewWithSharedPool(parent.Root, bc.stateCache, bc.snaps)
+		// Check whether the cache pool among blocks can be used
+		//If parent root is the same, use it
+		// Else drop and reset the cache.
+		if parent.Root != bc.cacheAmongBlocks.GetRoot() {
+			bc.cacheAmongBlocks = state.NewCacheAmongBlocks()
+		}
+		statedb, err := state.NewWithCacheAmongBlocks(parent.Root, bc.stateCache, bc.snaps, bc.cacheAmongBlocks)
+
 		if err != nil {
 			return it.index, err
 		}
