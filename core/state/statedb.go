@@ -81,13 +81,13 @@ func (m *mutation) isDelete() bool {
 // must be created with new root and updated database for accessing post-
 // commit states.
 type StateDB struct {
-	db             Database
-	prefetcherLock sync.Mutex
-	prefetcher     *triePrefetcher
-	trie           Trie
-	noTrie         bool
-	reader         Reader
-
+	db               Database
+	prefetcherLock   sync.Mutex
+	prefetcher       *triePrefetcher
+	trie             Trie
+	noTrie           bool
+	reader           Reader
+	cacheAmongBlocks *CacheAmongBlocks
 	// originalRoot is the pre-state root, before any changes were made.
 	// It will be updated when the Commit is called.
 	originalRoot common.Hash
@@ -177,6 +177,16 @@ func NewWithSharedPool(root common.Hash, db Database) (*StateDB, error) {
 		return nil, err
 	}
 	statedb.storagePool = NewStoragePool()
+	return statedb, nil
+}
+
+func NewWithCacheAmongBlocks(root common.Hash, db Database, cache *CacheAmongBlocks) (*StateDB, error) {
+	statedb, err := New(root, db)
+	if err != nil {
+		return nil, err
+	}
+
+	statedb.cacheAmongBlocks = cache
 	return statedb, nil
 }
 
@@ -695,12 +705,52 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	}
 	s.AccountLoaded++
 
+	var acct *types.StateAccount
 	start := time.Now()
-	acct, err := s.reader.Account(addr)
-	if err != nil {
-		s.setError(fmt.Errorf("getStateObject (%x) error: %w", addr.Bytes(), err))
-		return nil
+
+	existInCache := false
+	var acc *types.SlimAccount
+	// Try to get from cache among blocks if root is not nil
+	if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() != types.EmptyRootHash {
+		acc, existInCache = s.cacheAmongBlocks.GetAccount(crypto.HashData(s.hasher, addr.Bytes()))
+		if existInCache {
+			SnapshotBlockCacheAccountHitMeter.Mark(1)
+		} else {
+			SnapshotBlockCacheAccountMissMeter.Mark(1)
+		}
+		if existInCache && acc == nil {
+			return nil
+		}
 	}
+
+	if existInCache == false {
+		acct, err = s.reader.Account(addr)
+		if err != nil {
+			s.setError(fmt.Errorf("getStateObject (%x) error: %w", addr.Bytes(), err))
+			return nil
+		}
+		if err == nil {
+			if acct == nil {
+				return nil
+			}
+		}
+	}
+
+	if err == nil || existInCache {
+		acct = &types.StateAccount{
+			Nonce:    acc.Nonce,
+			Balance:  acc.Balance,
+			CodeHash: acc.CodeHash,
+			Root:     common.BytesToHash(acc.Root),
+		}
+		if len(acct.CodeHash) == 0 {
+			acct.CodeHash = types.EmptyCodeHash.Bytes()
+		}
+		if acct.Root == (common.Hash{}) {
+			acct.Root = types.EmptyRootHash
+		}
+	}
+
 	if metrics.EnabledExpensive() {
 		s.AccountReads += time.Since(start)
 	}
@@ -808,6 +858,7 @@ func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 	if s.witness != nil {
 		state.witness = s.witness.Copy()
 	}
+	state.cacheAmongBlocks = s.cacheAmongBlocks
 	// Do we need to copy the access list and transient storage?
 	// In practice: No. At the start of a transaction, these two lists are empty.
 	// In practice, we only ever copy state _between_ transactions/blocks, never

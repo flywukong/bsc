@@ -68,9 +68,14 @@ var (
 	snapshotBloomIndexTimer = metrics.NewRegisteredResettingTimer("state/snapshot/bloom/index", nil)
 	snapshotBloomErrorGauge = metrics.NewRegisteredGaugeFloat64("state/snapshot/bloom/error", nil)
 
-	snapshotBloomAccountTrueHitMeter  = metrics.NewRegisteredMeter("state/snapshot/bloom/account/truehit", nil)
-	snapshotBloomAccountFalseHitMeter = metrics.NewRegisteredMeter("state/snapshot/bloom/account/falsehit", nil)
-	snapshotBloomAccountMissMeter     = metrics.NewRegisteredMeter("state/snapshot/bloom/account/miss", nil)
+	snapshotBloomAccountTrueHitMeter   = metrics.NewRegisteredMeter("state/snapshot/bloom/account/truehit", nil)
+	snapshotBloomAccountFalseHitMeter  = metrics.NewRegisteredMeter("state/snapshot/bloom/account/falsehit", nil)
+	snapshotBloomAccountMissMeter      = metrics.NewRegisteredMeter("state/snapshot/bloom/account/miss", nil)
+	SnapshotBlockCacheAccountMissMeter = metrics.NewRegisteredMeter("state/snapshot/cacheblock/account/miss", nil)
+	SnapshotBlockCacheAccountHitMeter  = metrics.NewRegisteredMeter("state/snapshot/cacheblock/account/hit", nil)
+
+	SnapshotBlockCacheStorageMissMeter = metrics.NewRegisteredMeter("state/snapshot/cacheblock/storage/miss", nil)
+	SnapshotBlockCacheStorageHitMeter  = metrics.NewRegisteredMeter("state/snapshot/cacheblock/storage/hit", nil)
 
 	snapshotBloomStorageTrueHitMeter  = metrics.NewRegisteredMeter("state/snapshot/bloom/storage/truehit", nil)
 	snapshotBloomStorageFalseHitMeter = metrics.NewRegisteredMeter("state/snapshot/bloom/storage/falsehit", nil)

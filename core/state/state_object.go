@@ -224,16 +224,36 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		s.originStorage[key] = common.Hash{} // track the empty slot as origin value
 		return common.Hash{}
 	}
-	s.db.StorageLoaded++
-
-	var start time.Time
-	if metrics.EnabledExpensive() {
-		start = time.Now()
+	// If no live objects are available, attempt to use snapshots
+	var (
+		enc   []byte
+		err   error
+		value common.Hash
+	)
+	start := time.Now()
+	existInCache := false
+	// Try to get from cache among blocks if root is not nil
+	if s.db.cacheAmongBlocks != nil && s.db.cacheAmongBlocks.GetRoot() != types.EmptyRootHash {
+		enc, existInCache = s.db.cacheAmongBlocks.GetStorage(s.addrHash.String() + crypto.Keccak256Hash(key.Bytes()).String())
+		if existInCache {
+			SnapshotBlockCacheStorageHitMeter.Mark(1)
+		}
+		if len(enc) > 0 {
+			_, content, _, err := rlp.Split(enc)
+			if err != nil {
+				s.db.setError(err)
+			}
+			value.SetBytes(content)
+		}
 	}
-	value, err := s.db.reader.Storage(s.address, key)
-	if err != nil {
-		s.db.setError(err)
-		return common.Hash{}
+	if !existInCache {
+		SnapshotBlockCacheStorageMissMeter.Mark(1)
+		value, err := s.db.reader.Storage(s.address, key)
+		if err != nil {
+			s.db.setError(err)
+			return common.Hash{}
+		}
+
 	}
 	if metrics.EnabledExpensive() {
 		s.db.StorageReads += time.Since(start)
