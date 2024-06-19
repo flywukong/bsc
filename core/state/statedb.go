@@ -733,7 +733,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 	if s.snap != nil {
 		start := time.Now()
 		// Try to get from cache among blocks if root is not nil
-		if s.cacheAmongBlocks.GetRoot() != types.EmptyRootHash {
+		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() != types.EmptyRootHash {
 			acc, exist := s.cacheAmongBlocks.GetAccount(crypto.HashData(s.hasher, addr.Bytes()))
 			if acc == nil {
 				return nil
