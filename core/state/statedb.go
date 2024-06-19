@@ -915,6 +915,8 @@ func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 		snaps: s.snaps,
 		snap:  s.snap,
 	}
+
+	state.cacheAmongBlocks = NewCacheAmongBlocks()
 	// Copy the dirty states, logs, and preimages
 	for addr := range s.journal.dirties {
 		// As documented [here](https://github.com/ethereum/go-ethereum/pull/16485#issuecomment-380438527),
