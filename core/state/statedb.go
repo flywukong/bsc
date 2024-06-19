@@ -1804,13 +1804,16 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 		})
 		if s.cacheAmongBlocks != nil {
 			acc := new(types.SlimAccount)
-			if err := rlp.DecodeBytes(account, acc); err != nil {
+			if err := rlp.DecodeBytes(account, acc); err == nil {
 				s.cacheAmongBlocks.SetAccount(accountHash, acc)
 			} else {
+				log.Error("decode account err", "err", err.Error())
 				panic("Shouldn't happen!")
 			}
 		}
 	}
+	log.Info(" SnapToDiffLayer info", "account num", len(s.accounts), ""+
+		"storage num", len(s.storages))
 	storages := make([]types.DiffStorage, 0, len(s.storages))
 	for accountHash, storage := range s.storages {
 		keys := make([]common.Hash, 0, len(storage))

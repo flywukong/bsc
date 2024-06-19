@@ -228,6 +228,7 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		err   error
 		value common.Hash
 	)
+
 	if s.db.snap != nil {
 		start := time.Now()
 		enc, err = s.db.snap.Storage(s.addrHash, crypto.Keccak256Hash(key.Bytes()))
