@@ -824,33 +824,45 @@ func dbTrieDelete(ctx *cli.Context) error {
 
 // dbDelete deletes a key from the database
 func dbDelete(ctx *cli.Context) error {
-	if ctx.NArg() != 1 {
-		return fmt.Errorf("required arguments: %v", ctx.Command.ArgsUsage)
-	}
+	/*
+		if ctx.NArg() != 1 {
+			return fmt.Errorf("required arguments: %v", ctx.Command.ArgsUsage)
+		}
+
+	*/
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
 	db := utils.MakeChainDatabase(ctx, stack, false, false)
 	defer db.Close()
-
-	key, err := common.ParseHexOrString(ctx.Args().Get(0))
-	if err != nil {
-		log.Info("Could not decode the key", "error", err)
-		return err
-	}
-	opDb := db
-	if stack.CheckIfMultiDataBase() {
-		keyType := rawdb.DataTypeByKey(key)
-		if keyType == rawdb.StateDataType {
-			opDb = db.StateStore()
-		} else if keyType == rawdb.BlockDataType {
-			opDb = db.BlockStore()
+	/*
+		key, err := common.ParseHexOrString(ctx.Args().Get(0))
+		if err != nil {
+			log.Info("Could not decode the key", "error", err)
+			return err
 		}
-	}
+
+	*/
+	key := []byte("LastFast")
+
+	opDb := db
+	/*
+		if stack.CheckIfMultiDataBase() {
+			keyType := rawdb.DataTypeByKey(key)
+			if keyType == rawdb.StateDataType {
+				opDb = db.StateStore()
+			} else if keyType == rawdb.BlockDataType {
+				opDb = db.BlockStore()
+			}
+		}
+
+	*/
 
 	data, err := opDb.Get(key)
 	if err == nil {
 		fmt.Printf("Previous value: %#x\n", data)
+	} else {
+		return err
 	}
 	if err = opDb.Delete(key); err != nil {
 		log.Info("Delete operation returned an error", "key", fmt.Sprintf("%#x", key), "error", err)
