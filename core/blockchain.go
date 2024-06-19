@@ -548,6 +548,9 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 			return nil, err
 		}
 	}
+
+	// Initialise cache among blocks
+	bc.cacheAmongBlocks = state.NewCacheAmongBlocks()
 	// Start future block processor.
 	bc.wg.Add(1)
 	go bc.updateFutureBlocks()
@@ -582,9 +585,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	if txLookupLimit != nil {
 		bc.txIndexer = newTxIndexer(*txLookupLimit, bc)
 	}
-
-	// Initialise cache among blocks
-	bc.cacheAmongBlocks = state.NewCacheAmongBlocks()
 
 	return bc, nil
 }
@@ -2244,10 +2244,11 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		//If parent root is the same, use it
 		// Else drop and reset the cache.
 		if parent.Root != bc.cacheAmongBlocks.GetRoot() {
+			log.Error("root is not same with cache root", "parent root:", parent.Root,
+				"cache root", bc.cacheAmongBlocks.GetRoot())
 			bc.cacheAmongBlocks = state.NewCacheAmongBlocks()
 		}
 		statedb, err := state.NewWithCacheAmongBlocks(parent.Root, bc.stateCache, bc.snaps, bc.cacheAmongBlocks)
-
 		if err != nil {
 			return it.index, err
 		}
