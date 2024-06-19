@@ -27,6 +27,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"golang.org/x/exp/slices"
@@ -145,7 +146,8 @@ func storageBloomHash(h0, h1 common.Hash) uint64 {
 
 // newDiffLayer creates a new diff on top of an existing snapshot, whether that's a low
 // level persistent database or a hierarchical diff already.
-func newDiffLayer(parent snapshot, root common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte, verified chan struct{}) *diffLayer {
+func newDiffLayer(parent snapshot, root common.Hash, destructs map[common.Hash]struct{},
+	accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte, verified chan struct{}) *diffLayer {
 	// Create the new layer with some pre-allocated data segments
 	dl := &diffLayer{
 		parent:      parent,
@@ -209,6 +211,7 @@ func (dl *diffLayer) rebloom(origin *diskLayer) {
 		parent.lock.RUnlock()
 	} else {
 		dl.diffed, _ = bloomfilter.New(uint64(bloomSize), uint64(bloomFuncs))
+		log.Info("renew bloom filter")
 	}
 	// Iterate over all the accounts and storage slots and index them
 	for hash := range dl.destructSet {
@@ -442,6 +445,7 @@ func (dl *diffLayer) storage(accountHash, storageHash common.Hash, depth int) ([
 			if n := len(data); n > 0 {
 				snapshotDirtyStorageReadMeter.Mark(int64(n))
 			} else {
+				log.Info("difflayer hit ", "account ", accountHash, "storage hash", storageHash, "data len", 0)
 				snapshotDirtyStorageInexMeter.Mark(1)
 			}
 			snapshotBloomStorageTrueHitMeter.Mark(1)
@@ -451,6 +455,7 @@ func (dl *diffLayer) storage(accountHash, storageHash common.Hash, depth int) ([
 	// If the account is known locally, but deleted, return an empty slot
 	if _, ok := dl.destructSet[accountHash]; ok {
 		snapshotDirtyStorageHitMeter.Mark(1)
+		log.Info("difflayer hit ", "account ", accountHash, "destruct", "true")
 		//snapshotDirtyStorageHitDepthHist.Update(int64(depth))
 		snapshotDirtyStorageInexMeter.Mark(1)
 		snapshotBloomStorageTrueHitMeter.Mark(1)

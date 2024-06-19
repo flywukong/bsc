@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/badblock"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -49,6 +50,8 @@ const (
 	storageDeleteLimit = 512 * 1024 * 1024
 )
 
+var HasBadBlock bool
+
 type revision struct {
 	id           int
 	journalIndex int
@@ -67,6 +70,7 @@ type revision struct {
 // commit states.
 type StateDB struct {
 	db               Database
+	hasbadblock      bool
 	prefetcherLock   sync.Mutex
 	prefetcher       *triePrefetcher
 	trie             Trie
@@ -730,26 +734,69 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 	}
 	// If no live objects are available, attempt to use snapshots
 	var data *types.StateAccount
+	var err error
 	if s.snap != nil {
 		start := time.Now()
-		// Try to get from cache among blocks if root is not nil
-		if s.cacheAmongBlocks.GetRoot() != types.EmptyRootHash {
-			acc, exist := s.cacheAmongBlocks.GetAccount(crypto.HashData(s.hasher, addr.Bytes()))
-			if acc == nil {
-				return nil
-			}
 
-			if exist == false {
-				acc, err := s.snap.Account(crypto.HashData(s.hasher, addr.Bytes()))
-				if metrics.EnabledExpensive {
-					s.SnapshotAccountReads += time.Since(start)
-				}
-				if err == nil {
-					if acc == nil {
-						return nil
+		existInCache := false
+		var acc *types.SlimAccount
+
+		accounthash := crypto.HashData(s.hasher, addr.Bytes())
+		// Try to get from cache among blocks if root is not nil
+		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() == s.originalRoot {
+			start1 := time.Now()
+			acc, existInCache = s.cacheAmongBlocks.GetAccount(accounthash)
+			if existInCache {
+				BlockCacheAccountTimer.Update(time.Since(start1))
+				SnapshotBlockCacheAccountHitMeter.Mark(1)
+				if badblock.HasBadBlock() {
+					log.Info("check bad block info")
+					acc2, err2 := s.snap.Account(accounthash)
+					if err2 == nil {
+						if acc == nil && acc2 != nil {
+							log.Info("compare cache and difflayer not same", "account", acc,
+								"acc", "nil", "acc2 info", acc2.Balance, "code", common.Bytes2Hex(acc2.CodeHash), "root", acc2.Root,
+								"Nonce", acc2.Nonce)
+						} else if acc2 == nil && acc != nil {
+							log.Info("compare cache and difflayer not same", "account", acc,
+								"acc1 info", acc.Balance, "code", common.Bytes2Hex(acc.CodeHash), "root", acc.Root,
+								"Nonce", acc.Nonce, "acc2", "nil")
+						} else if acc2 != nil && acc != nil {
+							if *acc.Balance != *acc2.Balance || string(acc.CodeHash) != string(acc2.CodeHash) ||
+								acc.Nonce != acc2.Nonce || string(acc.Root) != string(acc2.Root) {
+								log.Info("compare cache and difflayer not same", "account", acc,
+									"acc1 info", acc.Balance, "code", common.Bytes2Hex(acc.CodeHash), "root", acc.Root,
+									"Nonce", acc.Nonce, "acc2 info", acc2.Balance, "code", common.Bytes2Hex(acc2.CodeHash), "root", acc2.Root,
+									"Nonce", acc2.Nonce)
+							}
+						}
+					} else {
+						log.Error("read compare err", "err", err2, "account", acc,
+							"acc1 info", acc.Balance, "code", acc.CodeHash, "root", acc.Root,
+							"Nonce", acc.Nonce)
 					}
 				}
+			} else {
+				SnapshotBlockCacheAccountMissMeter.Mark(1)
 			}
+			if existInCache && acc == nil {
+				return nil
+			}
+		}
+
+		if existInCache == false {
+			acc, err = s.snap.Account(accounthash)
+			if metrics.EnabledExpensive {
+				s.SnapshotAccountReads += time.Since(start)
+			}
+			if err == nil {
+				if acc == nil {
+					return nil
+				}
+			}
+		}
+
+		if err == nil || existInCache {
 			data = &types.StateAccount{
 				Nonce:    acc.Nonce,
 				Balance:  acc.Balance,
@@ -915,6 +962,8 @@ func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 		snaps: s.snaps,
 		snap:  s.snap,
 	}
+
+	// state.cacheAmongBlocks = s.cacheAmongBlocks
 	// Copy the dirty states, logs, and preimages
 	for addr := range s.journal.dirties {
 		// As documented [here](https://github.com/ethereum/go-ethereum/pull/16485#issuecomment-380438527),
@@ -1723,8 +1772,8 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 				diffLayer.Destructs, diffLayer.Accounts, diffLayer.Storages = s.SnapToDiffLayer()
 				// Only update if there's a state transition (skip empty Clique blocks)
 				if parent := s.snap.Root(); parent != s.expectedRoot {
+					//	log.Warn("try to update snapshot tree", "parent", parent, "expect root", s.expectedRoot)
 					err := s.snaps.Update(s.expectedRoot, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages, verified)
-
 					if err != nil {
 						log.Warn("Failed to update snapshot tree", "from", parent, "to", s.expectedRoot, "err", err)
 					}
@@ -1774,6 +1823,9 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 		root = types.EmptyRootHash
 	}
 
+	if root != s.expectedRoot {
+		log.Warn("compare root not same", "state root", root, "expected root", s.expectedRoot)
+	}
 	if s.cacheAmongBlocks != nil {
 		s.cacheAmongBlocks.SetRoot(root)
 	}
@@ -1790,27 +1842,63 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 
 func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []types.DiffStorage) {
 	destructs := make([]common.Address, 0, len(s.stateObjectsDestruct))
-	for account := range s.stateObjectsDestruct {
-		destructs = append(destructs, account)
+	for accountAddr, account := range s.stateObjectsDestruct {
+		destructs = append(destructs, accountAddr)
 		if s.cacheAmongBlocks != nil {
-			s.cacheAmongBlocks.SetAccount(crypto.HashData(s.hasher, account.Bytes()), nil)
+			obj, exist := s.stateObjects[accountAddr]
+			if !exist {
+				s.cacheAmongBlocks.SetAccount(crypto.Keccak256Hash(accountAddr.Bytes()), nil)
+				//	log.Info("cache set the destruct as nil", "account", crypto.Keccak256Hash(accountAddr.Bytes()))
+			} else {
+				s.cacheAmongBlocks.SetAccount(obj.addrHash, nil)
+				log.Info("cache set the destruct as nil", "account", obj.addrHash)
+			}
+			if account != nil && account.Root != types.EmptyRootHash {
+				log.Info("it is CA account", "root", account.Root, "account hash", accountAddr)
+				SnapshotBlockCacheStoragePurge.Mark(1)
+				s.cacheAmongBlocks.Purge()
+			}
 		}
+
 	}
+
+	keysize := 0
+	valSize := 0
+	keyNum := 0
 	accounts := make([]types.DiffAccount, 0, len(s.accounts))
 	for accountHash, account := range s.accounts {
 		accounts = append(accounts, types.DiffAccount{
 			Account: accountHash,
 			Blob:    account,
 		})
+
 		if s.cacheAmongBlocks != nil {
+			keyNum++
 			acc := new(types.SlimAccount)
-			if err := rlp.DecodeBytes(account, acc); err != nil {
+			if err := rlp.DecodeBytes(account, acc); err == nil {
+				keysize += len(accountHash)
+				valSize += len(account)
 				s.cacheAmongBlocks.SetAccount(accountHash, acc)
 			} else {
+				log.Error("decode account err", "err", err.Error())
 				panic("Shouldn't happen!")
 			}
 		}
 	}
+
+	if keyNum >= 1 {
+		log.Info("account avg size of cache storage", "key", keysize/keyNum, "value", valSize/keyNum,
+			"total", (keysize+valSize)/keyNum)
+	}
+
+	/*
+		log.Info(" SnapToDiffLayer info",
+			"account num of cacheAmongBlocks is", s.cacheAmongBlocks.GetAccountsNum(),
+			"storage num of cacheAmongBlocks is", s.cacheAmongBlocks.GetStorageNum())
+	*/
+	keysize = 0
+	valSize = 0
+	keyNum = 0
 	storages := make([]types.DiffStorage, 0, len(s.storages))
 	for accountHash, storage := range s.storages {
 		keys := make([]common.Hash, 0, len(storage))
@@ -1819,7 +1907,11 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 			keys = append(keys, k)
 			values = append(values, v)
 			if s.cacheAmongBlocks != nil {
-				s.cacheAmongBlocks.SetStorage(accountHash.String()+k.String(), v)
+				keyNum++
+				cacheKey := accountHash.String() + k.String()
+				keysize += len(cacheKey)
+				valSize += len(v)
+				s.cacheAmongBlocks.SetStorage(cacheKey, v)
 			}
 		}
 		storages = append(storages, types.DiffStorage{
@@ -1827,6 +1919,10 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 			Keys:    keys,
 			Vals:    values,
 		})
+	}
+	if keyNum >= 1 {
+		log.Info("storage avg size of cache storage", "key", keysize/keyNum, "value", valSize/keyNum,
+			"total", (keysize+valSize)/keyNum)
 	}
 	return destructs, accounts, storages
 }

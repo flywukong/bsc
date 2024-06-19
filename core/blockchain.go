@@ -32,6 +32,7 @@ import (
 	exlru "github.com/hashicorp/golang-lru"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/ethereum/go-ethereum/badblock"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/common/mclock"
@@ -247,6 +248,7 @@ type BlockChain struct {
 	chainConfig *params.ChainConfig // Chain & network configuration
 	cacheConfig *CacheConfig        // Cache configuration for pruning
 
+	hasBadBlock   bool
 	db            ethdb.Database                   // Low level persistent database to store final content in
 	snaps         *snapshot.Tree                   // Snapshot tree for fast trie leaf access
 	triegc        *prque.Prque[int64, common.Hash] // Priority queue mapping block numbers to tries to gc
@@ -548,6 +550,9 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 			return nil, err
 		}
 	}
+
+	// Initialise cache among blocks
+	bc.cacheAmongBlocks = state.NewCacheAmongBlocks()
 	// Start future block processor.
 	bc.wg.Add(1)
 	go bc.updateFutureBlocks()
@@ -582,9 +587,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	if txLookupLimit != nil {
 		bc.txIndexer = newTxIndexer(*txLookupLimit, bc)
 	}
-
-	// Initialise cache among blocks
-	bc.cacheAmongBlocks = state.NewCacheAmongBlocks()
 
 	return bc, nil
 }
@@ -2244,10 +2246,12 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		//If parent root is the same, use it
 		// Else drop and reset the cache.
 		if parent.Root != bc.cacheAmongBlocks.GetRoot() {
+			log.Error("root is not same with cache root", "parent root:", parent.Root,
+				"cache root", bc.cacheAmongBlocks.GetRoot())
 			bc.cacheAmongBlocks = state.NewCacheAmongBlocks()
 		}
+		log.Info("new state db with cache", "cache root", bc.cacheAmongBlocks.GetRoot())
 		statedb, err := state.NewWithCacheAmongBlocks(parent.Root, bc.stateCache, bc.snaps, bc.cacheAmongBlocks)
-
 		if err != nil {
 			return it.index, err
 		}
@@ -3078,6 +3082,7 @@ func (bc *BlockChain) isCachedBadBlock(block *types.Block) bool {
 // bad block need not save receipts & sidecars.
 func (bc *BlockChain) reportBlock(block *types.Block, receipts types.Receipts, err error) {
 	rawdb.WriteBadBlock(bc.db, block)
+	badblock.SetBadBlock()
 	log.Error(summarizeBadBlock(block, receipts, bc.Config(), err))
 }
 
