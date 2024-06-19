@@ -1,9 +1,10 @@
 package state
 
 import (
+	"sync"
+
 	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/core/types"
-	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -55,7 +56,7 @@ func NewCacheAmongBlocks() *CacheAmongBlocks {
 	return &CacheAmongBlocks{
 		cacheRoot:     types.EmptyRootHash,
 		accountsCache: lru.NewCache[common.Hash, *types.SlimAccount](10000),
-		storagesCache: lru.NewCache[string, []byte](10000),
+		storagesCache: lru.NewCache[string, []byte](200000),
 		// accountsCache: fastcache.New(10000),
 		// storagesCache: fastcache.New(10000),
 	}
@@ -65,6 +66,11 @@ func (c *CacheAmongBlocks) GetRoot() common.Hash {
 	return c.cacheRoot
 }
 
+func (c *CacheAmongBlocks) Purge() {
+	c.accountsCache.Purge()
+	c.storagesCache.Purge()
+}
+
 func (c *CacheAmongBlocks) SetRoot(root common.Hash) {
 	c.cacheRoot = root
 }
@@ -72,6 +78,14 @@ func (c *CacheAmongBlocks) SetRoot(root common.Hash) {
 func (c *CacheAmongBlocks) GetAccount(key common.Hash) (*types.SlimAccount, bool) {
 	//return c.accountsCache.HasGet(nil, key)
 	return c.accountsCache.Get(key)
+}
+
+func (c *CacheAmongBlocks) GetAccountsNum() int {
+	return len(c.accountsCache.Keys())
+}
+
+func (c *CacheAmongBlocks) GetStorageNum() int {
+	return len(c.storagesCache.Keys())
 }
 
 func (c *CacheAmongBlocks) GetStorage(key string) ([]byte, bool) {

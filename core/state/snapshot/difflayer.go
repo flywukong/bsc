@@ -27,6 +27,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"golang.org/x/exp/slices"
@@ -344,6 +345,7 @@ func (dl *diffLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	// If the bloom filter misses, don't even bother with traversing the memory
 	// diff layers, reach straight into the bottom persistent disk layer
 	if origin != nil {
+		log.Info("bloom filter account miss")
 		snapshotBloomAccountMissMeter.Mark(1)
 		return origin.AccountRLP(hash)
 	}
@@ -416,6 +418,7 @@ func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	// diff layers, reach straight into the bottom persistent disk layer
 	if origin != nil {
 		snapshotBloomStorageMissMeter.Mark(1)
+		log.Info("bloom fileter storage miss")
 		return origin.Storage(accountHash, storageHash)
 	}
 	// The bloom filter hit, start poking in the internal maps
