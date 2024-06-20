@@ -738,39 +738,42 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 			log.Info("the account num of snap is", "account num", len(accountList))
 		}
 
+		existInCache := false
+		var acc *types.SlimAccount
 		// Try to get from cache among blocks if root is not nil
 		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() != types.EmptyRootHash {
 			accountNum := s.cacheAmongBlocks.GetAccountsNum()
 			log.Info("the account num of cacheAmongBlocks is", "account num", accountNum)
-			acc, exist := s.cacheAmongBlocks.GetAccount(crypto.HashData(s.hasher, addr.Bytes()))
+			acc, existInCache = s.cacheAmongBlocks.GetAccount(crypto.HashData(s.hasher, addr.Bytes()))
 			if acc == nil {
 				return nil
 			}
+		}
 
-			if exist == false {
-				acc, err := s.snap.Account(crypto.HashData(s.hasher, addr.Bytes()))
-				if metrics.EnabledExpensive {
-					s.SnapshotAccountReads += time.Since(start)
+		if existInCache == false {
+			acc, err = s.snap.Account(crypto.HashData(s.hasher, addr.Bytes()))
+			if metrics.EnabledExpensive {
+				s.SnapshotAccountReads += time.Since(start)
+			}
+			if err == nil {
+				if acc == nil {
+					return nil
 				}
-				if err == nil {
-					if acc == nil {
-						return nil
-					}
-				}
-			}
-			data = &types.StateAccount{
-				Nonce:    acc.Nonce,
-				Balance:  acc.Balance,
-				CodeHash: acc.CodeHash,
-				Root:     common.BytesToHash(acc.Root),
-			}
-			if len(data.CodeHash) == 0 {
-				data.CodeHash = types.EmptyCodeHash.Bytes()
-			}
-			if data.Root == (common.Hash{}) {
-				data.Root = types.EmptyRootHash
 			}
 		}
+		data = &types.StateAccount{
+			Nonce:    acc.Nonce,
+			Balance:  acc.Balance,
+			CodeHash: acc.CodeHash,
+			Root:     common.BytesToHash(acc.Root),
+		}
+		if len(data.CodeHash) == 0 {
+			data.CodeHash = types.EmptyCodeHash.Bytes()
+		}
+		if data.Root == (common.Hash{}) {
+			data.Root = types.EmptyRootHash
+		}
+
 	}
 
 	// If snapshot unavailable or reading from it failed, load from the database
@@ -1828,7 +1831,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 		"storage num", len(s.storages))
 	accountNum := s.cacheAmongBlocks.GetAccountsNum()
 	log.Info("the account num of cacheAmongBlocks is", "account num", accountNum)
-	
+
 	storages := make([]types.DiffStorage, 0, len(s.storages))
 	for accountHash, storage := range s.storages {
 		keys := make([]common.Hash, 0, len(storage))
