@@ -1787,6 +1787,8 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 			Vals:    values,
 		})
 	}
+	log.Info(" SnapToDiffLayer info", "account num", len(s.accounts), ""+
+		"storage num", len(s.storages), "destruct", len(destructs))
 	return destructs, accounts, storages
 }
 
