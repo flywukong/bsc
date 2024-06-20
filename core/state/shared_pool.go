@@ -1,9 +1,10 @@
 package state
 
 import (
+	"sync"
+
 	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/core/types"
-	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -72,6 +73,10 @@ func (c *CacheAmongBlocks) SetRoot(root common.Hash) {
 func (c *CacheAmongBlocks) GetAccount(key common.Hash) (*types.SlimAccount, bool) {
 	//return c.accountsCache.HasGet(nil, key)
 	return c.accountsCache.Get(key)
+}
+
+func (c *CacheAmongBlocks) GetAccountsNum() int {
+	return len(c.accountsCache.Keys())
 }
 
 func (c *CacheAmongBlocks) GetStorage(key string) ([]byte, bool) {
