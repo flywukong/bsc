@@ -720,6 +720,11 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 	var data *types.StateAccount
 	if s.snap != nil {
 		start := time.Now()
+
+		accountList, err := s.snap.Accounts()
+		if err == nil {
+			log.Info("get object snap account num info", "account num", len(accountList))
+		}
 		acc, err := s.snap.Account(crypto.HashData(s.hasher, addr.Bytes()))
 		if metrics.EnabledExpensive {
 			s.SnapshotAccountReads += time.Since(start)
@@ -1762,6 +1767,11 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 }
 
 func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []types.DiffStorage) {
+	accountList, err := s.snap.Accounts()
+	if err == nil {
+		log.Info("snap account num info", "account num", len(accountList))
+	}
+
 	destructs := make([]common.Address, 0, len(s.stateObjectsDestruct))
 	for account := range s.stateObjectsDestruct {
 		destructs = append(destructs, account)
