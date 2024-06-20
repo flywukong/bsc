@@ -1802,6 +1802,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 }
 
 func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []types.DiffStorage) {
+	s.cacheAmongBlocks.Purge()
 	destructs := make([]common.Address, 0, len(s.stateObjectsDestruct))
 	for account := range s.stateObjectsDestruct {
 		destructs = append(destructs, account)

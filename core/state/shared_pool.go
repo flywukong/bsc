@@ -66,6 +66,11 @@ func (c *CacheAmongBlocks) GetRoot() common.Hash {
 	return c.cacheRoot
 }
 
+func (c *CacheAmongBlocks) Purge() {
+	c.accountsCache.Purge()
+	c.storagesCache.Purge()
+}
+
 func (c *CacheAmongBlocks) SetRoot(root common.Hash) {
 	c.cacheRoot = root
 }
