@@ -1794,9 +1794,11 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 	destructs := make([]common.Address, 0, len(s.stateObjectsDestruct))
 	for account := range s.stateObjectsDestruct {
 		destructs = append(destructs, account)
-		if s.cacheAmongBlocks != nil {
-			s.cacheAmongBlocks.SetAccount(crypto.HashData(s.hasher, account.Bytes()), nil)
-		}
+		/*
+			if s.cacheAmongBlocks != nil {
+				s.cacheAmongBlocks.SetAccount(crypto.HashData(s.hasher, account.Bytes()), nil)
+			}
+		*/
 	}
 	accounts := make([]types.DiffAccount, 0, len(s.accounts))
 	for accountHash, account := range s.accounts {
