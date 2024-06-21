@@ -26,7 +26,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie/trienode"
@@ -236,12 +235,12 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		// Try to get from cache among blocks if root is not nil
 		if s.db.cacheAmongBlocks != nil && s.db.cacheAmongBlocks.GetRoot() != types.EmptyRootHash {
 			enc, existInCache = s.db.cacheAmongBlocks.GetStorage(s.addrHash.String() + crypto.Keccak256Hash(key.Bytes()).String())
-			if existInCache && len(enc) > 0 {
-				log.Info("the storage exist in cacheAmongBlocks ")
+			if existInCache {
+				SnapshotBlockCacheStorageHitMeter.Mark(1)
 			}
 		}
 		if !existInCache {
-			log.Info("the storage not exist in cacheAmongBlocks")
+			SnapshotBlockCacheStorageMissMeter.Mark(1)
 			enc, err = s.db.snap.Storage(s.addrHash, crypto.Keccak256Hash(key.Bytes()))
 			if metrics.EnabledExpensive {
 				s.db.SnapshotStorageReads += time.Since(start)
