@@ -745,7 +745,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 			accountNum := s.cacheAmongBlocks.GetAccountsNum()
 			log.Info("the account num of cacheAmongBlocks is", "account num", accountNum)
 			acc, existInCache = s.cacheAmongBlocks.GetAccount(crypto.HashData(s.hasher, addr.Bytes()))
-			if acc == nil {
+			if existInCache && acc == nil {
 				return nil
 			}
 		}
@@ -759,21 +759,33 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 				if acc == nil {
 					return nil
 				}
+				data = &types.StateAccount{
+					Nonce:    acc.Nonce,
+					Balance:  acc.Balance,
+					CodeHash: acc.CodeHash,
+					Root:     common.BytesToHash(acc.Root),
+				}
+				if len(data.CodeHash) == 0 {
+					data.CodeHash = types.EmptyCodeHash.Bytes()
+				}
+				if data.Root == (common.Hash{}) {
+					data.Root = types.EmptyRootHash
+				}
+			}
+		} else {
+			data = &types.StateAccount{
+				Nonce:    acc.Nonce,
+				Balance:  acc.Balance,
+				CodeHash: acc.CodeHash,
+				Root:     common.BytesToHash(acc.Root),
+			}
+			if len(data.CodeHash) == 0 {
+				data.CodeHash = types.EmptyCodeHash.Bytes()
+			}
+			if data.Root == (common.Hash{}) {
+				data.Root = types.EmptyRootHash
 			}
 		}
-		data = &types.StateAccount{
-			Nonce:    acc.Nonce,
-			Balance:  acc.Balance,
-			CodeHash: acc.CodeHash,
-			Root:     common.BytesToHash(acc.Root),
-		}
-		if len(data.CodeHash) == 0 {
-			data.CodeHash = types.EmptyCodeHash.Bytes()
-		}
-		if data.Root == (common.Hash{}) {
-			data.Root = types.EmptyRootHash
-		}
-
 	}
 
 	// If snapshot unavailable or reading from it failed, load from the database
