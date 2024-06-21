@@ -740,7 +740,9 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() != types.EmptyRootHash {
 			acc, existInCache = s.cacheAmongBlocks.GetAccount(crypto.HashData(s.hasher, addr.Bytes()))
 			if existInCache {
-				log.Info("the account exist in cache is nil")
+				log.Info("the account exist in cache")
+			} else {
+				log.Info("the account not exist in cache")
 			}
 			if existInCache && acc == nil {
 				return nil
@@ -1827,12 +1829,11 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 			}
 		}
 	}
-	/*
-		log.Info(" SnapToDiffLayer info", "account num", len(s.accounts), ""+
-			"storage num", len(s.storages))
-		accountNum := s.cacheAmongBlocks.GetAccountsNum()
-		log.Info("the account num of cacheAmongBlocks is", "account num", accountNum)
-	*/
+
+	log.Info(" SnapToDiffLayer info",
+		"account num of cacheAmongBlocks is", s.cacheAmongBlocks.GetAccountsNum(),
+		"storage num of cacheAmongBlocks is", s.cacheAmongBlocks.GetStorageNum())
+
 	storages := make([]types.DiffStorage, 0, len(s.storages))
 	for accountHash, storage := range s.storages {
 		keys := make([]common.Hash, 0, len(storage))
