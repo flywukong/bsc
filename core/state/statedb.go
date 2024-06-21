@@ -746,6 +746,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 			log.Info("the account num of cacheAmongBlocks is", "account num", accountNum)
 			acc, existInCache = s.cacheAmongBlocks.GetAccount(crypto.HashData(s.hasher, addr.Bytes()))
 			if existInCache && acc == nil {
+				log.Info("the account exist in cache is nil")
 				return nil
 			}
 		}
@@ -773,6 +774,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 				}
 			}
 		} else {
+			log.Info("the account exist in cache ")
 			data = &types.StateAccount{
 				Nonce:    acc.Nonce,
 				Balance:  acc.Balance,
@@ -1814,7 +1816,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 }
 
 func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []types.DiffStorage) {
-	s.cacheAmongBlocks.Purge()
+	//	s.cacheAmongBlocks.Purge()
 	destructs := make([]common.Address, 0, len(s.stateObjectsDestruct))
 	for account := range s.stateObjectsDestruct {
 		destructs = append(destructs, account)
