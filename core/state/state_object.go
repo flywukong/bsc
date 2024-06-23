@@ -237,10 +237,11 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 			enc, existInCache = s.db.cacheAmongBlocks.GetStorage(s.addrHash.String() + crypto.Keccak256Hash(key.Bytes()).String())
 			if existInCache {
 				SnapshotBlockCacheStorageHitMeter.Mark(1)
+			} else {
+				SnapshotBlockCacheStorageMissMeter.Mark(1)
 			}
 		}
 		if !existInCache {
-			SnapshotBlockCacheStorageMissMeter.Mark(1)
 			enc, err = s.db.snap.Storage(s.addrHash, crypto.Keccak256Hash(key.Bytes()))
 			if metrics.EnabledExpensive {
 				s.db.SnapshotStorageReads += time.Since(start)

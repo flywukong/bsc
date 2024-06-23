@@ -56,7 +56,7 @@ func NewCacheAmongBlocks() *CacheAmongBlocks {
 	return &CacheAmongBlocks{
 		cacheRoot:     types.EmptyRootHash,
 		accountsCache: lru.NewCache[common.Hash, *types.SlimAccount](10000),
-		storagesCache: lru.NewCache[string, []byte](200000),
+		storagesCache: lru.NewCache[string, []byte](250000),
 		// accountsCache: fastcache.New(10000),
 		// storagesCache: fastcache.New(10000),
 	}
