@@ -1788,6 +1788,9 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 		root = types.EmptyRootHash
 	}
 
+	if root != s.expectedRoot {
+		log.Warn("compare root not same", "state root", root, "expected root", s.expectedRoot)
+	}
 	if s.cacheAmongBlocks != nil {
 		s.cacheAmongBlocks.SetRoot(root)
 	}
@@ -1807,7 +1810,12 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 	for account := range s.stateObjectsDestruct {
 		destructs = append(destructs, account)
 		if s.cacheAmongBlocks != nil {
-			s.cacheAmongBlocks.SetAccount(crypto.HashData(s.hasher, account.Bytes()), nil)
+			obj, exist := s.stateObjects[account]
+			if !exist {
+				s.cacheAmongBlocks.SetAccount(crypto.Keccak256Hash(account.Bytes()), nil)
+			} else {
+				s.cacheAmongBlocks.SetAccount(obj.addrHash, nil)
+			}
 		}
 	}
 	accounts := make([]types.DiffAccount, 0, len(s.accounts))
