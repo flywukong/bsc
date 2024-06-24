@@ -737,7 +737,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 		existInCache := false
 		var acc *types.SlimAccount
 		// Try to get from cache among blocks if root is not nil
-		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() != types.EmptyRootHash {
+		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() == s.stateRoot {
 			acc, existInCache = s.cacheAmongBlocks.GetAccount(crypto.HashData(s.hasher, addr.Bytes()))
 			if existInCache {
 				SnapshotBlockCacheAccountHitMeter.Mark(1)
@@ -1739,7 +1739,6 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 				if parent := s.snap.Root(); parent != s.expectedRoot {
 					log.Warn("try to update snapshot tree", "parent", parent, "expect root", s.expectedRoot)
 					err := s.snaps.Update(s.expectedRoot, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages, verified)
-
 					if err != nil {
 						log.Warn("Failed to update snapshot tree", "from", parent, "to", s.expectedRoot, "err", err)
 					}
@@ -1790,7 +1789,6 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 	}
 
 	if s.cacheAmongBlocks != nil {
-		log.Info("cache set root ", "root", root)
 		s.cacheAmongBlocks.SetRoot(root)
 	}
 
