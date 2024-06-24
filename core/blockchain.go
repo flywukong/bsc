@@ -32,6 +32,7 @@ import (
 	exlru "github.com/hashicorp/golang-lru"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/ethereum/go-ethereum/badblock"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/common/mclock"
@@ -247,6 +248,7 @@ type BlockChain struct {
 	chainConfig *params.ChainConfig // Chain & network configuration
 	cacheConfig *CacheConfig        // Cache configuration for pruning
 
+	hasBadBlock   bool
 	db            ethdb.Database                   // Low level persistent database to store final content in
 	snaps         *snapshot.Tree                   // Snapshot tree for fast trie leaf access
 	triegc        *prque.Prque[int64, common.Hash] // Priority queue mapping block numbers to tries to gc
@@ -3080,6 +3082,7 @@ func (bc *BlockChain) isCachedBadBlock(block *types.Block) bool {
 // bad block need not save receipts & sidecars.
 func (bc *BlockChain) reportBlock(block *types.Block, receipts types.Receipts, err error) {
 	rawdb.WriteBadBlock(bc.db, block)
+	badblock.SetBadBlock()
 	log.Error(summarizeBadBlock(block, receipts, bc.Config(), err))
 }
 
