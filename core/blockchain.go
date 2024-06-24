@@ -2248,6 +2248,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				"cache root", bc.cacheAmongBlocks.GetRoot())
 			bc.cacheAmongBlocks = state.NewCacheAmongBlocks()
 		}
+		log.Info("new state db with cache", "cache root", bc.cacheAmongBlocks.GetRoot())
 		statedb, err := state.NewWithCacheAmongBlocks(parent.Root, bc.stateCache, bc.snaps, bc.cacheAmongBlocks)
 		if err != nil {
 			return it.index, err

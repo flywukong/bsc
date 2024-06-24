@@ -1790,6 +1790,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 	}
 
 	if s.cacheAmongBlocks != nil {
+		log.Info("cache set root ", "root", root)
 		s.cacheAmongBlocks.SetRoot(root)
 	}
 
