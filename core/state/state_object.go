@@ -239,33 +239,31 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 			enc, existInCache = s.db.cacheAmongBlocks.GetStorage(s.addrHash.String() + crypto.Keccak256Hash(key.Bytes()).String())
 			if existInCache {
 				SnapshotBlockCacheStorageHitMeter.Mark(1)
+				if badblock.HasBadBlock() {
+					log.Info("check bad block info")
+					storageKey := crypto.Keccak256Hash(key.Bytes())
+					enc2, err2 := s.db.snap.Storage(s.addrHash, storageKey)
+					if !existInCache {
+						log.Error("no cache in cache among blocks")
+					}
+					if err2 != nil {
+						log.Error("compare read err", "err", err2, "account", s.addrHash,
+							"key", storageKey, "enc1", common.Bytes2Hex(enc))
+					}
+					if len(enc) == 0 && len(enc2) != 0 {
+						log.Error("compare cache and difflayer not same", "enc", "account", s.addrHash,
+							"key", storageKey, "enc1", "nil", "enc2", common.Bytes2Hex(enc2))
+					} else if len(enc) != 0 && len(enc2) == 0 {
+						log.Error("compare cache and difflayer not same", "enc", "account", s.addrHash,
+							"key", storageKey, "enc1", common.Bytes2Hex(enc), "enc2", "nil")
+					} else if bytes.Compare(enc, enc2) != 0 {
+						log.Error("compare cache and difflayer not same", "account", s.addrHash,
+							"key", storageKey, "enc1", common.Bytes2Hex(enc),
+							"enc2", common.Bytes2Hex(enc2), "enc1 str", string(enc), "enc2 str", string(enc2))
+					}
+				}
 			} else {
 				SnapshotBlockCacheStorageMissMeter.Mark(1)
-			}
-			if badblock.HasBadBlock() {
-				log.Info("check bad block info")
-				storageKey := crypto.Keccak256Hash(key.Bytes())
-				enc2, err2 := s.db.snap.Storage(s.addrHash, storageKey)
-				if !existInCache {
-					log.Error("no cache in cache among blocks")
-				}
-				if err2 != nil {
-					log.Error("compare read err", "err", err2)
-				}
-				if len(enc) == 0 && len(enc2) != 0 {
-					log.Error("compare cache and difflayer not same", "enc", "account", s.addrHash,
-						"key", storageKey, "enc1", "nil", "enc2", common.Bytes2Hex(enc2))
-				} else if len(enc) != 0 && len(enc2) == 0 {
-					log.Error("compare cache and difflayer not same", "enc", "account", s.addrHash,
-						"key", storageKey, "enc1", common.Bytes2Hex(enc), "enc2", "nil")
-				}
-
-				if bytes.Compare(enc, enc2) != 0 {
-					log.Error("compare cache and difflayer not same", "account", s.addrHash,
-						"key", storageKey, "enc1", common.Bytes2Hex(enc),
-						"enc2", common.Bytes2Hex(enc2), "enc1 str", string(enc), "enc2 str", string(enc2))
-				}
-
 			}
 
 		}
