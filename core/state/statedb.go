@@ -740,9 +740,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 
 		existInCache := false
 		var acc *types.SlimAccount
-		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() != s.originalRoot {
-			log.Error("root not right")
-		}
+
 		// Try to get from cache among blocks if root is not nil
 		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() == s.originalRoot {
 			accounthash := crypto.HashData(s.hasher, addr.Bytes())
@@ -1770,7 +1768,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 				diffLayer.Destructs, diffLayer.Accounts, diffLayer.Storages = s.SnapToDiffLayer()
 				// Only update if there's a state transition (skip empty Clique blocks)
 				if parent := s.snap.Root(); parent != s.expectedRoot {
-					log.Warn("try to update snapshot tree", "parent", parent, "expect root", s.expectedRoot)
+					//	log.Warn("try to update snapshot tree", "parent", parent, "expect root", s.expectedRoot)
 					err := s.snaps.Update(s.expectedRoot, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages, verified)
 					if err != nil {
 						log.Warn("Failed to update snapshot tree", "from", parent, "to", s.expectedRoot, "err", err)
@@ -1868,9 +1866,9 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 		}
 	}
 
-	log.Info(" SnapToDiffLayer info",
-		"account num of cacheAmongBlocks is", s.cacheAmongBlocks.GetAccountsNum(),
-		"storage num of cacheAmongBlocks is", s.cacheAmongBlocks.GetStorageNum())
+	//	log.Info(" SnapToDiffLayer info",
+	//		"account num of cacheAmongBlocks is", s.cacheAmongBlocks.GetAccountsNum(),
+	//		"storage num of cacheAmongBlocks is", s.cacheAmongBlocks.GetStorageNum())
 
 	storages := make([]types.DiffStorage, 0, len(s.storages))
 	for accountHash, storage := range s.storages {
