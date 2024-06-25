@@ -745,7 +745,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 			log.Info("compare root", "cache root", s.cacheAmongBlocks.GetRoot(),
 				"state root", s.stateRoot, "expect root", s.expectedRoot, "origin root", s.originalRoot)
 		}
-		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() != types.EmptyRootHash {
+		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() == s.originalRoot {
 			accounthash := crypto.HashData(s.hasher, addr.Bytes())
 			acc, existInCache = s.cacheAmongBlocks.GetAccount(accounthash)
 			if existInCache {
