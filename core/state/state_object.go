@@ -230,15 +230,14 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		err   error
 		value common.Hash
 	)
-
-	badblock.SetBadBlock()
+	
 	if s.db.snap != nil {
 		start := time.Now()
 		existInCache := false
 		// Try to get from cache among blocks if root is not nil
 		if s.db.cacheAmongBlocks != nil {
 			log.Info("compare root", "cache root", s.db.cacheAmongBlocks.GetRoot(),
-				"state root", s.db.stateRoot)
+				"state root", s.db.stateRoot, "expect root", s.db.expectedRoot)
 		}
 		if s.db.cacheAmongBlocks != nil && s.db.cacheAmongBlocks.GetRoot() != types.EmptyRootHash {
 			enc, existInCache = s.db.cacheAmongBlocks.GetStorage(s.addrHash.String() + crypto.Keccak256Hash(key.Bytes()).String())

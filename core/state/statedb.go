@@ -743,7 +743,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 		// Try to get from cache among blocks if root is not nil
 		if s.cacheAmongBlocks != nil {
 			log.Info("compare root", "cache root", s.cacheAmongBlocks.GetRoot(),
-				"state root", s.stateRoot)
+				"state root", s.stateRoot, "expect root", s.expectedRoot)
 		}
 		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() != types.EmptyRootHash {
 			accounthash := crypto.HashData(s.hasher, addr.Bytes())
@@ -757,17 +757,17 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 					if err2 == nil {
 						if acc == nil && acc2 != nil {
 							log.Info("compare cache and difflayer not same", "account", acc,
-								"acc", "nil", "acc2 info", acc2.Balance, "code", acc2.CodeHash, "root", acc2.Root,
+								"acc", "nil", "acc2 info", acc2.Balance, "code", common.Bytes2Hex(acc2.CodeHash), "root", acc2.Root,
 								"Nonce", acc2.Nonce)
 						} else if acc2 == nil && acc != nil {
 							log.Info("compare cache and difflayer not same", "account", acc,
-								"acc1 info", acc.Balance, "code", acc.CodeHash, "root", acc.Root,
+								"acc1 info", acc.Balance, "code", common.Bytes2Hex(acc.CodeHash), "root", acc.Root,
 								"Nonce", acc.Nonce, "acc2", "nil")
-						} else if acc.Balance != acc2.Balance || string(acc.CodeHash) != string(acc2.CodeHash) ||
+						} else if acc2 != nil && acc != nil && acc.Balance != acc2.Balance || string(acc.CodeHash) != string(acc2.CodeHash) ||
 							acc.Nonce != acc2.Nonce || string(acc.Root) != string(acc2.Root) {
 							log.Info("compare cache and difflayer not same", "account", acc,
-								"acc1 info", acc.Balance, "code", acc.CodeHash, "root", acc.Root,
-								"Nonce", acc.Nonce, "acc2 info", acc2.Balance, "code", acc2.CodeHash, "root", acc2.Root,
+								"acc1 info", acc.Balance, "code", common.Bytes2Hex(acc.CodeHash), "root", acc.Root,
+								"Nonce", acc.Nonce, "acc2 info", acc2.Balance, "code", common.Bytes2Hex(acc2.CodeHash), "root", acc2.Root,
 								"Nonce", acc2.Nonce)
 						}
 					} else {
