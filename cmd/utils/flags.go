@@ -2404,6 +2404,7 @@ func MakeChainDatabase(ctx *cli.Context, stack *node.Node, readonly, disableFree
 		chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", cache, handles, ctx.String(AncientFlag.Name), "", readonly, disableFreeze, false, false)
 		// set the separate state database
 		if stack.CheckIfMultiDataBase() && err == nil {
+			log.Info("NewDatabase WithFreezer 14")
 			stateDiskDb := MakeStateDataBase(ctx, stack, readonly, false)
 			chainDb.SetStateStore(stateDiskDb)
 			blockDb := MakeBlockDatabase(ctx, stack, readonly, false)

@@ -914,8 +914,10 @@ func (n *Node) CheckIfMultiDataBase() bool {
 	}
 
 	if stateExist && blockExist {
+		log.Info("NewDatabase WithFreezer 12")
 		return true
 	} else if !stateExist && !blockExist {
+		log.Info("NewDatabase WithFreezer 13")
 		return false
 	} else {
 		panic("data corruption! missing block or state dir.")
