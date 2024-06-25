@@ -231,6 +231,7 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		value common.Hash
 	)
 
+	badblock.SetBadBlock()
 	if s.db.snap != nil {
 		start := time.Now()
 		existInCache := false
