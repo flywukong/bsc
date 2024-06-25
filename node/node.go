@@ -900,11 +900,13 @@ func (n *Node) CheckIfMultiDataBase() bool {
 		blockExist = true
 	)
 
+	log.Info("NewDatabase WithFreezer 00")
 	separateStateDir := filepath.Join(n.ResolvePath("chaindata"), "state")
 	fileInfo, stateErr := os.Stat(separateStateDir)
 	if os.IsNotExist(stateErr) || !fileInfo.IsDir() {
 		stateExist = false
 	}
+	log.Info("NewDatabase WithFreezer 11")
 	separateBlockDir := filepath.Join(n.ResolvePath("chaindata"), "block")
 	blockFileInfo, blockErr := os.Stat(separateBlockDir)
 	if os.IsNotExist(blockErr) || !blockFileInfo.IsDir() {
