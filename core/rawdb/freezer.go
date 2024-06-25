@@ -98,6 +98,7 @@ func NewFreezer(datadir string, namespace string, readonly bool, offset uint64, 
 		writeMeter = metrics.NewRegisteredMeter(namespace+"ancient/write", nil)
 		sizeGauge  = metrics.NewRegisteredGauge(namespace+"ancient/size", nil)
 	)
+	log.Info("NewDatabase WithFreezer3")
 	// Ensure the datadir is not a symbolic link if it exists.
 	if info, err := os.Lstat(datadir); !os.IsNotExist(err) {
 		if info.Mode()&os.ModeSymlink != 0 {

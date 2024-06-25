@@ -185,6 +185,7 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 	// Because the freezer can only be opened once at the same time, this
 	// mechanism also ensures that at most one **non-readOnly** database
 	// is opened at the same time to prevent accidental mutation.
+	log.Info("NewDatabase WithFreezer4")
 	if ancient, err := diskdb.AncientDatadir(); err == nil && ancient != "" && !db.readOnly && !config.NoTries {
 		offset := uint64(0) // differ from in block data, only metadata is used in state data
 		freezer, err := rawdb.NewStateFreezer(ancient, false, offset)
