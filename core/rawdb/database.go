@@ -438,6 +438,7 @@ func NewEmptyFreezeDB(db ethdb.KeyValueStore) ethdb.Database {
 // NewFreezerDb only create a freezer without statedb.
 func NewFreezerDb(db ethdb.KeyValueStore, frz, namespace string, readonly bool, newOffSet uint64) (*Freezer, error) {
 	// Create the idle freezer instance, this operation should be atomic to avoid mismatch between offset and acientDB.
+	log.Info("NewDatabase WithFreezer 26")
 	frdb, err := NewFreezer(frz, namespace, readonly, newOffSet, freezerTableSize, chainFreezerNoSnappy)
 	if err != nil {
 		return nil, err
@@ -897,14 +898,17 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 
 	var trieIter ethdb.Iterator
 	var blockIter ethdb.Iterator
+	log.Info("NewDatabase WithFreezer 17")
 	if db.StateStore() != nil {
 		trieIter = db.StateStore().NewIterator(keyPrefix, nil)
 		defer trieIter.Release()
 	}
+	log.Info("NewDatabase WithFreezer 18")
 	if db.HasSeparateBlockStore() {
 		blockIter = db.BlockStore().NewIterator(keyPrefix, nil)
 		defer blockIter.Release()
 	}
+	log.Info("NewDatabase WithFreezer 19")
 	var (
 		count  int64
 		start  = time.Now()
@@ -1024,6 +1028,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			logged = time.Now()
 		}
 	}
+	log.Info("NewDatabase WithFreezer 20")
 	// inspect separate trie db
 	if trieIter != nil {
 		count = 0
@@ -1067,6 +1072,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		}
 		log.Info("Inspecting separate state database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
 	}
+	log.Info("NewDatabase WithFreezer 21")
 	// inspect separate block db
 	if blockIter != nil {
 		count = 0
@@ -1139,6 +1145,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		{"Light client", "Bloom trie nodes", bloomTrieNodes.Size(), bloomTrieNodes.Count()},
 	}
 	// Inspect all registered append-only file store then.
+	log.Info("NewDatabase WithFreezer 20")
 	ancients, err := inspectFreezers(db.BlockStore())
 	if err != nil {
 		return err

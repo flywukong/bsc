@@ -98,12 +98,14 @@ func inspectFreezers(db ethdb.Database) ([]freezerInfo, error) {
 			if err != nil {
 				return nil, err
 			}
+			log.Info("NewDatabase WithFreezer 21")
 			f, err := NewStateFreezer(datadir, true, 0)
 			if err != nil {
 				return nil, err
 			}
 			defer f.Close()
 
+			log.Info("NewDatabase WithFreezer 22")
 			info, err := inspect(StateFreezerName, stateFreezerNoSnappy, f)
 			if err != nil {
 				return nil, err

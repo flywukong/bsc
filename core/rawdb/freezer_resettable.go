@@ -52,6 +52,7 @@ func NewResettableFreezer(datadir string, namespace string, readonly bool, offse
 	if err := cleanup(datadir); err != nil {
 		return nil, err
 	}
+	log.Info("NewDatabase WithFreezer 24")
 	opener := func() (*Freezer, error) {
 		return NewFreezer(datadir, namespace, readonly, offset, maxTableSize, tables)
 	}

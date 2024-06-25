@@ -82,6 +82,7 @@ type Freezer struct {
 // NewChainFreezer is a small utility method around NewFreezer that sets the
 // default parameters for the chain storage.
 func NewChainFreezer(datadir string, namespace string, readonly bool, offset uint64) (*Freezer, error) {
+	log.Info("NewDatabase WithFreezer 25")
 	return NewFreezer(datadir, namespace, readonly, offset, freezerTableSize, chainFreezerNoSnappy)
 }
 
