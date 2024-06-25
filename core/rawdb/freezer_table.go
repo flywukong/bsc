@@ -148,6 +148,7 @@ func newTable(path string, name string, readMeter metrics.Meter, writeMeter metr
 	)
 	if readonly {
 		// Will fail if table doesn't exist
+		log.Info("NewDatabase WithFreezer35")
 		index, err = openFreezerFileForReadOnly(filepath.Join(path, idxName))
 		if err != nil {
 			return nil, err

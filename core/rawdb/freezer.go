@@ -111,6 +111,7 @@ func NewFreezer(datadir string, namespace string, readonly bool, offset uint64, 
 	if err := os.MkdirAll(filepath.Dir(flockFile), 0755); err != nil {
 		return nil, err
 	}
+	log.Info("NewDatabase WithFreezer30")
 	// Leveldb uses LOCK as the filelock filename. To prevent the
 	// name collision, we use FLOCK as the lock name.
 	lock := flock.New(flockFile)
@@ -123,6 +124,7 @@ func NewFreezer(datadir string, namespace string, readonly bool, offset uint64, 
 	} else if !locked {
 		return nil, errors.New("locking failed")
 	}
+	log.Info("NewDatabase WithFreezer31")
 	// Open all the supported data tables
 	freezer := &Freezer{
 		readonly:     readonly,
@@ -138,8 +140,10 @@ func NewFreezer(datadir string, namespace string, readonly bool, offset uint64, 
 			err   error
 		)
 		if slices.Contains(additionTables, name) {
+			log.Info("NewDatabase WithFreezer32")
 			table, err = openAdditionTable(datadir, name, readMeter, writeMeter, sizeGauge, maxTableSize, disableSnappy, readonly)
 		} else {
+			log.Info("NewDatabase WithFreezer33")
 			table, err = newTable(datadir, name, readMeter, writeMeter, sizeGauge, maxTableSize, disableSnappy, readonly)
 		}
 		if err != nil {
