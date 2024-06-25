@@ -239,10 +239,12 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 			log.Info("compare root", "cache root", s.db.cacheAmongBlocks.GetRoot(),
 				"state root", s.db.stateRoot, "expect root", s.db.expectedRoot, "origin root", s.db.originalRoot)
 		}
+		if s.db.cacheAmongBlocks != nil && s.db.cacheAmongBlocks.GetRoot() != s.db.originalRoot {
+			panic("root not right")
+		}
 		if s.db.cacheAmongBlocks != nil && s.db.cacheAmongBlocks.GetRoot() == s.db.originalRoot {
 			enc, existInCache = s.db.cacheAmongBlocks.GetStorage(s.addrHash.String() + crypto.Keccak256Hash(key.Bytes()).String())
 			if existInCache {
-				log.Info("exist in cache")
 				SnapshotBlockCacheStorageHitMeter.Mark(1)
 				if badblock.HasBadBlock() {
 					log.Info("check bad block info")
