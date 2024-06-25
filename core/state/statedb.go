@@ -745,7 +745,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 				"state root", s.stateRoot, "expect root", s.expectedRoot, "origin root", s.originalRoot)
 		}
 		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() != s.originalRoot {
-			panic("root not right")
+			log.Error("root not right")
 		}
 		// Try to get from cache among blocks if root is not nil
 		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() == s.originalRoot {

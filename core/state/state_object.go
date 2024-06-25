@@ -240,7 +240,7 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 				"state root", s.db.stateRoot, "expect root", s.db.expectedRoot, "origin root", s.db.originalRoot)
 		}
 		if s.db.cacheAmongBlocks != nil && s.db.cacheAmongBlocks.GetRoot() != s.db.originalRoot {
-			panic("root not right")
+			log.Error("root not right")
 		}
 		if s.db.cacheAmongBlocks != nil && s.db.cacheAmongBlocks.GetRoot() == s.db.originalRoot {
 			enc, existInCache = s.db.cacheAmongBlocks.GetStorage(s.addrHash.String() + crypto.Keccak256Hash(key.Bytes()).String())
