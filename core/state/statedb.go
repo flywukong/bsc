@@ -744,8 +744,10 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 		// Try to get from cache among blocks if root is not nil
 		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() == s.originalRoot {
 			accounthash := crypto.HashData(s.hasher, addr.Bytes())
+			start1 := time.Now()
 			acc, existInCache = s.cacheAmongBlocks.GetAccount(accounthash)
 			if existInCache {
+				BlockCacheAccountTimer.Update(time.Since(start1))
 				SnapshotBlockCacheAccountHitMeter.Mark(1)
 				if badblock.HasBadBlock() {
 					log.Info("check bad block info")
