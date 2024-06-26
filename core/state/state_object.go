@@ -251,10 +251,10 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 							"key", storageKey, "enc1", common.Bytes2Hex(enc))
 					}
 					if len(enc) == 0 && len(enc2) != 0 {
-						log.Error("compare cache and difflayer not same", "enc", "account", s.addrHash,
+						log.Error("compare cache and difflayer not same", "account", s.addrHash,
 							"key", storageKey, "enc1", "nil", "enc2", common.Bytes2Hex(enc2))
 					} else if len(enc) != 0 && len(enc2) == 0 {
-						log.Error("compare cache and difflayer not same", "enc", "account", s.addrHash,
+						log.Error("compare cache and difflayer not same", "account", s.addrHash,
 							"key", storageKey, "enc1", common.Bytes2Hex(enc), "enc2", "nil")
 					} else if bytes.Compare(enc, enc2) != 0 {
 						log.Error("compare cache and difflayer not same", "account", s.addrHash,
