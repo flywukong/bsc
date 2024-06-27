@@ -407,7 +407,6 @@ func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	}
 	hit := dl.diffed.ContainsHash(storageBloomHash(accountHash, storageHash))
 	if !hit {
-		log.Info("bloom filter miss1", "account ", accountHash, "storage hash", storageHash)
 		hit = dl.diffed.ContainsHash(destructBloomHash(accountHash))
 		if !hit {
 			log.Info("bloom filter miss2", "account ", accountHash, "storage hash", storageHash)
@@ -423,7 +422,6 @@ func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	// diff layers, reach straight into the bottom persistent disk layer
 	if origin != nil {
 		snapshotBloomStorageMissMeter.Mark(1)
-		log.Info("bloom filter miss", "account ", accountHash, "storage hash", storageHash)
 		return origin.Storage(accountHash, storageHash)
 	}
 	// The bloom filter hit, start poking in the internal maps
