@@ -239,6 +239,14 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 			start1 := time.Now()
 			enc, existInCache = s.db.cacheAmongBlocks.GetStorage(s.addrHash.String() + crypto.Keccak256Hash(key.Bytes()).String())
 			if existInCache {
+				acc, exist := s.db.cacheAmongBlocks.GetAccount(s.addrHash)
+				if exist == true {
+					if acc == nil {
+						log.Info("account is nil when storage hit", "account", s.addrHash, "enc", common.Bytes2Hex(enc))
+					}
+				} else {
+					log.Info("account is not exist when storage hit", "account", s.addrHash, "enc", common.Bytes2Hex(enc))
+				}
 				SnapshotBlockCacheStorageHitMeter.Mark(1)
 				BlockCacheStorageTimer.Update(time.Since(start1))
 				if badblock.HasBadBlock() {

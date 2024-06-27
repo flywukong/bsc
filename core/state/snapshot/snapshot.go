@@ -438,6 +438,7 @@ func (t *Tree) Cap(root common.Hash, layers int) error {
 	if layers == 0 {
 		// If full commit was requested, flatten the diffs and merge onto disk
 		diff.lock.RLock()
+		log.Info("diff layer faltten happen")
 		base := diffToDisk(diff.flatten().(*diffLayer))
 		diff.lock.RUnlock()
 

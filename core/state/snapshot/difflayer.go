@@ -27,6 +27,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"golang.org/x/exp/slices"
@@ -210,6 +211,7 @@ func (dl *diffLayer) rebloom(origin *diskLayer) {
 		parent.lock.RUnlock()
 	} else {
 		dl.diffed, _ = bloomfilter.New(uint64(bloomSize), uint64(bloomFuncs))
+		log.Info("renew bloom filter")
 	}
 	// Iterate over all the accounts and storage slots and index them
 	for hash := range dl.destructSet {
@@ -405,7 +407,11 @@ func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	}
 	hit := dl.diffed.ContainsHash(storageBloomHash(accountHash, storageHash))
 	if !hit {
+		log.Info("bloom filter miss1", "account ", accountHash, "storage hash", storageHash)
 		hit = dl.diffed.ContainsHash(destructBloomHash(accountHash))
+		if !hit {
+			log.Info("bloom filter miss2", "account ", accountHash, "storage hash", storageHash)
+		}
 	}
 	var origin *diskLayer
 	if !hit {
@@ -417,6 +423,7 @@ func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	// diff layers, reach straight into the bottom persistent disk layer
 	if origin != nil {
 		snapshotBloomStorageMissMeter.Mark(1)
+		log.Info("bloom filter miss", "account ", accountHash, "storage hash", storageHash)
 		return origin.Storage(accountHash, storageHash)
 	}
 	// The bloom filter hit, start poking in the internal maps
@@ -443,6 +450,7 @@ func (dl *diffLayer) storage(accountHash, storageHash common.Hash, depth int) ([
 			if n := len(data); n > 0 {
 				snapshotDirtyStorageReadMeter.Mark(int64(n))
 			} else {
+				log.Info("difflayer hit ", "account ", accountHash, "storage hash", storageHash, "data len", 0)
 				snapshotDirtyStorageInexMeter.Mark(1)
 			}
 			snapshotBloomStorageTrueHitMeter.Mark(1)
@@ -452,6 +460,7 @@ func (dl *diffLayer) storage(accountHash, storageHash common.Hash, depth int) ([
 	// If the account is known locally, but deleted, return an empty slot
 	if _, ok := dl.destructSet[accountHash]; ok {
 		snapshotDirtyStorageHitMeter.Mark(1)
+		log.Info("difflayer hit ", "account ", accountHash, "destruct", "true")
 		//snapshotDirtyStorageHitDepthHist.Update(int64(depth))
 		snapshotDirtyStorageInexMeter.Mark(1)
 		snapshotBloomStorageTrueHitMeter.Mark(1)
