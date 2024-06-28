@@ -1847,11 +1847,14 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 		if s.cacheAmongBlocks != nil {
 			obj, exist := s.stateObjects[account]
 			if !exist {
-				s.cacheAmongBlocks.SetAccount(crypto.Keccak256Hash(account.Bytes()), nil)
+				accHash := crypto.Keccak256Hash(account.Bytes())
+				s.cacheAmongBlocks.SetAccount(accHash, nil)
 				log.Info("cache set the destruct as nil", "account", crypto.Keccak256Hash(account.Bytes()))
+				s.cacheAmongBlocks.DelDestruct(accHash)
 			} else {
 				s.cacheAmongBlocks.SetAccount(obj.addrHash, nil)
 				log.Info("cache set the destruct as nil", "account", obj.addrHash)
+				s.cacheAmongBlocks.DelDestruct(obj.addrHash)
 			}
 		}
 	}
@@ -1882,12 +1885,14 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 		keys := make([]common.Hash, 0, len(storage))
 		values := make([][]byte, 0, len(storage))
 		num := 1
+
 		for k, v := range storage {
 			num++
 			keys = append(keys, k)
 			values = append(values, v)
 			if s.cacheAmongBlocks != nil {
-				s.cacheAmongBlocks.SetStorage(accountHash.String()+k.String(), v)
+				//	s.cacheAmongBlocks.SetStorage(accountHash.String()+k.String(), v)
+				s.cacheAmongBlocks.SetStorage2(accountHash, k, v)
 			}
 		}
 		log.Info("add the storage", "arr hash", accountHash, "storagen num", num)

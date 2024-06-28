@@ -5,6 +5,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -43,24 +44,23 @@ func (s *StoragePool) getStorage(address common.Address) *sync.Map {
 
 type CacheAmongBlocks struct {
 	// Cache among blocks
-	cacheRoot     common.Hash
-	aMux          sync.Mutex
-	sMux          sync.Mutex
-	accountsCache *lru.Cache[common.Hash, *types.SlimAccount]
-	storagesCache *lru.Cache[string, []byte]
-	//storagesCache2 *lru.Cache[common.Hash, map[common.Hash][]byte]
+	cacheRoot      common.Hash
+	aMux           sync.Mutex
+	sMux           sync.Mutex
+	accountsCache  *lru.Cache[common.Hash, *types.SlimAccount]
+	storagesCache  *lru.Cache[string, []byte]
+	storagesCache2 *lru.Cache[common.Hash, map[common.Hash][]byte]
 	//accountsCache *fastcache.Cache
 	//storagesCache *fastcache.Cache
 }
 
 func NewCacheAmongBlocks() *CacheAmongBlocks {
 	return &CacheAmongBlocks{
-		cacheRoot:     types.EmptyRootHash,
-		accountsCache: lru.NewCache[common.Hash, *types.SlimAccount](10000),
-		storagesCache: lru.NewCache[string, []byte](250000),
-		//storagesCache2: lru.NewCache[common.Hash, map[common.Hash][]byte](20000),
-		//	storagesCache2: map[string]map[common.Hash],
-		//lru.NewCache[string, []byte](250000),
+		cacheRoot:      types.EmptyRootHash,
+		accountsCache:  lru.NewCache[common.Hash, *types.SlimAccount](10000),
+		storagesCache:  lru.NewCache[string, []byte](250000),
+		storagesCache2: lru.NewCache[common.Hash, map[common.Hash][]byte](20000),
+
 		// accountsCache: fastcache.New(10000),
 		// storagesCache: fastcache.New(10000),
 	}
@@ -97,10 +97,45 @@ func (c *CacheAmongBlocks) GetStorage(key string) ([]byte, bool) {
 	return c.storagesCache.Get(key)
 }
 
+func (c *CacheAmongBlocks) GetStorage2(acc common.Hash, storage common.Hash) ([]byte, bool) {
+	//return c.storagesCache.HasGet(nil, key)
+	if c.storagesCache2.Contains(acc) {
+		cacheMap, _ := c.storagesCache2.Get(acc)
+		innerMap := (map[common.Hash][]byte)(cacheMap)
+		if v, ok := innerMap[storage]; ok {
+			return v, true
+		} else {
+			return nil, false
+		}
+	}
+	return nil, false
+}
+
 func (c *CacheAmongBlocks) SetAccount(key common.Hash, account *types.SlimAccount) {
 	c.accountsCache.Add(key, account)
 }
 
 func (c *CacheAmongBlocks) SetStorage(key string, value []byte) {
 	c.storagesCache.Add(key, value)
+}
+
+func (c *CacheAmongBlocks) SetStorage2(acc common.Hash, storage common.Hash, value []byte) {
+	if c.storagesCache2.Contains(acc) {
+		cacheMap, _ := c.storagesCache2.Get(acc)
+		innerMap := (map[common.Hash][]byte)(cacheMap)
+		innerMap[storage] = value
+		log.Info("change ", "acc", acc, "storage", storage, "vaue", value, "map size", len(innerMap))
+		c.storagesCache2.Add(acc, innerMap)
+	} else {
+		newMap := make(map[common.Hash][]byte)
+		newMap[storage] = value
+		c.storagesCache2.Add(acc, newMap)
+	}
+}
+
+func (c *CacheAmongBlocks) DelDestruct(acc common.Hash) {
+	if c.storagesCache2.Contains(acc) {
+		innerMap := make(map[common.Hash][]byte)
+		c.storagesCache2.Add(acc, innerMap)
+	}
 }

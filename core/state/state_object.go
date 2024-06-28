@@ -244,8 +244,11 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 				}
 			}
 			if exist == false || (exist == true && acc != nil) {
-				enc, existInCache = s.db.cacheAmongBlocks.GetStorage(s.addrHash.String() + crypto.Keccak256Hash(key.Bytes()).String())
+				//	enc, existInCache = s.db.cacheAmongBlocks.GetStorage(s.addrHash.String() + crypto.Keccak256Hash(key.Bytes()).String())
+				enc, existInCache = s.db.cacheAmongBlocks.GetStorage2(s.addrHash,
+					crypto.Keccak256Hash(key.Bytes()))
 				if existInCache {
+					//	log.Error("hit in storage cache")
 					SnapshotBlockCacheStorageHitMeter.Mark(1)
 					BlockCacheStorageTimer.Update(time.Since(start1))
 					if badblock.HasBadBlock() {
