@@ -1848,8 +1848,10 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 			obj, exist := s.stateObjects[account]
 			if !exist {
 				s.cacheAmongBlocks.SetAccount(crypto.Keccak256Hash(account.Bytes()), nil)
+				log.Info("cache set the destruct as nil", "account", crypto.Keccak256Hash(account.Bytes()))
 			} else {
 				s.cacheAmongBlocks.SetAccount(obj.addrHash, nil)
+				log.Info("cache set the destruct as nil", "account", obj.addrHash)
 			}
 		}
 	}
