@@ -408,9 +408,6 @@ func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	hit := dl.diffed.ContainsHash(storageBloomHash(accountHash, storageHash))
 	if !hit {
 		hit = dl.diffed.ContainsHash(destructBloomHash(accountHash))
-		if !hit {
-			log.Info("bloom filter miss2", "account ", accountHash, "storage hash", storageHash)
-		}
 	}
 	var origin *diskLayer
 	if !hit {

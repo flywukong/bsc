@@ -48,6 +48,7 @@ type CacheAmongBlocks struct {
 	sMux          sync.Mutex
 	accountsCache *lru.Cache[common.Hash, *types.SlimAccount]
 	storagesCache *lru.Cache[string, []byte]
+	//storagesCache2 *lru.Cache[common.Hash, map[common.Hash][]byte]
 	//accountsCache *fastcache.Cache
 	//storagesCache *fastcache.Cache
 }
@@ -57,6 +58,9 @@ func NewCacheAmongBlocks() *CacheAmongBlocks {
 		cacheRoot:     types.EmptyRootHash,
 		accountsCache: lru.NewCache[common.Hash, *types.SlimAccount](10000),
 		storagesCache: lru.NewCache[string, []byte](250000),
+		//storagesCache2: lru.NewCache[common.Hash, map[common.Hash][]byte](20000),
+		//	storagesCache2: map[string]map[common.Hash],
+		//lru.NewCache[string, []byte](250000),
 		// accountsCache: fastcache.New(10000),
 		// storagesCache: fastcache.New(10000),
 	}
