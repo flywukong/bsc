@@ -1895,7 +1895,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 				s.cacheAmongBlocks.SetStorage2(accountHash, k, v)
 			}
 		}
-		log.Info("add the storage", "arr hash", accountHash, "storagen num", num)
+		//log.Info("add the storage", "arr hash", accountHash, "storagen num", num)
 		storages = append(storages, types.DiffStorage{
 			Account: accountHash,
 			Keys:    keys,
