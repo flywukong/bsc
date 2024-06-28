@@ -249,7 +249,11 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 					SnapshotBlockCacheStorageHitMeter.Mark(1)
 					BlockCacheStorageTimer.Update(time.Since(start1))
 					if badblock.HasBadBlock() {
-						log.Info("check bad block info")
+						if exist == false {
+							log.Info("check bad block info", "account not exist in cache", 1)
+						} else if exist == true && acc != nil {
+							log.Info("check bad block info", "account is not nil", "nil")
+						}
 						storageKey := crypto.Keccak256Hash(key.Bytes())
 						enc2, err2 := s.db.snap.Storage(s.addrHash, storageKey)
 						if !existInCache {
