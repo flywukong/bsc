@@ -56,10 +56,10 @@ type CacheAmongBlocks struct {
 
 func NewCacheAmongBlocks() *CacheAmongBlocks {
 	return &CacheAmongBlocks{
-		cacheRoot:      types.EmptyRootHash,
-		accountsCache:  lru.NewCache[common.Hash, *types.SlimAccount](10000),
-		storagesCache:  lru.NewCache[string, []byte](250000),
-		storagesCache2: lru.NewCache[common.Hash, map[common.Hash][]byte](10000),
+		cacheRoot:     types.EmptyRootHash,
+		accountsCache: lru.NewCache[common.Hash, *types.SlimAccount](10000),
+		//	storagesCache:  lru.NewCache[string, []byte](250000),
+		storagesCache2: lru.NewCache[common.Hash, map[common.Hash][]byte](8000),
 
 		// accountsCache: fastcache.New(10000),
 		// storagesCache: fastcache.New(10000),
