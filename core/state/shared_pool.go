@@ -124,7 +124,9 @@ func (c *CacheAmongBlocks) SetStorage2(acc common.Hash, storage common.Hash, val
 		cacheMap, _ := c.storagesCache2.Get(acc)
 		innerMap := (map[common.Hash][]byte)(cacheMap)
 		innerMap[storage] = value
-		log.Info("change ", "acc", acc, "storage", storage, "vaue", value, "map size", len(innerMap))
+		if len(innerMap) > 1000000 {
+			log.Info("change ", "acc", acc, "storage", storage, "vaue", value, "map size", len(innerMap))
+		}
 		c.storagesCache2.Add(acc, innerMap)
 	} else {
 		newMap := make(map[common.Hash][]byte)
@@ -135,7 +137,6 @@ func (c *CacheAmongBlocks) SetStorage2(acc common.Hash, storage common.Hash, val
 
 func (c *CacheAmongBlocks) DelDestruct(acc common.Hash) {
 	if c.storagesCache2.Contains(acc) {
-		innerMap := make(map[common.Hash][]byte)
-		c.storagesCache2.Add(acc, innerMap)
+		c.storagesCache2.Remove(acc)
 	}
 }
