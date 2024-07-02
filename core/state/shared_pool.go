@@ -3,11 +3,10 @@ package state
 import (
 	"sync"
 
+	"github.com/VictoriaMetrics/fastcache"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/log"
-
-	"github.com/ethereum/go-ethereum/common"
 )
 
 // StoragePool is used to store maps of originStorage of stateObjects
@@ -49,7 +48,7 @@ type CacheAmongBlocks struct {
 	sMux           sync.Mutex
 	accountsCache  *lru.Cache[common.Hash, *types.SlimAccount]
 	storagesCache  *lru.Cache[string, []byte]
-	storagesCache2 *lru.Cache[common.Hash, map[common.Hash][]byte]
+	storagesCache2 *lru.Cache[common.Hash, *fastcache.Cache]
 	//accountsCache *fastcache.Cache
 	//storagesCache *fastcache.Cache
 }
@@ -59,9 +58,8 @@ func NewCacheAmongBlocks() *CacheAmongBlocks {
 		cacheRoot:     types.EmptyRootHash,
 		accountsCache: lru.NewCache[common.Hash, *types.SlimAccount](10000),
 		//	storagesCache:  lru.NewCache[string, []byte](250000),
-		storagesCache2: lru.NewCache[common.Hash, map[common.Hash][]byte](8000),
-
-		// accountsCache: fastcache.New(10000),
+		storagesCache2: lru.NewCache[common.Hash, *fastcache.Cache](5000),
+		// accountsCache2: fastcache.New(10000),
 		// storagesCache: fastcache.New(10000),
 	}
 }
@@ -101,11 +99,9 @@ func (c *CacheAmongBlocks) GetStorage2(acc common.Hash, storage common.Hash) ([]
 	//return c.storagesCache.HasGet(nil, key)
 	if c.storagesCache2.Contains(acc) {
 		cacheMap, _ := c.storagesCache2.Get(acc)
-		innerMap := (map[common.Hash][]byte)(cacheMap)
-		if v, ok := innerMap[storage]; ok {
-			return v, true
-		} else {
-			return nil, false
+		innerCache := (*fastcache.Cache)(cacheMap)
+		if blob, found := innerCache.HasGet(nil, storage.Bytes()); found {
+			return blob, true
 		}
 	}
 	return nil, false
@@ -122,15 +118,13 @@ func (c *CacheAmongBlocks) SetStorage(key string, value []byte) {
 func (c *CacheAmongBlocks) SetStorage2(acc common.Hash, storage common.Hash, value []byte) {
 	if c.storagesCache2.Contains(acc) {
 		cacheMap, _ := c.storagesCache2.Get(acc)
-		innerMap := (map[common.Hash][]byte)(cacheMap)
-		innerMap[storage] = value
-		if len(innerMap) > 1000000 {
-			log.Info("change ", "acc", acc, "storage", storage, "vaue", value, "map size", len(innerMap))
-		}
+		innerMap := (*fastcache.Cache)(cacheMap)
+		innerMap.Set(storage.Bytes(), value)
 		c.storagesCache2.Add(acc, innerMap)
 	} else {
-		newMap := make(map[common.Hash][]byte)
-		newMap[storage] = value
+		newMap := fastcache.New(50000)
+		//newMap[storage] = value
+		newMap.Set(storage.Bytes(), value)
 		c.storagesCache2.Add(acc, newMap)
 	}
 }
