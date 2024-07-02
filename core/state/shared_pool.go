@@ -7,6 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 // StoragePool is used to store maps of originStorage of stateObjects
@@ -58,7 +59,7 @@ func NewCacheAmongBlocks() *CacheAmongBlocks {
 		cacheRoot:     types.EmptyRootHash,
 		accountsCache: lru.NewCache[common.Hash, *types.SlimAccount](10000),
 		//	storagesCache:  lru.NewCache[string, []byte](250000),
-		storagesCache2: lru.NewCache[common.Hash, *fastcache.Cache](5000),
+		storagesCache2: lru.NewCache[common.Hash, *fastcache.Cache](2000),
 		// accountsCache2: fastcache.New(10000),
 		// storagesCache: fastcache.New(10000),
 	}
@@ -122,7 +123,7 @@ func (c *CacheAmongBlocks) SetStorage2(acc common.Hash, storage common.Hash, val
 		innerMap.Set(storage.Bytes(), value)
 		c.storagesCache2.Add(acc, innerMap)
 	} else {
-		newMap := fastcache.New(50000)
+		newMap := fastcache.New(10000)
 		//newMap[storage] = value
 		newMap.Set(storage.Bytes(), value)
 		c.storagesCache2.Add(acc, newMap)
@@ -131,6 +132,7 @@ func (c *CacheAmongBlocks) SetStorage2(acc common.Hash, storage common.Hash, val
 
 func (c *CacheAmongBlocks) DelDestruct(acc common.Hash) {
 	if c.storagesCache2.Contains(acc) {
+		log.Info("destruct the CA account")
 		c.storagesCache2.Remove(acc)
 	}
 }
