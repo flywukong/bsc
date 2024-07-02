@@ -41,4 +41,5 @@ var (
 	BlockCacheStorageTimer             = metrics.NewRegisteredResettingTimer("state/cacheblock/storage/timer", nil)
 	SnapshotBlockCacheStorageMissMeter = metrics.NewRegisteredMeter("state/snapshot/cacheblock/storage/miss", nil)
 	SnapshotBlockCacheStorageHitMeter  = metrics.NewRegisteredMeter("state/snapshot/cacheblock/storage/hit", nil)
+	SnapshotBlockCacheStoragePurge     = metrics.NewRegisteredMeter("state/snapshot/cacheblock/storage/purge", nil)
 )

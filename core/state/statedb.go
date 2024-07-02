@@ -1855,6 +1855,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 			}
 			if account != nil && account.Root != types.EmptyRootHash {
 				log.Info("it is CA account", "root", account.Root)
+				SnapshotBlockCacheStoragePurge.Mark(1)
 				s.cacheAmongBlocks.Purge()
 			}
 		}
