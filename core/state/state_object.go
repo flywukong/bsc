@@ -237,48 +237,47 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		// Try to get from cache among blocks if root is not nil
 		if s.db.cacheAmongBlocks != nil && s.db.cacheAmongBlocks.GetRoot() == s.db.originalRoot {
 			start1 := time.Now()
-			acc, exist := s.db.cacheAmongBlocks.GetAccount(s.addrHash)
-			if exist == true {
-				if acc == nil {
-					log.Info("account is nil when storage hit", "account", s.addrHash, "enc", common.Bytes2Hex(enc))
-				}
-			}
-			if exist == false || (exist == true && acc != nil) {
-				enc, existInCache = s.db.cacheAmongBlocks.GetStorage(s.addrHash.String() + crypto.Keccak256Hash(key.Bytes()).String())
-				if existInCache {
-					SnapshotBlockCacheStorageHitMeter.Mark(1)
-					BlockCacheStorageTimer.Update(time.Since(start1))
-					if badblock.HasBadBlock() {
-						if exist == false {
-							log.Info("check bad block info", "account not exist in cache", 1)
-						} else if exist == true && acc != nil {
-							log.Info("check bad block info", "account is not nil", "nil")
-						}
-						storageKey := crypto.Keccak256Hash(key.Bytes())
-						enc2, err2 := s.db.snap.Storage(s.addrHash, storageKey)
-						if !existInCache {
-							log.Error("no cache in cache among blocks")
-						}
-						if err2 != nil {
-							log.Error("compare read err", "err", err2, "account", s.addrHash,
-								"key", storageKey, "enc1", common.Bytes2Hex(enc))
-						}
-						if len(enc) == 0 && len(enc2) != 0 {
-							log.Error("compare cache and difflayer not same", "account", s.addrHash,
-								"key", storageKey, "enc1", "nil", "enc2", common.Bytes2Hex(enc2))
-						} else if len(enc) != 0 && len(enc2) == 0 {
-							log.Error("compare cache and difflayer not same", "account", s.addrHash,
-								"key", storageKey, "enc1", common.Bytes2Hex(enc), "enc2", "nil")
-						} else if bytes.Compare(enc, enc2) != 0 {
-							log.Error("compare cache and difflayer not same", "account", s.addrHash,
-								"key", storageKey, "enc1", common.Bytes2Hex(enc),
-								"enc2", common.Bytes2Hex(enc2), "enc1 str", string(enc), "enc2 str", string(enc2))
+			enc, existInCache = s.db.cacheAmongBlocks.GetStorage(s.addrHash.String() + crypto.Keccak256Hash(key.Bytes()).String())
+			if existInCache {
+				SnapshotBlockCacheStorageHitMeter.Mark(1)
+				BlockCacheStorageTimer.Update(time.Since(start1))
+				if badblock.HasBadBlock() {
+					acc, exist := s.db.cacheAmongBlocks.GetAccount(s.addrHash)
+					if exist == true {
+						if acc == nil {
+							log.Info("account is nil when storage hit", "account", s.addrHash, "enc", common.Bytes2Hex(enc))
 						}
 					}
-				} else {
-					SnapshotBlockCacheStorageMissMeter.Mark(1)
+					if exist == false {
+						log.Info("check bad block info", "account not exist in cache", 1)
+					} else if exist == true && acc != nil {
+						log.Info("check bad block info", "account is not nil", "nil")
+					}
+					storageKey := crypto.Keccak256Hash(key.Bytes())
+					enc2, err2 := s.db.snap.Storage(s.addrHash, storageKey)
+					if !existInCache {
+						log.Error("no cache in cache among blocks")
+					}
+					if err2 != nil {
+						log.Error("compare read err", "err", err2, "account", s.addrHash,
+							"key", storageKey, "enc1", common.Bytes2Hex(enc))
+					}
+					if len(enc) == 0 && len(enc2) != 0 {
+						log.Error("compare cache and difflayer not same", "account", s.addrHash,
+							"key", storageKey, "enc1", "nil", "enc2", common.Bytes2Hex(enc2))
+					} else if len(enc) != 0 && len(enc2) == 0 {
+						log.Error("compare cache and difflayer not same", "account", s.addrHash,
+							"key", storageKey, "enc1", common.Bytes2Hex(enc), "enc2", "nil")
+					} else if bytes.Compare(enc, enc2) != 0 {
+						log.Error("compare cache and difflayer not same", "account", s.addrHash,
+							"key", storageKey, "enc1", common.Bytes2Hex(enc),
+							"enc2", common.Bytes2Hex(enc2), "enc1 str", string(enc), "enc2 str", string(enc2))
+					}
 				}
+			} else {
+				SnapshotBlockCacheStorageMissMeter.Mark(1)
 			}
+
 		}
 
 		if !existInCache {
