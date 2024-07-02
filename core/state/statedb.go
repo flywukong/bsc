@@ -1853,7 +1853,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 				s.cacheAmongBlocks.SetAccount(obj.addrHash, nil)
 				log.Info("cache set the destruct as nil", "account", obj.addrHash)
 			}
-			if account.Root != types.EmptyRootHash {
+			if account != nil && account.Root != types.EmptyRootHash {
 				log.Info("it is CA account", "root", account.Root)
 				s.cacheAmongBlocks.Purge()
 			}
@@ -1886,16 +1886,13 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 	for accountHash, storage := range s.storages {
 		keys := make([]common.Hash, 0, len(storage))
 		values := make([][]byte, 0, len(storage))
-		num := 1
 		for k, v := range storage {
-			num++
 			keys = append(keys, k)
 			values = append(values, v)
 			if s.cacheAmongBlocks != nil {
 				s.cacheAmongBlocks.SetStorage(accountHash.String()+k.String(), v)
 			}
 		}
-		log.Info("add the storage", "arr hash", accountHash, "storagen num", num)
 		storages = append(storages, types.DiffStorage{
 			Account: accountHash,
 			Keys:    keys,
