@@ -59,7 +59,7 @@ func NewCacheAmongBlocks() *CacheAmongBlocks {
 		cacheRoot:     types.EmptyRootHash,
 		accountsCache: lru.NewCache[common.Hash, *types.SlimAccount](10000),
 		//	storagesCache:  lru.NewCache[string, []byte](250000),
-		storagesCache2: lru.NewCache[common.Hash, *fastcache.Cache](200),
+		storagesCache2: lru.NewCache[common.Hash, *fastcache.Cache](30),
 		// accountsCache2: fastcache.New(10000),
 		// storagesCache: fastcache.New(10000),
 	}
@@ -121,6 +121,7 @@ func (c *CacheAmongBlocks) SetStorage2(acc common.Hash, storage common.Hash, val
 		cacheMap, _ := c.storagesCache2.Get(acc)
 		//innerMap := (*fastcache.Cache)(cacheMap)
 		(*fastcache.Cache)(cacheMap).Set(storage.Bytes(), value)
+		log.Info("storage cache size", "size", len(c.storagesCache2.Keys()))
 		//	c.storagesCache2.Add(acc, innerMap)
 	} else {
 		log.Info("add a new fast cache", "account ", acc, "storage ", storage)
