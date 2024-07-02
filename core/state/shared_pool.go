@@ -71,7 +71,7 @@ func (c *CacheAmongBlocks) GetRoot() common.Hash {
 }
 
 func (c *CacheAmongBlocks) Purge() {
-	c.accountsCache.Purge()
+	//	c.accountsCache.Purge()
 	c.storagesCache.Purge()
 }
 

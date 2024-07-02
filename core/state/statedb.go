@@ -1842,18 +1842,23 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 
 func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []types.DiffStorage) {
 	destructs := make([]common.Address, 0, len(s.stateObjectsDestruct))
-	for account := range s.stateObjectsDestruct {
-		destructs = append(destructs, account)
+	for accountHash, account := range s.stateObjectsDestruct {
+		destructs = append(destructs, accountHash)
 		if s.cacheAmongBlocks != nil {
-			obj, exist := s.stateObjects[account]
+			obj, exist := s.stateObjects[accountHash]
 			if !exist {
-				s.cacheAmongBlocks.SetAccount(crypto.Keccak256Hash(account.Bytes()), nil)
-				log.Info("cache set the destruct as nil", "account", crypto.Keccak256Hash(account.Bytes()))
+				s.cacheAmongBlocks.SetAccount(crypto.Keccak256Hash(accountHash.Bytes()), nil)
+				log.Info("cache set the destruct as nil", "account", crypto.Keccak256Hash(accountHash.Bytes()))
 			} else {
 				s.cacheAmongBlocks.SetAccount(obj.addrHash, nil)
 				log.Info("cache set the destruct as nil", "account", obj.addrHash)
 			}
+			if account.Root != types.EmptyRootHash {
+				log.Info("it is CA account", "root", account.Root)
+				s.cacheAmongBlocks.Purge()
+			}
 		}
+
 	}
 
 	accounts := make([]types.DiffAccount, 0, len(s.accounts))
