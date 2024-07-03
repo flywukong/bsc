@@ -759,12 +759,14 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 							log.Info("compare cache and difflayer not same", "account", acc,
 								"acc1 info", acc.Balance, "code", common.Bytes2Hex(acc.CodeHash), "root", acc.Root,
 								"Nonce", acc.Nonce, "acc2", "nil")
-						} else if acc2 != nil && acc != nil && acc.Balance != acc2.Balance || string(acc.CodeHash) != string(acc2.CodeHash) ||
-							acc.Nonce != acc2.Nonce || string(acc.Root) != string(acc2.Root) {
-							log.Info("compare cache and difflayer not same", "account", acc,
-								"acc1 info", acc.Balance, "code", common.Bytes2Hex(acc.CodeHash), "root", acc.Root,
-								"Nonce", acc.Nonce, "acc2 info", acc2.Balance, "code", common.Bytes2Hex(acc2.CodeHash), "root", acc2.Root,
-								"Nonce", acc2.Nonce)
+						} else if acc2 != nil && acc != nil {
+							if *acc.Balance != *acc2.Balance || string(acc.CodeHash) != string(acc2.CodeHash) ||
+								acc.Nonce != acc2.Nonce || string(acc.Root) != string(acc2.Root) {
+								log.Info("compare cache and difflayer not same", "account", acc,
+									"acc1 info", acc.Balance, "code", common.Bytes2Hex(acc.CodeHash), "root", acc.Root,
+									"Nonce", acc.Nonce, "acc2 info", acc2.Balance, "code", common.Bytes2Hex(acc2.CodeHash), "root", acc2.Root,
+									"Nonce", acc2.Nonce)
+							}
 						}
 					} else {
 						log.Error("read compare err", "err", err2, "account", acc,
@@ -1838,17 +1840,25 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 
 func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []types.DiffStorage) {
 	destructs := make([]common.Address, 0, len(s.stateObjectsDestruct))
-	for account := range s.stateObjectsDestruct {
-		destructs = append(destructs, account)
+	for accountHash, account := range s.stateObjectsDestruct {
+		destructs = append(destructs, accountHash)
 		if s.cacheAmongBlocks != nil {
-			obj, exist := s.stateObjects[account]
+			obj, exist := s.stateObjects[accountHash]
 			if !exist {
-				s.cacheAmongBlocks.SetAccount(crypto.Keccak256Hash(account.Bytes()), nil)
+				s.cacheAmongBlocks.SetAccount(crypto.Keccak256Hash(accountHash.Bytes()), nil)
+				log.Info("cache set the destruct as nil", "account", crypto.Keccak256Hash(accountHash.Bytes()))
 			} else {
 				s.cacheAmongBlocks.SetAccount(obj.addrHash, nil)
+				log.Info("cache set the destruct as nil", "account", obj.addrHash)
+			}
+			if account != nil && account.Root != types.EmptyRootHash {
+				log.Info("it is CA account", "root", account.Root, "account hash", accountHash)
+				s.cacheAmongBlocks.Purge()
 			}
 		}
+
 	}
+
 	accounts := make([]types.DiffAccount, 0, len(s.accounts))
 	for accountHash, account := range s.accounts {
 		accounts = append(accounts, types.DiffAccount{
