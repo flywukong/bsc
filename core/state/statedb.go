@@ -1862,15 +1862,22 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 
 	}
 
+	keysize := 0
+	valSize := 0
+	keyNum := 0
 	accounts := make([]types.DiffAccount, 0, len(s.accounts))
 	for accountHash, account := range s.accounts {
 		accounts = append(accounts, types.DiffAccount{
 			Account: accountHash,
 			Blob:    account,
 		})
+
 		if s.cacheAmongBlocks != nil {
+			keyNum++
 			acc := new(types.SlimAccount)
 			if err := rlp.DecodeBytes(account, acc); err == nil {
+				keysize += len(accountHash)
+				valSize += len(account)
 				s.cacheAmongBlocks.SetAccount(accountHash, acc)
 			} else {
 				log.Error("decode account err", "err", err.Error())
@@ -1879,13 +1886,18 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 		}
 	}
 
-	//	log.Info(" SnapToDiffLayer info",
-	//		"account num of cacheAmongBlocks is", s.cacheAmongBlocks.GetAccountsNum(),
-	//		"storage num of cacheAmongBlocks is", s.cacheAmongBlocks.GetStorageNum())
+	if keyNum >= 1 {
+		log.Info("account avg size of cache storage", "key", keysize/keyNum, "value", valSize/keyNum,
+			"total", (keysize+valSize)/keyNum)
+	}
 
-	keysize := 0
-	valSize := 0
-	keyNum := 0
+	log.Info(" SnapToDiffLayer info",
+		"account num of cacheAmongBlocks is", s.cacheAmongBlocks.GetAccountsNum(),
+		"storage num of cacheAmongBlocks is", s.cacheAmongBlocks.GetStorageNum())
+
+	keysize = 0
+	valSize = 0
+	keyNum = 0
 	storages := make([]types.DiffStorage, 0, len(s.storages))
 	for accountHash, storage := range s.storages {
 		keys := make([]common.Hash, 0, len(storage))
@@ -1908,8 +1920,8 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 		})
 	}
 	if keyNum >= 1 {
-		log.Info("avg size of cache storage", "key", keysize/keyNum, "value", valSize/keyNum,
-			"total", keysize+valSize/keyNum)
+		log.Info("storage avg size of cache storage", "key", keysize/keyNum, "value", valSize/keyNum,
+			"total", (keysize+valSize)/keyNum)
 	}
 	return destructs, accounts, storages
 }
