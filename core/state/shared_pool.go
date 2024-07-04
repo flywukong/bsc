@@ -85,12 +85,10 @@ func (c *CacheAmongBlocks) GetAccount(key common.Hash) (*types.SlimAccount, bool
 	//return c.accountsCache.HasGet(nil, key)
 	// return c.accountsCache.Get(key)
 	if blob, found := c.accountsCache.HasGet(nil, key[:]); found {
-		/*
-			if len(blob) == 0 { // can be both nil and []byte{} ?
-				return nil, false
-			}
-		*/
 		log.Info("hit account hash")
+		if len(blob) == 0 { // can be both nil and []byte{}
+			return nil, true
+		}
 		account := new(types.SlimAccount)
 		if err := rlp.DecodeBytes(blob, account); err != nil {
 			panic(err)
