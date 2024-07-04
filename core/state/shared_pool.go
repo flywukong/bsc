@@ -5,6 +5,7 @@ import (
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -83,10 +84,13 @@ func (c *CacheAmongBlocks) SetRoot(root common.Hash) {
 func (c *CacheAmongBlocks) GetAccount(key common.Hash) (*types.SlimAccount, bool) {
 	//return c.accountsCache.HasGet(nil, key)
 	// return c.accountsCache.Get(key)
-	if blob, found := c.accountsCache.HasGet(nil, key.Bytes()); found {
-		if len(blob) == 0 { // can be both nil and []byte{} ?
-			return nil, false
-		}
+	if blob, found := c.accountsCache.HasGet(nil, key[:]); found {
+		/*
+			if len(blob) == 0 { // can be both nil and []byte{} ?
+				return nil, false
+			}
+		*/
+		log.Info("hit account hash")
 		account := new(types.SlimAccount)
 		if err := rlp.DecodeBytes(blob, account); err != nil {
 			panic(err)
@@ -123,7 +127,7 @@ func (c *CacheAmongBlocks) SetAccount(key common.Hash, account *types.SlimAccoun
 */
 
 func (c *CacheAmongBlocks) SetAccount(key common.Hash, account []byte) {
-	c.accountsCache.Set(key.Bytes(), account)
+	c.accountsCache.Set(key[:], account)
 }
 
 func (c *CacheAmongBlocks) SetStorage(accountHash common.Hash, storageKey common.Hash, value []byte) {
