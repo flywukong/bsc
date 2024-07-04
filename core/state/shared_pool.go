@@ -3,8 +3,9 @@ package state
 import (
 	"sync"
 
-	"github.com/ethereum/go-ethereum/common/lru"
+	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/rlp"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -43,26 +44,26 @@ func (s *StoragePool) getStorage(address common.Address) *sync.Map {
 
 type CacheAmongBlocks struct {
 	// Cache among blocks
-	cacheRoot     common.Hash
-	aMux          sync.Mutex
-	sMux          sync.Mutex
-	accountsCache *lru.Cache[common.Hash, *types.SlimAccount]
-	storagesCache *lru.Cache[string, []byte]
+	cacheRoot common.Hash
+	aMux      sync.Mutex
+	sMux      sync.Mutex
+	//accountsCache *lru.Cache[common.Hash, *types.SlimAccount]
+	//storagesCache *lru.Cache[string, []byte]
 	//storagesCache2 *lru.Cache[common.Hash, map[common.Hash][]byte]
-	//accountsCache *fastcache.Cache
-	//storagesCache *fastcache.Cache
+	accountsCache *fastcache.Cache
+	storagesCache *fastcache.Cache
 }
 
 func NewCacheAmongBlocks() *CacheAmongBlocks {
 	return &CacheAmongBlocks{
-		cacheRoot:     types.EmptyRootHash,
-		accountsCache: lru.NewCache[common.Hash, *types.SlimAccount](10000),
-		storagesCache: lru.NewCache[string, []byte](80000),
+		cacheRoot: types.EmptyRootHash,
+		//	accountsCache: lru.NewCache[common.Hash, *types.SlimAccount](10000),
+		//	storagesCache: lru.NewCache[string, []byte](80000),
 		//storagesCache2: lru.NewCache[common.Hash, map[common.Hash][]byte](20000),
 		//	storagesCache2: map[string]map[common.Hash],
 		//lru.NewCache[string, []byte](250000),
-		// accountsCache: fastcache.New(10000),
-		// storagesCache: fastcache.New(10000),
+		accountsCache: fastcache.New(2400000),
+		storagesCache: fastcache.New(28000000),
 	}
 }
 
@@ -72,7 +73,7 @@ func (c *CacheAmongBlocks) GetRoot() common.Hash {
 
 func (c *CacheAmongBlocks) Purge() {
 	//	c.accountsCache.Purge()
-	c.storagesCache.Purge()
+	c.storagesCache.Reset()
 }
 
 func (c *CacheAmongBlocks) SetRoot(root common.Hash) {
@@ -81,26 +82,51 @@ func (c *CacheAmongBlocks) SetRoot(root common.Hash) {
 
 func (c *CacheAmongBlocks) GetAccount(key common.Hash) (*types.SlimAccount, bool) {
 	//return c.accountsCache.HasGet(nil, key)
-	return c.accountsCache.Get(key)
+	// return c.accountsCache.Get(key)
+	if blob, found := c.accountsCache.HasGet(nil, key[:]); found {
+		if len(blob) == 0 { // can be both nil and []byte{} ?
+			return nil, false
+		}
+		account := new(types.SlimAccount)
+		if err := rlp.DecodeBytes(blob, account); err != nil {
+			panic(err)
+			return account, true
+		}
+	}
+	return nil, false
 }
 
-func (c *CacheAmongBlocks) GetAccountsNum() int {
-	return len(c.accountsCache.Keys())
-}
+/*
+	func (c *CacheAmongBlocks) GetAccountsNum() int {
+		return len(c.accountsCache.)
+	}
 
-func (c *CacheAmongBlocks) GetStorageNum() int {
-	return len(c.storagesCache.Keys())
-}
-
-func (c *CacheAmongBlocks) GetStorage(key string) ([]byte, bool) {
+	func (c *CacheAmongBlocks) GetStorageNum() int {
+		return len(c.storagesCache.Keys())
+	}
+*/
+func (c *CacheAmongBlocks) GetStorage(accountHash common.Hash, storageKey common.Hash) ([]byte, bool) {
 	//return c.storagesCache.HasGet(nil, key)
-	return c.storagesCache.Get(key)
+	//	return c.storagesCache.Get(key)
+	key := append(accountHash.Bytes(), storageKey.Bytes()...)
+	if blob, found := c.storagesCache.HasGet(nil, key); found {
+		return blob, true
+	}
+	return nil, false
 }
 
+/*
 func (c *CacheAmongBlocks) SetAccount(key common.Hash, account *types.SlimAccount) {
-	c.accountsCache.Add(key, account)
+	c.accountsCache.Set(key, account)
 }
 
-func (c *CacheAmongBlocks) SetStorage(key string, value []byte) {
-	c.storagesCache.Add(key, value)
+*/
+
+func (c *CacheAmongBlocks) SetAccount(key common.Hash, account []byte) {
+	c.accountsCache.Set(key.Bytes(), account)
+}
+
+func (c *CacheAmongBlocks) SetStorage(accountHash common.Hash, storageKey common.Hash, value []byte) {
+	res := append(accountHash.Bytes(), storageKey.Bytes()...)
+	c.storagesCache.Set(res, value)
 }

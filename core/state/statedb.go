@@ -1874,15 +1874,19 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 
 		if s.cacheAmongBlocks != nil {
 			keyNum++
-			acc := new(types.SlimAccount)
-			if err := rlp.DecodeBytes(account, acc); err == nil {
-				keysize += len(accountHash)
-				valSize += len(account)
-				s.cacheAmongBlocks.SetAccount(accountHash, acc)
-			} else {
-				log.Error("decode account err", "err", err.Error())
-				panic("Shouldn't happen!")
-			}
+			s.cacheAmongBlocks.SetAccount(accountHash, account)
+			/*
+				acc := new(types.SlimAccount)
+				if err := rlp.DecodeBytes(account, acc); err == nil {
+					keysize += len(accountHash)
+					valSize += len(account)
+					s.cacheAmongBlocks.SetAccount(accountHash, acc)
+				} else {
+					log.Error("decode account err", "err", err.Error())
+					panic("Shouldn't happen!")
+				}
+
+			*/
 		}
 	}
 
@@ -1911,7 +1915,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 				cacheKey := accountHash.String() + k.String()
 				keysize += len(cacheKey)
 				valSize += len(v)
-				s.cacheAmongBlocks.SetStorage(cacheKey, v)
+				s.cacheAmongBlocks.SetStorage(accountHash, k, v)
 			}
 		}
 		storages = append(storages, types.DiffStorage{
