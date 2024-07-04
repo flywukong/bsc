@@ -2248,7 +2248,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		if parent.Root != bc.cacheAmongBlocks.GetRoot() {
 			log.Error("root is not same with cache root", "parent root:", parent.Root,
 				"cache root", bc.cacheAmongBlocks.GetRoot())
-			bc.cacheAmongBlocks = state.NewCacheAmongBlocks()
+			bc.cacheAmongBlocks.Reset()
 		}
 		log.Info("new state db with cache", "cache root", bc.cacheAmongBlocks.GetRoot())
 		statedb, err := state.NewWithCacheAmongBlocks(parent.Root, bc.stateCache, bc.snaps, bc.cacheAmongBlocks)

@@ -742,6 +742,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 		var acc *types.SlimAccount
 
 		accounthash := crypto.HashData(s.hasher, addr.Bytes())
+
 		// Try to get from cache among blocks if root is not nil
 		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() == s.originalRoot {
 			start1 := time.Now()
@@ -963,7 +964,7 @@ func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 		snap:  s.snap,
 	}
 
-	// state.cacheAmongBlocks = s.cacheAmongBlocks
+	state.cacheAmongBlocks = s.cacheAmongBlocks
 	// Copy the dirty states, logs, and preimages
 	for addr := range s.journal.dirties {
 		// As documented [here](https://github.com/ethereum/go-ethereum/pull/16485#issuecomment-380438527),
@@ -1828,6 +1829,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 	}
 	if s.cacheAmongBlocks != nil {
 		s.cacheAmongBlocks.SetRoot(root)
+		log.Info("set set new root", "root", root)
 	}
 
 	// Clear all internal flags at the end of commit operation.
@@ -1837,6 +1839,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 	s.storagesOrigin = make(map[common.Address]map[common.Hash][]byte)
 	s.stateObjectsDirty = make(map[common.Address]struct{})
 	s.stateObjectsDestruct = make(map[common.Address]*types.StateAccount)
+	s.cacheAmongBlocks = nil
 	return root, diffLayer, nil
 }
 
@@ -1847,10 +1850,10 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 		if s.cacheAmongBlocks != nil {
 			obj, exist := s.stateObjects[accountAddr]
 			if !exist {
-				s.cacheAmongBlocks.SetAccount(crypto.Keccak256Hash(accountAddr.Bytes()), nil)
+				s.cacheAmongBlocks.SetAccount(crypto.Keccak256Hash(accountAddr.Bytes()), []byte(""))
 				//	log.Info("cache set the destruct as nil", "account", crypto.Keccak256Hash(accountAddr.Bytes()))
 			} else {
-				s.cacheAmongBlocks.SetAccount(obj.addrHash, nil)
+				s.cacheAmongBlocks.SetAccount(obj.addrHash, []byte(""))
 				log.Info("cache set the destruct as nil", "account", obj.addrHash)
 			}
 			if account != nil && account.Root != types.EmptyRootHash {
@@ -1874,21 +1877,25 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 
 		if s.cacheAmongBlocks != nil {
 			keyNum++
-			acc := new(types.SlimAccount)
-			if err := rlp.DecodeBytes(account, acc); err == nil {
-				keysize += len(accountHash)
-				valSize += len(account)
-				s.cacheAmongBlocks.SetAccount(accountHash, acc)
-			} else {
-				log.Error("decode account err", "err", err.Error())
-				panic("Shouldn't happen!")
-			}
+			s.cacheAmongBlocks.SetAccount(accountHash, account)
+			/*
+				acc := new(types.SlimAccount)
+				if err := rlp.DecodeBytes(account, acc); err == nil {
+					keysize += len(accountHash)
+					valSize += len(account)
+					s.cacheAmongBlocks.SetAccount(accountHash, acc)
+				} else {
+					log.Error("decode account err", "err", err.Error())
+					panic("Shouldn't happen!")
+				}
+
+			*/
 		}
 	}
 
 	if keyNum >= 1 {
 		log.Info("account avg size of cache storage", "key", keysize/keyNum, "value", valSize/keyNum,
-			"total", (keysize+valSize)/keyNum)
+			"total", (keysize+valSize)/keyNum, "key num", keyNum)
 	}
 
 	/*
@@ -1899,6 +1906,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 	keysize = 0
 	valSize = 0
 	keyNum = 0
+	keyNum2 := 0
 	storages := make([]types.DiffStorage, 0, len(s.storages))
 	for accountHash, storage := range s.storages {
 		keys := make([]common.Hash, 0, len(storage))
@@ -1906,12 +1914,12 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 		for k, v := range storage {
 			keys = append(keys, k)
 			values = append(values, v)
+			keyNum++
 			if s.cacheAmongBlocks != nil {
-				keyNum++
 				cacheKey := accountHash.String() + k.String()
 				keysize += len(cacheKey)
 				valSize += len(v)
-				s.cacheAmongBlocks.SetStorage(cacheKey, v)
+				s.cacheAmongBlocks.SetStorage(accountHash, k, v)
 			}
 		}
 		storages = append(storages, types.DiffStorage{
@@ -1922,7 +1930,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 	}
 	if keyNum >= 1 {
 		log.Info("storage avg size of cache storage", "key", keysize/keyNum, "value", valSize/keyNum,
-			"total", (keysize+valSize)/keyNum)
+			"total", (keysize+valSize)/keyNum, "key num", keyNum, "key num2", keyNum2)
 	}
 	return destructs, accounts, storages
 }
