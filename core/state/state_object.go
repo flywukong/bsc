@@ -234,10 +234,11 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	if s.db.snap != nil {
 		start := time.Now()
 		existInCache := false
+		storageKey := crypto.Keccak256Hash(key.Bytes())
 		// Try to get from cache among blocks if root is not nil
 		if s.db.cacheAmongBlocks != nil && s.db.cacheAmongBlocks.GetRoot() == s.db.originalRoot {
 			start1 := time.Now()
-			enc, existInCache = s.db.cacheAmongBlocks.GetStorage(s.addrHash.String() + crypto.Keccak256Hash(key.Bytes()).String())
+			enc, existInCache = s.db.cacheAmongBlocks.GetStorage(s.addrHash.String() + storageKey.String())
 			if existInCache {
 				SnapshotBlockCacheStorageHitMeter.Mark(1)
 				BlockCacheStorageTimer.Update(time.Since(start1))
@@ -253,7 +254,6 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 					} else if exist == true && acc != nil {
 						log.Info("check bad block info", "account is not nil", "nil")
 					}
-					storageKey := crypto.Keccak256Hash(key.Bytes())
 					enc2, err2 := s.db.snap.Storage(s.addrHash, storageKey)
 					if !existInCache {
 						log.Error("no cache in cache among blocks")
@@ -281,7 +281,7 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		}
 
 		if !existInCache {
-			enc, err = s.db.snap.Storage(s.addrHash, crypto.Keccak256Hash(key.Bytes()))
+			enc, err = s.db.snap.Storage(s.addrHash, storageKey)
 			if metrics.EnabledExpensive {
 				s.db.SnapshotStorageReads += time.Since(start)
 			}

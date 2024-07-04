@@ -741,9 +741,9 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 		existInCache := false
 		var acc *types.SlimAccount
 
+		accounthash := crypto.HashData(s.hasher, addr.Bytes())
 		// Try to get from cache among blocks if root is not nil
 		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() == s.originalRoot {
-			accounthash := crypto.HashData(s.hasher, addr.Bytes())
 			start1 := time.Now()
 			acc, existInCache = s.cacheAmongBlocks.GetAccount(accounthash)
 			if existInCache {
@@ -785,7 +785,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 		}
 
 		if existInCache == false {
-			acc, err = s.snap.Account(crypto.HashData(s.hasher, addr.Bytes()))
+			acc, err = s.snap.Account(accounthash)
 			if metrics.EnabledExpensive {
 				s.SnapshotAccountReads += time.Since(start)
 			}
@@ -1842,19 +1842,19 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 
 func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []types.DiffStorage) {
 	destructs := make([]common.Address, 0, len(s.stateObjectsDestruct))
-	for accountHash, account := range s.stateObjectsDestruct {
-		destructs = append(destructs, accountHash)
+	for accountAddr, account := range s.stateObjectsDestruct {
+		destructs = append(destructs, accountAddr)
 		if s.cacheAmongBlocks != nil {
-			obj, exist := s.stateObjects[accountHash]
+			obj, exist := s.stateObjects[accountAddr]
 			if !exist {
-				s.cacheAmongBlocks.SetAccount(crypto.Keccak256Hash(accountHash.Bytes()), nil)
-				log.Info("cache set the destruct as nil", "account", crypto.Keccak256Hash(accountHash.Bytes()))
+				s.cacheAmongBlocks.SetAccount(crypto.Keccak256Hash(accountAddr.Bytes()), nil)
+				//	log.Info("cache set the destruct as nil", "account", crypto.Keccak256Hash(accountAddr.Bytes()))
 			} else {
 				s.cacheAmongBlocks.SetAccount(obj.addrHash, nil)
 				log.Info("cache set the destruct as nil", "account", obj.addrHash)
 			}
 			if account != nil && account.Root != types.EmptyRootHash {
-				log.Info("it is CA account", "root", account.Root, "account hash", accountHash)
+				log.Info("it is CA account", "root", account.Root, "account hash", accountAddr)
 				SnapshotBlockCacheStoragePurge.Mark(1)
 				s.cacheAmongBlocks.Purge()
 			}
@@ -1891,10 +1891,11 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 			"total", (keysize+valSize)/keyNum)
 	}
 
-	log.Info(" SnapToDiffLayer info",
-		"account num of cacheAmongBlocks is", s.cacheAmongBlocks.GetAccountsNum(),
-		"storage num of cacheAmongBlocks is", s.cacheAmongBlocks.GetStorageNum())
-
+	/*
+		log.Info(" SnapToDiffLayer info",
+			"account num of cacheAmongBlocks is", s.cacheAmongBlocks.GetAccountsNum(),
+			"storage num of cacheAmongBlocks is", s.cacheAmongBlocks.GetStorageNum())
+	*/
 	keysize = 0
 	valSize = 0
 	keyNum = 0
