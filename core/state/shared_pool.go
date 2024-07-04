@@ -63,7 +63,7 @@ func NewCacheAmongBlocks() *CacheAmongBlocks {
 		//	storagesCache2: map[string]map[common.Hash],
 		//lru.NewCache[string, []byte](250000),
 		accountsCache: fastcache.New(2400000),
-		storagesCache: fastcache.New(28000000),
+		storagesCache: fastcache.New(10000000),
 	}
 }
 
@@ -83,7 +83,7 @@ func (c *CacheAmongBlocks) SetRoot(root common.Hash) {
 func (c *CacheAmongBlocks) GetAccount(key common.Hash) (*types.SlimAccount, bool) {
 	//return c.accountsCache.HasGet(nil, key)
 	// return c.accountsCache.Get(key)
-	if blob, found := c.accountsCache.HasGet(nil, key[:]); found {
+	if blob, found := c.accountsCache.HasGet(nil, key.Bytes()); found {
 		if len(blob) == 0 { // can be both nil and []byte{} ?
 			return nil, false
 		}
