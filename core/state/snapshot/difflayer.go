@@ -211,7 +211,6 @@ func (dl *diffLayer) rebloom(origin *diskLayer) {
 		parent.lock.RUnlock()
 	} else {
 		dl.diffed, _ = bloomfilter.New(uint64(bloomSize), uint64(bloomFuncs))
-		log.Info("renew bloom filter")
 	}
 	// Iterate over all the accounts and storage slots and index them
 	for hash := range dl.destructSet {
@@ -445,7 +444,6 @@ func (dl *diffLayer) storage(accountHash, storageHash common.Hash, depth int) ([
 			if n := len(data); n > 0 {
 				snapshotDirtyStorageReadMeter.Mark(int64(n))
 			} else {
-				log.Info("difflayer hit ", "account ", accountHash, "storage hash", storageHash, "data len", 0)
 				snapshotDirtyStorageInexMeter.Mark(1)
 			}
 			snapshotBloomStorageTrueHitMeter.Mark(1)

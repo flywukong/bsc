@@ -552,7 +552,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	}
 
 	// Initialise cache among blocks
-	bc.cacheAmongBlocks = state.NewCacheAmongBlocks()
 	// Start future block processor.
 	bc.wg.Add(1)
 	go bc.updateFutureBlocks()
@@ -2242,15 +2241,18 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			parent = bc.GetHeader(block.ParentHash(), block.NumberU64()-1)
 		}
 
-		// Check whether the cache pool among blocks can be used
-		//If parent root is the same, use it
+		if bc.cacheAmongBlocks == nil {
+			bc.cacheAmongBlocks = state.NewCacheAmongBlocks(parent.Root)
+		}
+		// Check whether the cache pool among blocks can be used, if parent root is the same, use it
 		// Else drop and reset the cache.
 		if parent.Root != bc.cacheAmongBlocks.GetRoot() {
-			log.Error("root is not same with cache root", "parent root:", parent.Root,
+			log.Info("root is not same with cache root", "parent root:", parent.Root,
 				"cache root", bc.cacheAmongBlocks.GetRoot())
-			bc.cacheAmongBlocks = state.NewCacheAmongBlocks()
+			bc.cacheAmongBlocks.Reset()
 		}
-		log.Info("new state db with cache", "cache root", bc.cacheAmongBlocks.GetRoot())
+
+		//log.Info("new state db with cache", "cache root", bc.cacheAmongBlocks.GetRoot())
 		statedb, err := state.NewWithCacheAmongBlocks(parent.Root, bc.stateCache, bc.snaps, bc.cacheAmongBlocks)
 		if err != nil {
 			return it.index, err

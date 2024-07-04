@@ -235,10 +235,11 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		start := time.Now()
 		existInCache := false
 		storageKey := crypto.Keccak256Hash(key.Bytes())
+
 		// Try to get from cache among blocks if root is not nil
 		if s.db.cacheAmongBlocks != nil && s.db.cacheAmongBlocks.GetRoot() == s.db.originalRoot {
 			start1 := time.Now()
-			enc, existInCache = s.db.cacheAmongBlocks.GetStorage(s.addrHash.String() + storageKey.String())
+			enc, existInCache = s.db.cacheAmongBlocks.GetStorage(s.addrHash, storageKey)
 			if existInCache {
 				SnapshotBlockCacheStorageHitMeter.Mark(1)
 				BlockCacheStorageTimer.Update(time.Since(start1))
