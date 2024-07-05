@@ -1842,23 +1842,26 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 
 func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []types.DiffStorage) {
 	destructs := make([]common.Address, 0, len(s.stateObjectsDestruct))
-	for accountAddr, account := range s.stateObjectsDestruct {
+	for accountAddr, _ := range s.stateObjectsDestruct {
 		destructs = append(destructs, accountAddr)
-		if s.cacheAmongBlocks != nil {
-			obj, exist := s.stateObjects[accountAddr]
-			if !exist {
-				s.cacheAmongBlocks.SetAccount(crypto.Keccak256Hash(accountAddr.Bytes()), []byte(""))
-				//	log.Info("cache set the destruct as nil", "account", crypto.Keccak256Hash(accountAddr.Bytes()))
-			} else {
-				s.cacheAmongBlocks.SetAccount(obj.addrHash, []byte(""))
-				log.Info("cache set the destruct as nil", "account", obj.addrHash)
+		/*
+			if s.cacheAmongBlocks != nil {
+				obj, exist := s.stateObjects[accountAddr]
+				if !exist {
+					s.cacheAmongBlocks.SetAccount(crypto.Keccak256Hash(accountAddr.Bytes()), []byte(""))
+					//	log.Info("cache set the destruct as nil", "account", crypto.Keccak256Hash(accountAddr.Bytes()))
+				} else {
+					s.cacheAmongBlocks.SetAccount(obj.addrHash, []byte(""))
+					log.Info("cache set the destruct as nil", "account", obj.addrHash)
+				}
+				if account != nil && account.Root != types.EmptyRootHash {
+					log.Info("it is CA account", "root", account.Root, "account hash", accountAddr)
+					SnapshotBlockCacheStoragePurge.Mark(1)
+					s.cacheAmongBlocks.Purge()
+				}
 			}
-			if account != nil && account.Root != types.EmptyRootHash {
-				log.Info("it is CA account", "root", account.Root, "account hash", accountAddr)
-				SnapshotBlockCacheStoragePurge.Mark(1)
-				s.cacheAmongBlocks.Purge()
-			}
-		}
+
+		*/
 
 	}
 
@@ -1874,7 +1877,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 
 		if s.cacheAmongBlocks != nil {
 			keyNum++
-			s.cacheAmongBlocks.SetAccount(accountHash, account)
+			//	s.cacheAmongBlocks.SetAccount(accountHash, account)
 			/*
 				acc := new(types.SlimAccount)
 				if err := rlp.DecodeBytes(account, acc); err == nil {
@@ -1917,6 +1920,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 				valSize += len(v)
 				s.cacheAmongBlocks.SetStorage(accountHash, k, v)
 			}
+
 		}
 		storages = append(storages, types.DiffStorage{
 			Account: accountHash,
