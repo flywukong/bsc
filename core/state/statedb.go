@@ -959,8 +959,9 @@ func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 		// to the snapshot tree, we need to copy that as well. Otherwise, any
 		// block mined by ourselves will cause gaps in the tree, and force the
 		// miner to operate trie-backed only.
-		snaps: s.snaps,
-		snap:  s.snap,
+		snaps:            s.snaps,
+		snap:             s.snap,
+		cacheAmongBlocks: nil,
 	}
 
 	// state.cacheAmongBlocks = s.cacheAmongBlocks
@@ -1915,19 +1916,16 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 			keys = append(keys, k)
 			values = append(values, v)
 			keyNum++
-			/*
-				if s.cacheAmongBlocks != nil {
-					if keyNum%10 == 0 {
-						keyNum2++
-						cacheKey := accountHash.String() + k.String()
-						keysize += len(cacheKey)
-						valSize += len(v)
-						s.cacheAmongBlocks.SetStorage(accountHash, k, v)
-					}
+
+			if s.cacheAmongBlocks != nil {
+				if keyNum%10 == 0 {
+					keyNum2++
+					cacheKey := accountHash.String() + k.String()
+					keysize += len(cacheKey)
+					valSize += len(v)
+					s.cacheAmongBlocks.SetStorage(accountHash, k, v)
 				}
-
-
-			*/
+			}
 
 		}
 		storages = append(storages, types.DiffStorage{
