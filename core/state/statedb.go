@@ -1914,6 +1914,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 		for k, v := range storage {
 			keys = append(keys, k)
 			values = append(values, v)
+			keyNum++
 			if s.cacheAmongBlocks != nil {
 				if keyNum%10 == 0 {
 					keyNum2++
