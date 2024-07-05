@@ -1892,7 +1892,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 
 	if keyNum >= 1 {
 		log.Info("account avg size of cache storage", "key", keysize/keyNum, "value", valSize/keyNum,
-			"total", (keysize+valSize)/keyNum)
+			"total", (keysize+valSize)/keyNum, "key num", keyNum)
 	}
 
 	/*
@@ -1926,7 +1926,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 	}
 	if keyNum >= 1 {
 		log.Info("storage avg size of cache storage", "key", keysize/keyNum, "value", valSize/keyNum,
-			"total", (keysize+valSize)/keyNum)
+			"total", (keysize+valSize)/keyNum, "key num", keyNum)
 	}
 	return destructs, accounts, storages
 }
