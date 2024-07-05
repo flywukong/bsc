@@ -1829,6 +1829,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 	}
 	if s.cacheAmongBlocks != nil {
 		s.cacheAmongBlocks.SetRoot(root)
+		log.Info("set set new root", "root", root)
 	}
 
 	// Clear all internal flags at the end of commit operation.
@@ -1838,6 +1839,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 	s.storagesOrigin = make(map[common.Address]map[common.Hash][]byte)
 	s.stateObjectsDirty = make(map[common.Address]struct{})
 	s.stateObjectsDestruct = make(map[common.Address]*types.StateAccount)
+	s.cacheAmongBlocks = nil
 	return root, diffLayer, nil
 }
 
@@ -1916,17 +1918,12 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 			keys = append(keys, k)
 			values = append(values, v)
 			keyNum++
-
 			if s.cacheAmongBlocks != nil {
-				if keyNum%10 == 0 {
-					keyNum2++
-					cacheKey := accountHash.String() + k.String()
-					keysize += len(cacheKey)
-					valSize += len(v)
-					s.cacheAmongBlocks.SetStorage(accountHash, k, v)
-				}
+				cacheKey := accountHash.String() + k.String()
+				keysize += len(cacheKey)
+				valSize += len(v)
+				s.cacheAmongBlocks.SetStorage(accountHash, k, v)
 			}
-
 		}
 		storages = append(storages, types.DiffStorage{
 			Account: accountHash,
