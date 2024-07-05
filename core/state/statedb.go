@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/badblock"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -741,49 +742,49 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 		var acc *types.SlimAccount
 
 		accounthash := crypto.HashData(s.hasher, addr.Bytes())
-		/*
-			// Try to get from cache among blocks if root is not nil
-			if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() == s.originalRoot {
-				start1 := time.Now()
-				acc, existInCache = s.cacheAmongBlocks.GetAccount(accounthash)
-				if existInCache {
-					BlockCacheAccountTimer.Update(time.Since(start1))
-					SnapshotBlockCacheAccountHitMeter.Mark(1)
-					if badblock.HasBadBlock() {
-						log.Info("check bad block info")
-						acc2, err2 := s.snap.Account(accounthash)
-						if err2 == nil {
-							if acc == nil && acc2 != nil {
-								log.Info("compare cache and difflayer not same", "account", acc,
-									"acc", "nil", "acc2 info", acc2.Balance, "code", common.Bytes2Hex(acc2.CodeHash), "root", acc2.Root,
-									"Nonce", acc2.Nonce)
-							} else if acc2 == nil && acc != nil {
+
+		// Try to get from cache among blocks if root is not nil
+		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() == s.originalRoot {
+			start1 := time.Now()
+			acc, existInCache = s.cacheAmongBlocks.GetAccount(accounthash)
+			if existInCache {
+				BlockCacheAccountTimer.Update(time.Since(start1))
+				SnapshotBlockCacheAccountHitMeter.Mark(1)
+				if badblock.HasBadBlock() {
+					log.Info("check bad block info")
+					acc2, err2 := s.snap.Account(accounthash)
+					if err2 == nil {
+						if acc == nil && acc2 != nil {
+							log.Info("compare cache and difflayer not same", "account", acc,
+								"acc", "nil", "acc2 info", acc2.Balance, "code", common.Bytes2Hex(acc2.CodeHash), "root", acc2.Root,
+								"Nonce", acc2.Nonce)
+						} else if acc2 == nil && acc != nil {
+							log.Info("compare cache and difflayer not same", "account", acc,
+								"acc1 info", acc.Balance, "code", common.Bytes2Hex(acc.CodeHash), "root", acc.Root,
+								"Nonce", acc.Nonce, "acc2", "nil")
+						} else if acc2 != nil && acc != nil {
+							if *acc.Balance != *acc2.Balance || string(acc.CodeHash) != string(acc2.CodeHash) ||
+								acc.Nonce != acc2.Nonce || string(acc.Root) != string(acc2.Root) {
 								log.Info("compare cache and difflayer not same", "account", acc,
 									"acc1 info", acc.Balance, "code", common.Bytes2Hex(acc.CodeHash), "root", acc.Root,
-									"Nonce", acc.Nonce, "acc2", "nil")
-							} else if acc2 != nil && acc != nil {
-								if *acc.Balance != *acc2.Balance || string(acc.CodeHash) != string(acc2.CodeHash) ||
-									acc.Nonce != acc2.Nonce || string(acc.Root) != string(acc2.Root) {
-									log.Info("compare cache and difflayer not same", "account", acc,
-										"acc1 info", acc.Balance, "code", common.Bytes2Hex(acc.CodeHash), "root", acc.Root,
-										"Nonce", acc.Nonce, "acc2 info", acc2.Balance, "code", common.Bytes2Hex(acc2.CodeHash), "root", acc2.Root,
-										"Nonce", acc2.Nonce)
-								}
+									"Nonce", acc.Nonce, "acc2 info", acc2.Balance, "code", common.Bytes2Hex(acc2.CodeHash), "root", acc2.Root,
+									"Nonce", acc2.Nonce)
 							}
-						} else {
-							log.Error("read compare err", "err", err2, "account", acc,
-								"acc1 info", acc.Balance, "code", acc.CodeHash, "root", acc.Root,
-								"Nonce", acc.Nonce)
 						}
+					} else {
+						log.Error("read compare err", "err", err2, "account", acc,
+							"acc1 info", acc.Balance, "code", acc.CodeHash, "root", acc.Root,
+							"Nonce", acc.Nonce)
 					}
-				} else {
-					SnapshotBlockCacheAccountMissMeter.Mark(1)
 				}
-				if existInCache && acc == nil {
-					return nil
-				}
+			} else {
+				SnapshotBlockCacheAccountMissMeter.Mark(1)
 			}
-		*/
+			if existInCache && acc == nil {
+				return nil
+			}
+		}
+
 		if existInCache == false {
 			acc, err = s.snap.Account(accounthash)
 			if metrics.EnabledExpensive {
@@ -1845,26 +1846,23 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 
 func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []types.DiffStorage) {
 	destructs := make([]common.Address, 0, len(s.stateObjectsDestruct))
-	for accountAddr, _ := range s.stateObjectsDestruct {
+	for accountAddr, account := range s.stateObjectsDestruct {
 		destructs = append(destructs, accountAddr)
-		/*
-			if s.cacheAmongBlocks != nil {
-				obj, exist := s.stateObjects[accountAddr]
-				if !exist {
-					s.cacheAmongBlocks.SetAccount(crypto.Keccak256Hash(accountAddr.Bytes()), []byte(""))
-					//	log.Info("cache set the destruct as nil", "account", crypto.Keccak256Hash(accountAddr.Bytes()))
-				} else {
-					s.cacheAmongBlocks.SetAccount(obj.addrHash, []byte(""))
-					log.Info("cache set the destruct as nil", "account", obj.addrHash)
-				}
-				if account != nil && account.Root != types.EmptyRootHash {
-					log.Info("it is CA account", "root", account.Root, "account hash", accountAddr)
-					SnapshotBlockCacheStoragePurge.Mark(1)
-					s.cacheAmongBlocks.Purge()
-				}
+		if s.cacheAmongBlocks != nil {
+			obj, exist := s.stateObjects[accountAddr]
+			if !exist {
+				s.cacheAmongBlocks.SetAccount(crypto.Keccak256Hash(accountAddr.Bytes()), []byte(""))
+				//	log.Info("cache set the destruct as nil", "account", crypto.Keccak256Hash(accountAddr.Bytes()))
+			} else {
+				s.cacheAmongBlocks.SetAccount(obj.addrHash, []byte(""))
+				log.Info("cache set the destruct as nil", "account", obj.addrHash)
 			}
-
-		*/
+			if account != nil && account.Root != types.EmptyRootHash {
+				log.Info("it is CA account", "root", account.Root, "account hash", accountAddr)
+				SnapshotBlockCacheStoragePurge.Mark(1)
+				s.cacheAmongBlocks.Purge()
+			}
+		}
 
 	}
 
@@ -1880,7 +1878,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 
 		if s.cacheAmongBlocks != nil {
 			keyNum++
-			//	s.cacheAmongBlocks.SetAccount(accountHash, account)
+			s.cacheAmongBlocks.SetAccount(accountHash, account)
 			/*
 				acc := new(types.SlimAccount)
 				if err := rlp.DecodeBytes(account, acc); err == nil {
