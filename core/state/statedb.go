@@ -960,12 +960,11 @@ func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 		// to the snapshot tree, we need to copy that as well. Otherwise, any
 		// block mined by ourselves will cause gaps in the tree, and force the
 		// miner to operate trie-backed only.
-		snaps:            s.snaps,
-		snap:             s.snap,
-		cacheAmongBlocks: nil,
+		snaps: s.snaps,
+		snap:  s.snap,
 	}
 
-	// state.cacheAmongBlocks = s.cacheAmongBlocks
+	state.cacheAmongBlocks = s.cacheAmongBlocks
 	// Copy the dirty states, logs, and preimages
 	for addr := range s.journal.dirties {
 		// As documented [here](https://github.com/ethereum/go-ethereum/pull/16485#issuecomment-380438527),
