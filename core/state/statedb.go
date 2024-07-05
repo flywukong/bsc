@@ -1906,6 +1906,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 	keysize = 0
 	valSize = 0
 	keyNum = 0
+	keyNum2 := 0
 	storages := make([]types.DiffStorage, 0, len(s.storages))
 	for accountHash, storage := range s.storages {
 		keys := make([]common.Hash, 0, len(storage))
@@ -1914,11 +1915,13 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 			keys = append(keys, k)
 			values = append(values, v)
 			if s.cacheAmongBlocks != nil {
-				keyNum++
-				cacheKey := accountHash.String() + k.String()
-				keysize += len(cacheKey)
-				valSize += len(v)
-				s.cacheAmongBlocks.SetStorage(accountHash, k, v)
+				if keyNum%10 == 0 {
+					keyNum2++
+					cacheKey := accountHash.String() + k.String()
+					keysize += len(cacheKey)
+					valSize += len(v)
+					s.cacheAmongBlocks.SetStorage(accountHash, k, v)
+				}
 			}
 
 		}
@@ -1930,7 +1933,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 	}
 	if keyNum >= 1 {
 		log.Info("storage avg size of cache storage", "key", keysize/keyNum, "value", valSize/keyNum,
-			"total", (keysize+valSize)/keyNum, "key num", keyNum)
+			"total", (keysize+valSize)/keyNum, "key num", keyNum, "key num2", keyNum2)
 	}
 	return destructs, accounts, storages
 }
