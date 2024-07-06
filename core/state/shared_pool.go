@@ -63,7 +63,7 @@ func NewCacheAmongBlocks() *CacheAmongBlocks {
 		//	storagesCache2: map[string]map[common.Hash],
 		//lru.NewCache[string, []byte](250000),
 		accountsCache: fastcache.New(2400000),
-		storagesCache: fastcache.New(10000000),
+		storagesCache: fastcache.New(50000000),
 	}
 }
 
