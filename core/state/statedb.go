@@ -171,7 +171,7 @@ func NewWithCacheAmongBlocks(root common.Hash, db Database, snaps *snapshot.Tree
 		return nil, err
 	}
 
-	statedb.cacheAmongBlocks = cache
+	statedb.cacheAmongBlocks = nil
 	return statedb, nil
 }
 
