@@ -1853,10 +1853,10 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 				//	log.Info("cache set the destruct as nil", "account", crypto.Keccak256Hash(accountAddr.Bytes()))
 			} else {
 				s.cacheAmongBlocks.SetAccount(obj.addrHash, []byte(""))
-				log.Info("cache set the destruct as nil", "account", obj.addrHash)
+				//		log.Info("cache set the destruct as nil", "account", obj.addrHash)
 			}
 			if account != nil && account.Root != types.EmptyRootHash {
-				log.Info("it is CA account", "root", account.Root, "account hash", accountAddr)
+				//	log.Info("it is CA account", "root", account.Root, "account hash", accountAddr)
 				SnapshotBlockCacheStoragePurge.Mark(1)
 				s.cacheAmongBlocks.Purge()
 			}
