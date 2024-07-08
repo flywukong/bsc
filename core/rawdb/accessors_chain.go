@@ -468,7 +468,7 @@ func ReadCanonicalBodyRLP(db ethdb.Reader, number uint64) rlp.RawValue {
 		// Block is not in ancients, read from leveldb by hash and number.
 		// Note: ReadCanonicalHash cannot be used here because it also
 		// calls ReadAncients internally.
-		hash, _ := db.Get(headerHashKey(number))
+		hash, _ := db.BlockStoreReader().Get(headerHashKey(number))
 		data, _ = db.BlockStoreReader().Get(blockBodyKey(number, common.BytesToHash(hash)))
 		return nil
 	})
