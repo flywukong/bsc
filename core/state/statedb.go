@@ -1828,7 +1828,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 	}
 	if s.cacheAmongBlocks != nil {
 		s.cacheAmongBlocks.SetRoot(root)
-		log.Info("set set new root", "root", root)
+		//log.Info("set set new root", "root", root)
 	}
 
 	// Clear all internal flags at the end of commit operation.
