@@ -62,8 +62,21 @@ func NewCacheAmongBlocks() *CacheAmongBlocks {
 		//storagesCache2: lru.NewCache[common.Hash, map[common.Hash][]byte](20000),
 		//	storagesCache2: map[string]map[common.Hash],
 		//lru.NewCache[string, []byte](250000),
-		accountsCache: fastcache.New(2400000),
-		storagesCache: fastcache.New(10000000),
+		accountsCache: fastcache.New(100 * 1024 * 1024),
+		storagesCache: fastcache.New(500 * 1024 * 1024),
+	}
+}
+
+func NewCacheAmongBlocksWithCacheRoot(cacheRoot common.Hash) *CacheAmongBlocks {
+	return &CacheAmongBlocks{
+		cacheRoot: cacheRoot,
+		//	accountsCache: lru.NewCache[common.Hash, *types.SlimAccount](10000),
+		//	storagesCache: lru.NewCache[string, []byte](80000),
+		//storagesCache2: lru.NewCache[common.Hash, map[common.Hash][]byte](20000),
+		//	storagesCache2: map[string]map[common.Hash],
+		//lru.NewCache[string, []byte](250000),
+		accountsCache: fastcache.New(100 * 1024 * 1024),
+		storagesCache: fastcache.New(500 * 1024 * 1024),
 	}
 }
 

@@ -742,7 +742,6 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 		var acc *types.SlimAccount
 
 		accounthash := crypto.HashData(s.hasher, addr.Bytes())
-
 		// Try to get from cache among blocks if root is not nil
 		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() == s.originalRoot {
 			start1 := time.Now()
