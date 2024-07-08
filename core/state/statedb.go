@@ -1864,9 +1864,6 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 
 	}
 
-	keysize := 0
-	valSize := 0
-	keyNum := 0
 	accounts := make([]types.DiffAccount, 0, len(s.accounts))
 	for accountHash, account := range s.accounts {
 		accounts = append(accounts, types.DiffAccount{
@@ -1875,7 +1872,6 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 		})
 
 		if s.cacheAmongBlocks != nil {
-			keyNum++
 			s.cacheAmongBlocks.SetAccount(accountHash, account)
 			/*
 				acc := new(types.SlimAccount)
@@ -1892,20 +1888,12 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 		}
 	}
 
-	if keyNum >= 1 {
-		log.Info("account avg size of cache storage", "key", keysize/keyNum, "value", valSize/keyNum,
-			"total", (keysize+valSize)/keyNum, "key num", keyNum)
-	}
-
 	/*
 		log.Info(" SnapToDiffLayer info",
 			"account num of cacheAmongBlocks is", s.cacheAmongBlocks.GetAccountsNum(),
 			"storage num of cacheAmongBlocks is", s.cacheAmongBlocks.GetStorageNum())
 	*/
-	keysize = 0
-	valSize = 0
-	keyNum = 0
-	keyNum2 := 0
+
 	storages := make([]types.DiffStorage, 0, len(s.storages))
 	for accountHash, storage := range s.storages {
 		keys := make([]common.Hash, 0, len(storage))
@@ -1913,11 +1901,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 		for k, v := range storage {
 			keys = append(keys, k)
 			values = append(values, v)
-			keyNum++
 			if s.cacheAmongBlocks != nil {
-				cacheKey := accountHash.String() + k.String()
-				keysize += len(cacheKey)
-				valSize += len(v)
 				s.cacheAmongBlocks.SetStorage(accountHash, k, v)
 			}
 		}
@@ -1927,10 +1911,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 			Vals:    values,
 		})
 	}
-	if keyNum >= 1 {
-		log.Info("storage avg size of cache storage", "key", keysize/keyNum, "value", valSize/keyNum,
-			"total", (keysize+valSize)/keyNum, "key num", keyNum, "key num2", keyNum2)
-	}
+
 	return destructs, accounts, storages
 }
 
