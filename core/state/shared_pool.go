@@ -44,39 +44,26 @@ func (s *StoragePool) getStorage(address common.Address) *sync.Map {
 
 type CacheAmongBlocks struct {
 	// Cache among blocks
-	cacheRoot common.Hash
-	aMux      sync.Mutex
-	sMux      sync.Mutex
-	//accountsCache *lru.Cache[common.Hash, *types.SlimAccount]
-	//storagesCache *lru.Cache[string, []byte]
-	//storagesCache2 *lru.Cache[common.Hash, map[common.Hash][]byte]
+	cacheRoot     common.Hash
+	aMux          sync.Mutex
+	sMux          sync.Mutex
 	accountsCache *fastcache.Cache
 	storagesCache *fastcache.Cache
 }
 
 func NewCacheAmongBlocks() *CacheAmongBlocks {
 	return &CacheAmongBlocks{
-		cacheRoot: types.EmptyRootHash,
-		//	accountsCache: lru.NewCache[common.Hash, *types.SlimAccount](10000),
-		//	storagesCache: lru.NewCache[string, []byte](80000),
-		//storagesCache2: lru.NewCache[common.Hash, map[common.Hash][]byte](20000),
-		//	storagesCache2: map[string]map[common.Hash],
-		//lru.NewCache[string, []byte](250000),
-		accountsCache: fastcache.New(100 * 1024 * 1024),
-		storagesCache: fastcache.New(500 * 1024 * 1024),
+		cacheRoot:     types.EmptyRootHash,
+		accountsCache: fastcache.New(20 * 1024 * 1024),
+		storagesCache: fastcache.New(100 * 1024 * 1024),
 	}
 }
 
 func NewCacheAmongBlocksWithCacheRoot(cacheRoot common.Hash) *CacheAmongBlocks {
 	return &CacheAmongBlocks{
-		cacheRoot: cacheRoot,
-		//	accountsCache: lru.NewCache[common.Hash, *types.SlimAccount](10000),
-		//	storagesCache: lru.NewCache[string, []byte](80000),
-		//storagesCache2: lru.NewCache[common.Hash, map[common.Hash][]byte](20000),
-		//	storagesCache2: map[string]map[common.Hash],
-		//lru.NewCache[string, []byte](250000),
-		accountsCache: fastcache.New(100 * 1024 * 1024),
-		storagesCache: fastcache.New(500 * 1024 * 1024),
+		cacheRoot:     cacheRoot,
+		accountsCache: fastcache.New(10 * 1024 * 1024),
+		storagesCache: fastcache.New(100 * 1024 * 1024),
 	}
 }
 
@@ -85,9 +72,9 @@ func (c *CacheAmongBlocks) GetRoot() common.Hash {
 }
 
 func (c *CacheAmongBlocks) Purge() {
-	//	c.accountsCache.Purge()
 	c.storagesCache.Reset()
 }
+
 func (c *CacheAmongBlocks) Reset() {
 	c.accountsCache.Reset()
 	c.storagesCache.Reset()
@@ -99,8 +86,6 @@ func (c *CacheAmongBlocks) SetRoot(root common.Hash) {
 }
 
 func (c *CacheAmongBlocks) GetAccount(key common.Hash) (*types.SlimAccount, bool) {
-	//return c.accountsCache.HasGet(nil, key)
-	// return c.accountsCache.Get(key)
 	if blob, found := c.accountsCache.HasGet(nil, key[:]); found {
 		if len(blob) == 0 { // can be both nil and []byte{}
 			return nil, true
@@ -115,18 +100,7 @@ func (c *CacheAmongBlocks) GetAccount(key common.Hash) (*types.SlimAccount, bool
 	return nil, false
 }
 
-/*
-	func (c *CacheAmongBlocks) GetAccountsNum() int {
-		return len(c.accountsCache.)
-	}
-
-	func (c *CacheAmongBlocks) GetStorageNum() int {
-		return len(c.storagesCache.Keys())
-	}
-*/
 func (c *CacheAmongBlocks) GetStorage(accountHash common.Hash, storageKey common.Hash) ([]byte, bool) {
-	//return c.storagesCache.HasGet(nil, key)
-	//	return c.storagesCache.Get(key)
 	key := append(accountHash.Bytes(), storageKey.Bytes()...)
 	if blob, found := c.storagesCache.HasGet(nil, key); found {
 		return blob, true
