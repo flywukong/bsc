@@ -101,7 +101,6 @@ type Downloader struct {
 	peers   *peerSet // Set of active peers from which download can proceed
 
 	stateDB ethdb.Database // Database to state sync into (and deduplicate via)
-	// chainDB ethdb.Database
 	// Statistics
 	syncStatsChainOrigin uint64       // Origin block number where syncing started at
 	syncStatsChainHeight uint64       // Highest block number known when syncing started
@@ -217,8 +216,7 @@ type BlockChain interface {
 type DownloadOption func(downloader *Downloader) *Downloader
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(stateDb ethdb.Database, mux *event.TypeMux, chain BlockChain, lightchain LightChain,
-	dropPeer peerDropFn, _ func()) *Downloader {
+func New(stateDb ethdb.Database, mux *event.TypeMux, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, _ func()) *Downloader {
 	if lightchain == nil {
 		lightchain = chain
 	}
