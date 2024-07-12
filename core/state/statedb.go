@@ -25,7 +25,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/badblock"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -735,56 +734,24 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 	// If no live objects are available, attempt to use snapshots
 	var data *types.StateAccount
 	var err error
+	var exist bool
 	if s.snap != nil {
 		start := time.Now()
-
-		existInCache := false
 		var acc *types.SlimAccount
-
 		accounthash := crypto.HashData(s.hasher, addr.Bytes())
-		// Try to get from cache among blocks if root is not nil
+		// Try to get from cache among blocks if the cache root is the pre-state root
 		if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() == s.originalRoot {
-			start1 := time.Now()
-			acc, existInCache = s.cacheAmongBlocks.GetAccount(accounthash)
-			if existInCache {
-				BlockCacheAccountTimer.Update(time.Since(start1))
+			acc, exist = s.cacheAmongBlocks.GetAccount(accounthash)
+			if exist {
 				SnapshotBlockCacheAccountHitMeter.Mark(1)
-				if badblock.HasBadBlock() {
-					log.Info("check bad block info")
-					acc2, err2 := s.snap.Account(accounthash)
-					if err2 == nil {
-						if acc == nil && acc2 != nil {
-							log.Info("compare cache and difflayer not same", "account", acc,
-								"acc", "nil", "acc2 info", acc2.Balance, "code", common.Bytes2Hex(acc2.CodeHash), "root", acc2.Root,
-								"Nonce", acc2.Nonce)
-						} else if acc2 == nil && acc != nil {
-							log.Info("compare cache and difflayer not same", "account", acc,
-								"acc1 info", acc.Balance, "code", common.Bytes2Hex(acc.CodeHash), "root", acc.Root,
-								"Nonce", acc.Nonce, "acc2", "nil")
-						} else if acc2 != nil && acc != nil {
-							if *acc.Balance != *acc2.Balance || string(acc.CodeHash) != string(acc2.CodeHash) ||
-								acc.Nonce != acc2.Nonce || string(acc.Root) != string(acc2.Root) {
-								log.Info("compare cache and difflayer not same", "account", acc,
-									"acc1 info", acc.Balance, "code", common.Bytes2Hex(acc.CodeHash), "root", acc.Root,
-									"Nonce", acc.Nonce, "acc2 info", acc2.Balance, "code", common.Bytes2Hex(acc2.CodeHash), "root", acc2.Root,
-									"Nonce", acc2.Nonce)
-							}
-						}
-					} else {
-						log.Error("read compare err", "err", err2, "account", acc,
-							"acc1 info", acc.Balance, "code", acc.CodeHash, "root", acc.Root,
-							"Nonce", acc.Nonce)
-					}
+				if acc == nil {
+					return nil
 				}
 			} else {
 				SnapshotBlockCacheAccountMissMeter.Mark(1)
 			}
-			if existInCache && acc == nil {
-				return nil
-			}
 		}
-
-		if existInCache == false {
+		if exist == false {
 			acc, err = s.snap.Account(accounthash)
 			if metrics.EnabledExpensive {
 				s.SnapshotAccountReads += time.Since(start)
@@ -796,7 +763,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 			}
 		}
 
-		if err == nil || existInCache {
+		if err == nil || exist {
 			data = &types.StateAccount{
 				Nonce:    acc.Nonce,
 				Balance:  acc.Balance,
