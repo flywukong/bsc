@@ -50,8 +50,8 @@ func (s *StoragePool) getStorage(address common.Address) *sync.Map {
 // CacheAmongBlocks is used to store difflayer data in a flat cache,
 // it only stores the latest version of the data
 type CacheAmongBlocks struct {
-	cacheRoot     common.Hash
-	sMux          sync.Mutex // TODO use mutex to update the cache if pipeline used the cache
+	cacheRoot common.Hash
+	//	sMux          sync.Mutex // TODO use mutex to update the cache if pipeline used the cache
 	accountsCache *fastcache.Cache
 	storagesCache *fastcache.Cache
 }

@@ -49,8 +49,6 @@ const (
 	storageDeleteLimit = 512 * 1024 * 1024
 )
 
-var HasBadBlock bool
-
 type revision struct {
 	id           int
 	journalIndex int
@@ -69,7 +67,6 @@ type revision struct {
 // commit states.
 type StateDB struct {
 	db               Database
-	hasbadblock      bool
 	prefetcherLock   sync.Mutex
 	prefetcher       *triePrefetcher
 	trie             Trie
@@ -751,7 +748,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 				SnapshotBlockCacheAccountMissMeter.Mark(1)
 			}
 		}
-		if exist == false {
+		if !exist {
 			acc, err = s.snap.Account(accounthash)
 			if metrics.EnabledExpensive {
 				s.SnapshotAccountReads += time.Since(start)
@@ -762,7 +759,6 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 				}
 			}
 		}
-
 		if err == nil || exist {
 			data = &types.StateAccount{
 				Nonce:    acc.Nonce,
@@ -1822,7 +1818,6 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 				s.cacheAmongBlocks.PurgeStorageCache()
 			}
 		}
-
 	}
 
 	accounts := make([]types.DiffAccount, 0, len(s.accounts))

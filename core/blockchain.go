@@ -244,10 +244,8 @@ type txLookup struct {
 // included in the canonical one where as GetBlockByNumber always represents the
 // canonical chain.
 type BlockChain struct {
-	chainConfig *params.ChainConfig // Chain & network configuration
-	cacheConfig *CacheConfig        // Cache configuration for pruning
-
-	hasBadBlock   bool
+	chainConfig   *params.ChainConfig              // Chain & network configuration
+	cacheConfig   *CacheConfig                     // Cache configuration for pruning
 	db            ethdb.Database                   // Low level persistent database to store final content in
 	snaps         *snapshot.Tree                   // Snapshot tree for fast trie leaf access
 	triegc        *prque.Prque[int64, common.Hash] // Priority queue mapping block numbers to tries to gc

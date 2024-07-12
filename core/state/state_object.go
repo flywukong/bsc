@@ -241,7 +241,6 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 			} else {
 				SnapshotBlockCacheStorageMissMeter.Mark(1)
 			}
-
 		}
 		if !exist {
 			enc, err = s.db.snap.Storage(s.addrHash, storageKey)
