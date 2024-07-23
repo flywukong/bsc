@@ -61,10 +61,8 @@ func (frdb *freezerdb) BlockStoreReader() ethdb.Reader {
 }
 
 func (frdb *freezerdb) BlockStoreWriter() ethdb.Writer {
-	if frdb.blockStore == nil {
-		return frdb
-	}
-	return frdb.blockStore
+	// TODO implement me
+	panic("implement me")
 }
 
 // AncientDatadir returns the path of root ancient directory.
@@ -116,13 +114,6 @@ func (frdb *freezerdb) SetDiffStore(diff ethdb.KeyValueStore) {
 
 func (frdb *freezerdb) StateStore() ethdb.Database {
 	return frdb.stateStore
-}
-
-func (frdb *freezerdb) GetStateStore() ethdb.Database {
-	if frdb.stateStore != nil {
-		return frdb.stateStore
-	}
-	return frdb
 }
 
 func (frdb *freezerdb) SetStateStore(state ethdb.Database) {
@@ -261,13 +252,6 @@ func (db *nofreezedb) StateStore() ethdb.Database {
 
 func (db *nofreezedb) SetStateStore(state ethdb.Database) {
 	db.stateStore = state
-}
-
-func (db *nofreezedb) GetStateStore() ethdb.Database {
-	if db.stateStore != nil {
-		return db.stateStore
-	}
-	return db
 }
 
 func (db *nofreezedb) StateStoreReader() ethdb.Reader {
@@ -419,7 +403,6 @@ func (db *emptyfreezedb) Sync() error {
 func (db *emptyfreezedb) DiffStore() ethdb.KeyValueStore        { return db }
 func (db *emptyfreezedb) SetDiffStore(diff ethdb.KeyValueStore) {}
 func (db *emptyfreezedb) StateStore() ethdb.Database            { return db }
-func (db *emptyfreezedb) GetStateStore() ethdb.Database         { return db }
 func (db *emptyfreezedb) SetStateStore(state ethdb.Database)    {}
 func (db *emptyfreezedb) StateStoreReader() ethdb.Reader        { return db }
 func (db *emptyfreezedb) BlockStore() ethdb.Database            { return db }
@@ -535,17 +518,8 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 
 	// Create the idle freezer instance
 	frdb, err := newChainFreezer(resolveChainFreezerDir(ancient), namespace, readonly, offset, multiDatabase)
-
-	// We are creating the freezerdb here because the validation logic for db and freezer below requires certain interfaces
-	// that need a database type. Therefore, we are pre-creating it for subsequent use.
-	freezerDb := &freezerdb{
-		ancientRoot:    ancient,
-		KeyValueStore:  db,
-		AncientStore:   frdb,
-		AncientFreezer: frdb,
-	}
 	if err != nil {
-		printChainMetadata(freezerDb)
+		printChainMetadata(db)
 		return nil, err
 	}
 
@@ -581,10 +555,10 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 			// the freezer and the key-value store.
 			frgenesis, err := frdb.Ancient(ChainFreezerHashTable, 0)
 			if err != nil {
-				printChainMetadata(freezerDb)
+				printChainMetadata(db)
 				return nil, fmt.Errorf("failed to retrieve genesis from ancient %v", err)
 			} else if !bytes.Equal(kvgenesis, frgenesis) {
-				printChainMetadata(freezerDb)
+				printChainMetadata(db)
 				return nil, fmt.Errorf("genesis mismatch: %#x (leveldb) != %#x (ancients)", kvgenesis, frgenesis)
 			}
 			// Key-value store and freezer belong to the same network. Ensure that they
@@ -592,7 +566,7 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 			if kvhash, _ := db.Get(headerHashKey(frozen)); len(kvhash) == 0 {
 				// Subsequent header after the freezer limit is missing from the database.
 				// Reject startup if the database has a more recent head.
-				if head := *ReadHeaderNumber(freezerDb, ReadHeadHeaderHash(freezerDb)); head > frozen-1 {
+				if head := *ReadHeaderNumber(db, ReadHeadHeaderHash(db)); head > frozen-1 {
 					// Find the smallest block stored in the key-value store
 					// in range of [frozen, head]
 					var number uint64
@@ -602,7 +576,7 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 						}
 					}
 					// We are about to exit on error. Print database metadata before exiting
-					printChainMetadata(freezerDb)
+					printChainMetadata(db)
 					return nil, fmt.Errorf("gap in the chain between ancients [0 - #%d] and leveldb [#%d - #%d] ",
 						frozen-1, number, head)
 				}
@@ -617,11 +591,11 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 			// store, otherwise we'll end up missing data. We check block #1 to decide
 			// if we froze anything previously or not, but do take care of databases with
 			// only the genesis block.
-			if ReadHeadHeaderHash(freezerDb) != common.BytesToHash(kvgenesis) {
+			if ReadHeadHeaderHash(db) != common.BytesToHash(kvgenesis) {
 				// Key-value store contains more data than the genesis block, make sure we
 				// didn't freeze anything yet.
 				if kvblob, _ := db.Get(headerHashKey(1)); len(kvblob) == 0 {
-					printChainMetadata(freezerDb)
+					printChainMetadata(db)
 					return nil, errors.New("ancient chain segments already extracted, please set --datadir.ancient to the correct path")
 				}
 				// Block #1 is still in the database, we're allowed to init a new freezer
@@ -643,7 +617,12 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 			frdb.wg.Done()
 		}()
 	}
-	return freezerDb, nil
+	return &freezerdb{
+		ancientRoot:    ancient,
+		KeyValueStore:  db,
+		AncientStore:   frdb,
+		AncientFreezer: frdb,
+	}, nil
 }
 
 // NewMemoryDatabase creates an ephemeral in-memory key-value database without a
@@ -1259,7 +1238,7 @@ func DeleteTrieState(db ethdb.Database) error {
 }
 
 // printChainMetadata prints out chain metadata to stderr.
-func printChainMetadata(db ethdb.Reader) {
+func printChainMetadata(db ethdb.KeyValueStore) {
 	fmt.Fprintf(os.Stderr, "Chain metadata\n")
 	for _, v := range ReadChainMetadata(db) {
 		fmt.Fprintf(os.Stderr, "  %s\n", strings.Join(v, ": "))
@@ -1270,7 +1249,7 @@ func printChainMetadata(db ethdb.Reader) {
 // ReadChainMetadata returns a set of key/value pairs that contains information
 // about the database chain status. This can be used for diagnostic purposes
 // when investigating the state of the node.
-func ReadChainMetadata(db ethdb.Reader) [][]string {
+func ReadChainMetadata(db ethdb.KeyValueStore) [][]string {
 	pp := func(val *uint64) string {
 		if val == nil {
 			return "<nil>"
@@ -1282,6 +1261,29 @@ func ReadChainMetadata(db ethdb.Reader) [][]string {
 		{"headBlockHash", fmt.Sprintf("%v", ReadHeadBlockHash(db))},
 		{"headFastBlockHash", fmt.Sprintf("%v", ReadHeadFastBlockHash(db))},
 		{"headHeaderHash", fmt.Sprintf("%v", ReadHeadHeaderHash(db))},
+		{"lastPivotNumber", pp(ReadLastPivotNumber(db))},
+		{"len(snapshotSyncStatus)", fmt.Sprintf("%d bytes", len(ReadSnapshotSyncStatus(db)))},
+		{"snapshotDisabled", fmt.Sprintf("%v", ReadSnapshotDisabled(db))},
+		{"snapshotJournal", fmt.Sprintf("%d bytes", len(ReadSnapshotJournal(db)))},
+		{"snapshotRecoveryNumber", pp(ReadSnapshotRecoveryNumber(db))},
+		{"snapshotRoot", fmt.Sprintf("%v", ReadSnapshotRoot(db))},
+		{"txIndexTail", pp(ReadTxIndexTail(db))},
+	}
+	return data
+}
+
+func ReadChainMetadataFromMultiDatabase(db ethdb.Database) [][]string {
+	pp := func(val *uint64) string {
+		if val == nil {
+			return "<nil>"
+		}
+		return fmt.Sprintf("%d (%#x)", *val, *val)
+	}
+	data := [][]string{
+		{"databaseVersion", pp(ReadDatabaseVersion(db))},
+		{"headBlockHash", fmt.Sprintf("%v", ReadHeadBlockHash(db.BlockStore()))},
+		{"headFastBlockHash", fmt.Sprintf("%v", ReadHeadFastBlockHash(db.BlockStore()))},
+		{"headHeaderHash", fmt.Sprintf("%v", ReadHeadHeaderHash(db.BlockStore()))},
 		{"lastPivotNumber", pp(ReadLastPivotNumber(db))},
 		{"len(snapshotSyncStatus)", fmt.Sprintf("%d bytes", len(ReadSnapshotSyncStatus(db)))},
 		{"snapshotDisabled", fmt.Sprintf("%v", ReadSnapshotDisabled(db))},

@@ -251,10 +251,6 @@ func (t *table) SetStateStore(state ethdb.Database) {
 	panic("not implement")
 }
 
-func (t *table) GetStateStore() ethdb.Database {
-	return nil
-}
-
 func (t *table) StateStoreReader() ethdb.Reader {
 	return nil
 }
