@@ -50,6 +50,12 @@ const (
 	storageDeleteLimit = 512 * 1024 * 1024
 )
 
+var (
+	blockSetAccountGauge3 = metrics.NewRegisteredGauge("chain/set/account3", nil)
+	//blockGetAccountGauge = metrics.NewRegisteredGauge("chain/get/account", nil)
+	blockSetStorageGauge3 = metrics.NewRegisteredGauge("chain/set/storage3", nil)
+)
+
 type revision struct {
 	id           int
 	journalIndex int
@@ -1810,6 +1816,8 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 			Blob:    account,
 		})
 	}
+	blockSetAccountGauge3.Update(int64(len(s.accounts)))
+
 	storages := make([]types.DiffStorage, 0, len(s.storages))
 	for accountHash, storage := range s.storages {
 		keys := make([]common.Hash, 0, len(storage))
@@ -1824,6 +1832,8 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 			Vals:    values,
 		})
 	}
+	blockSetStorageGauge3.Update(int64(len(s.storages)))
+
 	return destructs, accounts, storages
 }
 
