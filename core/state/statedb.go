@@ -53,7 +53,8 @@ const (
 var (
 	blockSetAccountGauge3 = metrics.NewRegisteredGauge("chain/set/account3", nil)
 	//blockGetAccountGauge = metrics.NewRegisteredGauge("chain/get/account", nil)
-	blockSetStorageGauge3 = metrics.NewRegisteredGauge("chain/set/storage3", nil)
+	blockSetStorageGauge3     = metrics.NewRegisteredGauge("chain/set/storage3", nil)
+	blockSetTotalStorageGauge = metrics.NewRegisteredGauge("chain/set/totalstorage3", nil)
 )
 
 type revision struct {
@@ -1818,6 +1819,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 	}
 	blockSetAccountGauge3.Update(int64(len(s.accounts)))
 
+	num := int64(0)
 	storages := make([]types.DiffStorage, 0, len(s.storages))
 	for accountHash, storage := range s.storages {
 		keys := make([]common.Hash, 0, len(storage))
@@ -1825,6 +1827,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 		for k, v := range storage {
 			keys = append(keys, k)
 			values = append(values, v)
+			num++
 		}
 		storages = append(storages, types.DiffStorage{
 			Account: accountHash,
@@ -1833,7 +1836,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 		})
 	}
 	blockSetStorageGauge3.Update(int64(len(s.storages)))
-
+	blockSetTotalStorageGauge.Update(int64(num))
 	return destructs, accounts, storages
 }
 
