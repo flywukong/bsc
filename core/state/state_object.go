@@ -232,12 +232,12 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	if s.db.snap != nil {
 		start := time.Now()
 		enc, err = s.db.snap.Storage(s.addrHash, crypto.Keccak256Hash(key.Bytes()))
+		routeid := cachemetrics.Goid()
+		if cachemetrics.IsSyncMainRoutineID(routeid) {
+			s.db.ReadStorageNum++
+		}
 		if metrics.EnabledExpensive {
 			s.db.SnapshotStorageReads += time.Since(start)
-			routeid := cachemetrics.Goid()
-			if cachemetrics.IsSyncMainRoutineID(routeid) {
-				s.db.ReadStorageNum++
-			}
 		}
 
 		if len(enc) > 0 {
