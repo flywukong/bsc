@@ -99,6 +99,7 @@ var (
 	blockGetAccountGauge = metrics.NewRegisteredGauge("chain/get/account", nil)
 	blockGetStorageGauge = metrics.NewRegisteredGauge("chain/get/storage", nil)
 	blockSetAccountGauge = metrics.NewRegisteredGauge("chain/set/account", nil)
+	//blockGetAccountGauge = metrics.NewRegisteredGauge("chain/get/account", nil)
 	blockSetStorageGauge = metrics.NewRegisteredGauge("chain/set/storage", nil)
 	blockTxnNumGauge     = metrics.NewRegisteredGauge("chain/txn", nil)
 
@@ -2341,6 +2342,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		blockGetAccountGauge.Update(int64(statedb.ReadAccountNum))
 		blockGetStorageGauge.Update(int64(statedb.ReadStorageNum))
 		blockSetStorageGauge.Update(int64(statedb.SetStateNum))
+		blockSetAccountGauge.Update(int64(statedb.SetAccountNum))
 		blockTxnNumGauge.Update(int64(len(block.Transactions())))
 
 		// Report the import stats before returning the various results
