@@ -101,7 +101,14 @@ var (
 	blockSetAccountGauge = metrics.NewRegisteredGauge("chain/set/account", nil)
 	//blockGetAccountGauge = metrics.NewRegisteredGauge("chain/get/account", nil)
 	blockSetStorageGauge = metrics.NewRegisteredGauge("chain/set/storage", nil)
-	blockTxnNumGauge     = metrics.NewRegisteredGauge("chain/txn", nil)
+
+	blockGetAccountGauge2 = metrics.NewRegisteredGauge("chain/get/account2", nil)
+	blockGetStorageGauge2 = metrics.NewRegisteredGauge("chain/get/storage2", nil)
+	blockSetAccountGauge2 = metrics.NewRegisteredGauge("chain/set/account2", nil)
+	//blockGetAccountGauge = metrics.NewRegisteredGauge("chain/get/account", nil)
+	blockSetStorageGauge2 = metrics.NewRegisteredGauge("chain/set/storage2", nil)
+
+	blockTxnNumGauge = metrics.NewRegisteredGauge("chain/txn", nil)
 
 	blockReorgMeter     = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
 	blockReorgAddMeter  = metrics.NewRegisteredMeter("chain/reorg/add", nil)
@@ -2288,6 +2295,11 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		}
 		ptime := time.Since(pstart)
 
+		blockGetAccountGauge.Update(int64(statedb.ReadAccountNum))
+		blockGetStorageGauge.Update(int64(statedb.ReadStorageNum))
+		blockSetStorageGauge.Update(int64(statedb.SetStateNum))
+		blockSetAccountGauge.Update(int64(statedb.SetAccountNum))
+
 		// Validate the state using the default validator
 		vstart := time.Now()
 		if err := bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
@@ -2296,6 +2308,12 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			statedb.StopPrefetcher()
 			return it.index, err
 		}
+
+		blockGetAccountGauge2.Update(int64(statedb.ReadAccountNum))
+		blockGetStorageGauge2.Update(int64(statedb.ReadStorageNum))
+		blockSetStorageGauge2.Update(int64(statedb.SetStateNum))
+		blockSetAccountGauge2.Update(int64(statedb.SetAccountNum))
+
 		vtime := time.Since(vstart)
 		proctime := time.Since(start) // processing + validation
 
@@ -2339,10 +2357,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		blockWriteTimer.Update(time.Since(wstart) - statedb.AccountCommits - statedb.StorageCommits - statedb.SnapshotCommits - statedb.TrieDBCommits)
 		blockInsertTimer.UpdateSince(start)
 
-		blockGetAccountGauge.Update(int64(statedb.ReadAccountNum))
-		blockGetStorageGauge.Update(int64(statedb.ReadStorageNum))
-		blockSetStorageGauge.Update(int64(statedb.SetStateNum))
-		blockSetAccountGauge.Update(int64(statedb.SetAccountNum))
 		blockTxnNumGauge.Update(int64(len(block.Transactions())))
 
 		// Report the import stats before returning the various results
