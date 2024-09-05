@@ -27,6 +27,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"golang.org/x/exp/slices"
@@ -297,6 +298,7 @@ func (dl *diffLayer) Account(hash common.Hash) (*types.SlimAccount, error) {
 	if err := rlp.DecodeBytes(data, account); err != nil {
 		panic(err)
 	}
+	log.Info(" get account code hash", len(account.CodeHash))
 	return account, nil
 }
 
