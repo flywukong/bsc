@@ -594,6 +594,7 @@ func (s *StateDB) SetCode(addr common.Address, code []byte) {
 			s.SetAccountNum++
 		}
 		log.Info("code length is:", "len:", len(code))
+		fmt.Println("code hash length is ", len(code))
 		stateObject.SetCode(crypto.Keccak256Hash(code), code)
 	}
 }

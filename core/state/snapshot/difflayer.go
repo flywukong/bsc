@@ -298,7 +298,12 @@ func (dl *diffLayer) Account(hash common.Hash) (*types.SlimAccount, error) {
 	if err := rlp.DecodeBytes(data, account); err != nil {
 		panic(err)
 	}
-	log.Info(" get account code hash", len(account.CodeHash))
+	log.Info(" get account code hash", "len", len(account.CodeHash))
+	if common.BytesToHash(account.Root) != types.EmptyRootHash {
+		fmt.Println("CA code hash length is ", len(account.CodeHash))
+	} else {
+		fmt.Println("EOA code hash length is ", len(account.CodeHash))
+	}
 	return account, nil
 }
 
