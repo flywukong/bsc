@@ -57,6 +57,7 @@ var (
 	blockSetTotalStorageGauge = metrics.NewRegisteredGauge("chain/set/totalstorage", nil)
 	blockSetKeySizeGauge      = metrics.NewRegisteredGauge("chain/set/keysize", nil)
 	blockSetValueSizeGauge    = metrics.NewRegisteredGauge("chain/set/valsize", nil)
+	blockSetAccSizeGauge      = metrics.NewRegisteredGauge("chain/set/accsize", nil)
 )
 
 type revision struct {
@@ -1818,6 +1819,7 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 			Account: accountHash,
 			Blob:    account,
 		})
+		blockSetAccSizeGauge.Update(int64(len(account)))
 	}
 	blockSetAccountGauge3.Update(int64(len(s.accounts)))
 
