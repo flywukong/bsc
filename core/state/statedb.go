@@ -699,10 +699,8 @@ func (s *StateDB) updateStateObject(obj *stateObject) {
 	if err := s.trie.UpdateAccount(addr, &obj.data); err != nil {
 		s.setError(fmt.Errorf("updateStateObject (%x) error: %v", addr[:], err))
 	}
-	routeid := cachemetrics.Goid()
-	if cachemetrics.IsSyncMainRoutineID(routeid) {
-		s.AccountUpdated += 1
-	}
+	s.AccountUpdated += 1
+
 	if obj.dirtyCode {
 		s.trie.UpdateContractCode(obj.Address(), common.BytesToHash(obj.CodeHash()), obj.code)
 	}
@@ -1232,10 +1230,8 @@ func (s *StateDB) AccountsIntermediateRoot() {
 		}
 	}
 	wg.Wait()
-	routeid := cachemetrics.Goid()
-	if cachemetrics.IsSyncMainRoutineID(routeid) {
-		s.TrieUpdated = updateNum
-	}
+
+	s.TrieUpdated = updateNum
 }
 
 func (s *StateDB) StateIntermediateRoot() common.Hash {
