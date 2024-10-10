@@ -372,11 +372,7 @@ func (s *stateObject) updateTrie() (Trie, error) {
 					s.db.setError(err)
 				}
 
-				routeid := cachemetrics.Goid()
-				if cachemetrics.IsSyncMainRoutineID(routeid) {
-					s.db.StorageUpdated += 1
-				}
-
+				s.db.StorageUpdated += 1
 				//s.db.StorageUpdated += 1
 			}
 			// Cache the items for preloading
