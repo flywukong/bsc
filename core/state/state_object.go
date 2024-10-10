@@ -447,6 +447,7 @@ func (s *stateObject) updateRoot() {
 	if err != nil || tr == nil {
 		return
 	}
+
 	// Track the amount of time wasted on hashing the storage trie
 	if metrics.EnabledExpensive {
 		defer func(start time.Time) {

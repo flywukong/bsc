@@ -158,6 +158,7 @@ type StateDB struct {
 
 	AccountUpdated int
 	StorageUpdated int
+	TrieUpdated    int
 	AccountDeleted int
 	StorageDeleted int
 
@@ -1210,8 +1211,10 @@ func (s *StateDB) AccountsIntermediateRoot() {
 	// the account prefetcher. Instead, let's process all the storage updates
 	// first, giving the account prefetches just a few more milliseconds of time
 	// to pull useful data from disk.
+	updateNum := 0
 	for addr := range s.stateObjectsPending {
 		if obj := s.stateObjects[addr]; !obj.deleted {
+			updateNum++
 			wg.Add(1)
 			tasks <- func() {
 				obj.updateRoot()
@@ -1229,6 +1232,10 @@ func (s *StateDB) AccountsIntermediateRoot() {
 		}
 	}
 	wg.Wait()
+	routeid := cachemetrics.Goid()
+	if cachemetrics.IsSyncMainRoutineID(routeid) {
+		s.TrieUpdated = updateNum
+	}
 }
 
 func (s *StateDB) StateIntermediateRoot() common.Hash {
