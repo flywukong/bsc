@@ -2348,6 +2348,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		blockUpdateAccountGauge.Update(int64(statedb.AccountUpdated))
 		blockUpdateStorageGauge.Update(int64(statedb.StorageUpdated))
 		blockUpdateTrieGauge.Update(int64(statedb.TrieUpdated))
+
+		//log.Info("Signing key not trusted", "keyid", keyID(sig.KeyId), "error", err)
 		// Report the import stats before returning the various results
 		stats.processed++
 		stats.usedGas += usedGas
