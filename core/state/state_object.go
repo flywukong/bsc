@@ -370,7 +370,11 @@ func (s *stateObject) updateTrie() (Trie, error) {
 				if err := tr.UpdateStorage(s.address, key[:], value); err != nil {
 					s.db.setError(err)
 				}
-				s.db.StorageUpdated += 1
+				routeid := cachemetrics.Goid()
+				if cachemetrics.IsSyncMainRoutineID(routeid) {
+					s.db.StorageUpdated += 1
+				}
+
 			}
 			// Cache the items for preloading
 			usedStorage = append(usedStorage, common.CopyBytes(key[:]))
