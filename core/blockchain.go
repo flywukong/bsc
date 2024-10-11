@@ -100,6 +100,7 @@ var (
 	blockGetStorageGauge = metrics.NewRegisteredGauge("chain/get/storage", nil)
 	blockSetAccountGauge = metrics.NewRegisteredGauge("chain/set/account", nil)
 	blockSetStorageGauge = metrics.NewRegisteredGauge("chain/set/storage", nil)
+	blockDelStorageGauge = metrics.NewRegisteredGauge("chain/delete/storage", nil)
 
 	blockUpdateAccountGauge = metrics.NewRegisteredGauge("chain/update/account", nil)
 	blockUpdateStorageGauge = metrics.NewRegisteredGauge("chain/update/storage", nil)
@@ -2348,6 +2349,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		blockUpdateAccountGauge.Update(int64(statedb.AccountUpdated))
 		blockUpdateStorageGauge.Update(int64(statedb.StorageUpdated))
 		blockUpdateTrieGauge.Update(int64(statedb.TrieUpdated))
+		blockDelStorageGauge.Update(int64(statedb.StorageDeleted))
 
 		//log.Info("Signing key not trusted", "keyid", keyID(sig.KeyId), "error", err)
 		// Report the import stats before returning the various results
