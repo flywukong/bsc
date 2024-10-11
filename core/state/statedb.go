@@ -162,6 +162,9 @@ type StateDB struct {
 	AccountDeleted int
 	StorageDeleted int
 
+	AccountChanged    int
+	StorageChanged    int
+	StorageChangedAll int
 	// Testing hooks
 	onCommit func(states *triestate.Set) // Hook invoked when commit is performed
 }
@@ -1813,17 +1816,24 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 		destructs = append(destructs, account)
 	}
 	accounts := make([]types.DiffAccount, 0, len(s.accounts))
+	num := 0
 	for accountHash, account := range s.accounts {
 		accounts = append(accounts, types.DiffAccount{
 			Account: accountHash,
 			Blob:    account,
 		})
+		num++
 	}
+	s.AccountChanged = num
+	num = 0
+	num2 := 0
 	storages := make([]types.DiffStorage, 0, len(s.storages))
 	for accountHash, storage := range s.storages {
+		num++
 		keys := make([]common.Hash, 0, len(storage))
 		values := make([][]byte, 0, len(storage))
 		for k, v := range storage {
+			num2++
 			keys = append(keys, k)
 			values = append(values, v)
 		}
@@ -1833,6 +1843,8 @@ func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []ty
 			Vals:    values,
 		})
 	}
+	s.StorageChanged = num
+	s.StorageChangedAll = num2
 	return destructs, accounts, storages
 }
 
