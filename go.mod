@@ -1,8 +1,8 @@
 module github.com/ethereum/go-ethereum
 
-go 1.21
+go 1.22
 
-toolchain go1.21.5
+toolchain go1.22.5
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.2.0
@@ -267,7 +267,7 @@ require (
 	github.com/wealdtech/go-eth2-util v1.6.3 // indirect
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
-	go.etcd.io/bbolt v1.3.7 // indirect
+	go.etcd.io/bbolt v1.3.11 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.uber.org/dig v1.17.1 // indirect
 	go.uber.org/fx v1.20.1 // indirect
