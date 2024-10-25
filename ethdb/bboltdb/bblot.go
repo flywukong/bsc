@@ -219,37 +219,32 @@ func (d *Database) Compact(start []byte, limit []byte) error {
 
 // NewIterator returns a new iterator for traversing the keys in the database.
 func (d *Database) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
-	var tx *bbolt.Tx
 	var cursor *bbolt.Cursor
-	_ = d.db.View(func(t *bbolt.Tx) error {
-		tx = t
-		bucket := t.Bucket([]byte("ethdb"))
+	_ = d.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("ethdb"))
 		if bucket != nil {
 			cursor = bucket.Cursor()
 		}
 		return nil
 	})
-	return &BBoltIterator{tx: tx, cursor: cursor, prefix: prefix, start: start}
+	return &BBoltIterator{cursor: cursor, prefix: prefix, start: start}
 }
 
 // NewSeekIterator creates a binary-alphabetical iterator.
 func (d *Database) NewSeekIterator(prefix, key []byte) ethdb.Iterator {
-	var tx *bbolt.Tx
 	var cursor *bbolt.Cursor
-	_ = d.db.View(func(t *bbolt.Tx) error {
-		tx = t
-		bucket := t.Bucket([]byte("ethdb"))
+	_ = d.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("ethdb"))
 		if bucket != nil {
 			cursor = bucket.Cursor()
 		}
 		return nil
 	})
-	return &BBoltIterator{tx: tx, cursor: cursor, prefix: prefix}
+	return &BBoltIterator{cursor: cursor, prefix: prefix}
 }
 
 // BBoltIterator is an iterator for the bbolt database.
 type BBoltIterator struct {
-	tx     *bbolt.Tx
 	cursor *bbolt.Cursor
 	key    []byte
 	value  []byte
@@ -304,10 +299,6 @@ func (it *BBoltIterator) Value() []byte {
 
 // Release releases associated resources.
 func (it *BBoltIterator) Release() {
-	if it.tx != nil {
-		_ = it.tx.Rollback()
-		it.tx = nil
-	}
 	it.cursor = nil
 }
 
