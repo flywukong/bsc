@@ -217,34 +217,9 @@ func (d *Database) Compact(start []byte, limit []byte) error {
 	return nil
 }
 
-// NewIterator returns a new iterator for traversing the keys in the database.
-func (d *Database) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
-	var cursor *bbolt.Cursor
-	_ = d.db.View(func(tx *bbolt.Tx) error {
-		bucket := tx.Bucket([]byte("ethdb"))
-		if bucket != nil {
-			cursor = bucket.Cursor()
-		}
-		return nil
-	})
-	return &BBoltIterator{cursor: cursor, prefix: prefix, start: start}
-}
-
-// NewSeekIterator creates a binary-alphabetical iterator.
-func (d *Database) NewSeekIterator(prefix, key []byte) ethdb.Iterator {
-	var cursor *bbolt.Cursor
-	_ = d.db.View(func(tx *bbolt.Tx) error {
-		bucket := tx.Bucket([]byte("ethdb"))
-		if bucket != nil {
-			cursor = bucket.Cursor()
-		}
-		return nil
-	})
-	return &BBoltIterator{cursor: cursor, prefix: prefix}
-}
-
 // BBoltIterator is an iterator for the bbolt database.
 type BBoltIterator struct {
+	db     *bbolt.DB
 	cursor *bbolt.Cursor
 	key    []byte
 	value  []byte
@@ -253,26 +228,51 @@ type BBoltIterator struct {
 	moved  bool
 }
 
+// NewIterator returns a new iterator for traversing the keys in the database.
+func (d *Database) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
+	return &BBoltIterator{db: d.db, prefix: prefix, start: start}
+}
+
+// NewSeekIterator creates a binary-alphabetical iterator.
+func (d *Database) NewSeekIterator(prefix, key []byte) ethdb.Iterator {
+	return &BBoltIterator{db: d.db, prefix: prefix}
+}
+
 // Seek moves the iterator to the last key/value pair whose key is less than the given key.
 // Returns true if the iterator is pointing at a valid entry and false otherwise.
 func (it *BBoltIterator) Seek(key []byte) bool {
-	it.key, it.value = it.cursor.Seek(append(it.prefix, key...))
-	if it.key != nil && string(it.key) >= string(append(it.prefix, key...)) {
-		it.key, it.value = it.cursor.Prev()
-	}
-	it.moved = true
-	return it.key != nil
+	err := it.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("ethdb"))
+		if bucket == nil {
+			return fmt.Errorf("bucket does not exist")
+		}
+		it.cursor = bucket.Cursor()
+		it.key, it.value = it.cursor.Seek(append(it.prefix, key...))
+		if it.key != nil && string(it.key) >= string(append(it.prefix, key...)) {
+			it.key, it.value = it.cursor.Prev()
+		}
+		it.moved = true
+		return nil
+	})
+	return err == nil && it.key != nil
 }
 
 // Next moves the iterator to the next key/value pair. It returns whether the iterator is exhausted.
 func (it *BBoltIterator) Next() bool {
-	if !it.moved {
-		it.key, it.value = it.cursor.First()
-		it.moved = true
-	} else {
-		it.key, it.value = it.cursor.Next()
-	}
-	return it.key != nil
+	err := it.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("ethdb"))
+		if bucket == nil {
+			return fmt.Errorf("bucket does not exist")
+		}
+		if it.cursor == nil {
+			it.cursor = bucket.Cursor()
+			it.key, it.value = it.cursor.First()
+		} else {
+			it.key, it.value = it.cursor.Next()
+		}
+		return nil
+	})
+	return err == nil && it.key != nil
 }
 
 // Error returns any accumulated error.
