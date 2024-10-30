@@ -253,8 +253,24 @@ func (d *Database) NewSeekIterator(prefix, key []byte) ethdb.Iterator {
 	// Start a read-write transaction to create the bucket if it does not exist.
 	tx, _ := d.db.Begin(false) // Begin a read-write transaction
 	bucket, _ := tx.CreateBucketIfNotExists([]byte("ethdb"))
+
 	cursor := bucket.Cursor()
-	cursor.Seek(append(prefix, key...))
+	if len(prefix) == 0 && len(key) == 0 {
+		// No prefix or start, iterate from the beginning
+		//	firstKey, firstVal = cursor.First()
+		cursor.First()
+		//	fmt.Println("firtst key", string(k))
+		//fmt.Println("no start")
+	} else if len(key) > 0 {
+		// Seek to start key if provided
+		itKey, _ := cursor.Seek(key)
+		if itKey == nil || !bytes.HasPrefix(itKey, prefix) {
+			cursor.Seek(prefix)
+		}
+	} else {
+		// Only prefix provided, seek to prefix
+		cursor.Seek(prefix)
+	}
 	return &BBoltIterator{tx: tx, cursor: cursor, prefix: prefix, start: key}
 }
 
@@ -264,7 +280,7 @@ func (d *Database) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
 	tx, _ := d.db.Begin(false) // Begin a read-only transaction
 	bucket := tx.Bucket([]byte("ethdb"))
 	var cursor *bbolt.Cursor
-	fmt.Println("new iterator begin")
+	//fmt.Println("new iterator begin")
 	//var firstKey, firstVal []byte
 	if bucket != nil {
 		cursor = bucket.Cursor()
@@ -288,7 +304,7 @@ func (d *Database) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
 		panic("bucket is nil")
 	}
 
-	fmt.Println("new iterator finish")
+	//fmt.Println("new iterator finish")
 	return &BBoltIterator{tx: tx, cursor: cursor, prefix: prefix, start: start,
 		firstKey: true}
 }
@@ -311,13 +327,13 @@ func (it *BBoltIterator) Next() bool {
 	}
 
 	if it.firstKey {
-		fmt.Println("first key")
+		//	fmt.Println("first key")
 		it.key, it.value = it.cursor.First()
 		it.firstKey = false
 	} else {
 		it.key, it.value = it.cursor.Next()
 	}
-	fmt.Println("iterator finish")
+	//fmt.Println("iterator finish")
 	return it.key != nil
 }
 
@@ -387,7 +403,7 @@ func (b *batch) Put(key, value []byte) error {
 
 	b.ops = append(b.ops, func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte("ethdb"))
-		fmt.Println("put key:", string(key))
+		//fmt.Println("put key:", string(key))
 		return bucket.Put(key, value)
 	})
 	b.size += len(key) + len(value)
