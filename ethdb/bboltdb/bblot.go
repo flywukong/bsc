@@ -257,23 +257,10 @@ func (d *Database) NewSeekIterator(prefix, key []byte) ethdb.Iterator {
 	if bucket == nil {
 		panic("bucket is nil in iterator")
 	}
+
 	cursor := bucket.Cursor()
-	if len(prefix) == 0 && len(key) == 0 {
-		// No prefix or start, iterate from the beginning
-		//	firstKey, firstVal = cursor.First()
-		cursor.First()
-		//	fmt.Println("firtst key", string(k))
-		//fmt.Println("no start")
-	} else if len(key) > 0 {
-		// Seek to start key if provided
-		itKey, _ := cursor.Seek(key)
-		if itKey == nil || !bytes.HasPrefix(itKey, prefix) {
-			cursor.Seek(prefix)
-		}
-	} else {
-		// Only prefix provided, seek to prefix
-		cursor.Seek(prefix)
-	}
+	cursor.Seek(prefix)
+	
 	return &BBoltIterator{tx: tx, cursor: cursor, prefix: prefix, start: key}
 }
 
