@@ -1,6 +1,7 @@
 package bboltdb
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/etcd-io/bbolt"
@@ -16,6 +17,17 @@ func TestBoltDB(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to open bbolt database: %v", err)
 			}
+
+			// Create the default bucket if it does not exist
+			err = db1.Update(func(tx *bbolt.Tx) error {
+				_, err := tx.CreateBucketIfNotExists([]byte("ethdb"))
+				return err
+			})
+			if err != nil {
+				db1.Close()
+				panic(fmt.Errorf("failed to create default bucket: %v", err))
+			}
+
 			return &Database{
 				db: db1,
 			}
