@@ -252,8 +252,11 @@ type BBoltIterator struct {
 func (d *Database) NewSeekIterator(prefix, key []byte) ethdb.Iterator {
 	// Start a read-write transaction to create the bucket if it does not exist.
 	tx, _ := d.db.Begin(false) // Begin a read-write transaction
-	bucket, _ := tx.CreateBucketIfNotExists([]byte("ethdb"))
+	bucket := tx.Bucket([]byte("ethdb"))
 
+	if bucket == nil {
+		panic("bucket is nil in iterator")
+	}
 	cursor := bucket.Cursor()
 	if len(prefix) == 0 && len(key) == 0 {
 		// No prefix or start, iterate from the beginning
