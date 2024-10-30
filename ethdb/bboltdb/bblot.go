@@ -260,7 +260,7 @@ func (d *Database) NewSeekIterator(prefix, key []byte) ethdb.Iterator {
 
 	cursor := bucket.Cursor()
 	cursor.Seek(prefix)
-	
+
 	return &BBoltIterator{tx: tx, cursor: cursor, prefix: prefix, start: key}
 }
 
@@ -302,8 +302,16 @@ func (d *Database) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
 // Seek moves the iterator to the given key or the closest following key.
 // Returns true if the iterator is pointing at a valid entry and false otherwise.
 func (it *BBoltIterator) Seek(key []byte) bool {
-	if it.cursor == nil {
-		return false
+	/*
+		it.key, it.value = it.cursor.Seek(append(it.prefix, key...))
+		if it.key != nil && string(it.key) >= string(append(it.prefix, key...)) {
+			it.key, it.value = it.cursor.Prev()
+		}
+
+	*/
+	it.key, it.value = it.cursor.Seek(key)
+	if it.key != nil && string(it.key) >= string(key) {
+		it.key, it.value = it.cursor.Prev()
 	}
 	it.key, it.value = it.cursor.Seek(key)
 
