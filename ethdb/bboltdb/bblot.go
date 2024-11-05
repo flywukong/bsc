@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,9 +23,9 @@ import (
 // Apart from basic data storage functionality it also supports batch writes and
 // iterating over the keyspace in binary-alphabetical order.
 type Database struct {
-	fn                  string    // Filename for reporting
-	db                  *bbolt.DB // Underlying bbolt storage engine
-	bucket              *bbolt.Bucket
+	fn                  string        // Filename for reporting
+	db                  *bbolt.DB     // Underlying bbolt storage engine
+	mu                  sync.Mutex    // Mutex to ensure atomic write operations
 	compTimeMeter       metrics.Meter // Meter for measuring the total time spent in database compaction
 	compReadMeter       metrics.Meter // Meter for measuring the data read during compaction
 	compWriteMeter      metrics.Meter // Meter for measuring the data written during compaction
@@ -41,9 +42,9 @@ type Database struct {
 
 	levelsGauge []metrics.Gauge // Gauge for tracking the number of tables in levels
 
-	quitLock sync.RWMutex    // Mutex protecting the quit channel and the closed flag
-	quitChan chan chan error // Quit channel to stop the metrics collection before closing the database
-	closed   bool            // keep track of whether we're Closed
+	//quitLock sync.RWMutex    // Mutex protecting the quit channel and the closed flag
+	//quitChan chan chan error // Quit channel to stop the metrics collection before closing the database
+	closed bool // keep track of whether we're Closed
 
 	log log.Logger // Contextual logger tracking the database path
 
@@ -92,42 +93,64 @@ func (d *Database) onWriteStallEnd() {
 // New creates a new instance of Database.
 func New(file string, cache int, handles int, namespace string, readonly bool, ephemeral bool) (*Database, error) {
 	// Open the bbolt database file
-	options := &bbolt.Options{Timeout: 0}
+	options := &bbolt.Options{Timeout: 0,
+		ReadOnly: readonly,
+		NoSync:   ephemeral,
+	}
+
 	fullpath := filepath.Join(file, "bbolt.db")
 	dir := filepath.Dir(fullpath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %v", err)
 	}
-	db, err := bbolt.Open(fullpath, 0600, options)
+	innerDB, err := bbolt.Open(fullpath, 0600, options)
 	if err != nil {
+		panic("open db err" + err.Error())
 		return nil, fmt.Errorf("failed to open bbolt database: %v", err)
 	}
 
-	var bucket *bbolt.Bucket
 	// Create the default bucket if it does not exist
-	err = db.Update(func(tx *bbolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte("ethdb"))
-		if err == nil {
-			bucket = b
+	err = innerDB.Update(func(tx *bbolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte("ethdb"))
+		if err != nil {
+			panic("fail to create bucket")
 		}
 		return err
 	})
 	if err != nil {
-		db.Close()
+		innerDB.Close()
 		return nil, fmt.Errorf("failed to create default bucket: %v", err)
 	}
 
-	return &Database{fn: file, db: db, bucket: bucket}, nil
+	db := &Database{
+		fn: file,
+		db: innerDB,
+	}
+
+	db.db = innerDB
+
+	return db, nil
 }
 
 // Put adds the given value under the specified key to the database.
 func (d *Database) Put(key []byte, value []byte) error {
+	log.Info("db write begin")
+	start := time.Now()
+	defer func() {
+		log.Info("db write cost time", "time", time.Since(start).Milliseconds())
+	}()
 	return d.db.Update(func(tx *bbolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte("ethdb"))
-		if err != nil {
-			return err
+		bucket := tx.Bucket([]byte("ethdb"))
+		if bucket == nil {
+			panic("put db bucket is nil")
+			return fmt.Errorf("bucket does not exist")
 		}
-		return b.Put(key, value)
+		err := bucket.Put(key, value)
+		if err != nil {
+			panic("put db err" + err.Error())
+		}
+		log.Info("db write finish")
+		return err
 	})
 }
 
@@ -143,6 +166,9 @@ func (d *Database) Get(key []byte) ([]byte, error) {
 		result = bucket.Get(key)
 		return nil
 	}); err != nil {
+		if err != nil {
+			panic("get  db err" + err.Error())
+		}
 		return nil, err
 	}
 	if result == nil {
@@ -158,28 +184,29 @@ func (d *Database) Delete(key []byte) error {
 		if bucket == nil {
 			return fmt.Errorf("bucket does not exist")
 		}
-		return bucket.Delete(key)
+		err := bucket.Delete(key)
+		if err != nil {
+			panic("delete db err" + err.Error())
+		}
+		return err
 	})
 }
 
 // Close closes the database file.
 func (d *Database) Close() error {
-	d.quitLock.Lock()
-	defer d.quitLock.Unlock()
 	if d.closed {
 		return nil
 	}
 
+	fmt.Println("close db")
+
 	d.closed = true
-	if d.quitChan != nil {
-		errc := make(chan error)
-		d.quitChan <- errc
-		if err := <-errc; err != nil {
-			d.log.Error("Metrics collection failed", "err", err)
-		}
-		d.quitChan = nil
+	err := d.db.Close()
+	if err != nil {
+		fmt.Println("close db fail", err.Error())
 	}
-	return d.db.Close()
+	fmt.Println("close finish")
+	return nil
 }
 
 // Has checks if the given key exists in the database.
@@ -192,6 +219,7 @@ func (d *Database) Has(key []byte) (bool, error) {
 		}
 		return nil
 	}); err != nil {
+		panic("has db err" + err.Error())
 		return false, err
 	}
 	return exists, nil
@@ -212,8 +240,6 @@ func (d *Database) Stat(property string) (string, error) {
 // DeleteRange deletes all of the keys (and values) in the range [start, end)
 // (inclusive on start, exclusive on end).
 func (d *Database) DeleteRange(start, end []byte) error {
-	d.quitLock.RLock()
-	defer d.quitLock.RUnlock()
 	if d.closed {
 		return fmt.Errorf("database is closed")
 	}
@@ -240,13 +266,12 @@ func (d *Database) Compact(start []byte, limit []byte) error {
 type BBoltIterator struct {
 	tx       *bbolt.Tx
 	cursor   *bbolt.Cursor
-	key      []byte
-	value    []byte
 	prefix   []byte
 	start    []byte
+	key      []byte
+	value    []byte
 	firstKey bool
-	//firstKey []byte
-	//firstVal []byte
+	emptyDB  bool
 }
 
 func (d *Database) NewSeekIterator(prefix, key []byte) ethdb.Iterator {
@@ -260,70 +285,94 @@ func (d *Database) NewSeekIterator(prefix, key []byte) ethdb.Iterator {
 
 	cursor := bucket.Cursor()
 	cursor.Seek(prefix)
-	
+
 	return &BBoltIterator{tx: tx, cursor: cursor, prefix: prefix, start: key}
 }
 
 // NewIterator returns a new iterator for traversing the keys in the database.
 func (d *Database) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
 	// Start a read transaction and create a cursor.
-	tx, _ := d.db.Begin(false) // Begin a read-only transaction
+	tx, err := d.db.Begin(false) // Begin a read-only transaction
+	if err != nil {
+		panic("err start tx" + err.Error())
+	}
+
 	bucket := tx.Bucket([]byte("ethdb"))
-	var cursor *bbolt.Cursor
-	//fmt.Println("new iterator begin")
-	//var firstKey, firstVal []byte
-	if bucket != nil {
-		cursor = bucket.Cursor()
-		if len(prefix) == 0 && len(start) == 0 {
-			// No prefix or start, iterate from the beginning
-			//	firstKey, firstVal = cursor.First()
-			cursor.First()
-			//	fmt.Println("firtst key", string(k))
-			//fmt.Println("no start")
-		} else if len(start) > 0 {
-			// Seek to start key if provided
-			itKey, _ := cursor.Seek(start)
-			if itKey == nil || !bytes.HasPrefix(itKey, prefix) {
-				cursor.Seek(prefix)
-			}
-		} else {
-			// Only prefix provided, seek to prefix
-			cursor.Seek(prefix)
-		}
-	} else {
+	if bucket == nil {
+		tx.Rollback()
 		panic("bucket is nil")
 	}
 
-	//fmt.Println("new iterator finish")
-	return &BBoltIterator{tx: tx, cursor: cursor, prefix: prefix, start: start,
-		firstKey: true}
-}
+	cursor := bucket.Cursor()
+	var k, v []byte
 
-// Seek moves the iterator to the given key or the closest following key.
-// Returns true if the iterator is pointing at a valid entry and false otherwise.
-func (it *BBoltIterator) Seek(key []byte) bool {
-	if it.cursor == nil {
-		return false
+	if len(prefix) > 0 && len(start) > 0 {
+		k, v = cursor.Seek(append(prefix, start...))
+
+		if k != nil && !bytes.HasPrefix(k, prefix) {
+			k, v = nil, nil
+		}
+	} else if len(prefix) > 0 {
+		k, v = cursor.Seek(prefix)
+		if k != nil && !bytes.HasPrefix(k, prefix) {
+			k, v = nil, nil
+		}
+	} else if len(start) > 0 {
+		k, v = cursor.Seek(start)
+	} else {
+		k, v = cursor.First()
 	}
-	it.key, it.value = it.cursor.Seek(key)
 
-	return it.key != nil
+	return &BBoltIterator{
+		tx:       tx,
+		cursor:   cursor,
+		prefix:   prefix,
+		start:    start,
+		key:      k,
+		value:    v,
+		firstKey: true,
+	}
 }
 
-// Next moves the iterator to the next key/value pair. It returns whether the iterator is exhausted.
+// Next moves the iterator to the next key/value pair.
 func (it *BBoltIterator) Next() bool {
 	if it.cursor == nil {
 		return false
 	}
 
+	var k, v []byte
+
 	if it.firstKey {
-		//	fmt.Println("first key")
-		it.key, it.value = it.cursor.First()
+		k, v = it.key, it.value
 		it.firstKey = false
+		if k == nil {
+			fmt.Println("key is nil")
+		}
 	} else {
-		it.key, it.value = it.cursor.Next()
+		k, v = it.cursor.Next()
 	}
-	//fmt.Println("iterator finish")
+
+	if k != nil && len(it.prefix) > 0 && !bytes.HasPrefix(k, it.prefix) {
+		k = nil
+	}
+
+	if k == nil {
+		return false
+	}
+
+	it.key = k
+	it.value = v
+	return true
+}
+
+// Seek moves the iterator to the given key or the closest following key.
+// Returns true if the iterator is pointing at a valid entry and false otherwise.
+func (it *BBoltIterator) Seek(key []byte) bool {
+	it.key, it.value = it.cursor.Seek(key)
+	if it.key != nil && string(it.key) >= string(key) {
+		it.key, it.value = it.cursor.Prev()
+	}
+
 	return it.key != nil
 }
 
@@ -362,8 +411,8 @@ func (it *BBoltIterator) Release() {
 
 // Batch is a write-only batch that commits changes to its host database when Write is called.
 type batch struct {
-	db         *Database
-	ops        []func(*bbolt.Tx) error
+	db *Database
+	//	ops        []func(*bbolt.Tx) error
 	size       int
 	operations []operation
 }
@@ -377,9 +426,17 @@ type operation struct {
 // NewBatch creates a new batch for batching database operations.
 func (d *Database) NewBatch() ethdb.Batch {
 	return &batch{
+		db: d,
+		//	ops:        make([]func(*bbolt.Tx) error, 0),
+		operations: make([]operation, 0),
+	}
+}
+
+// NewBatchWithSize creates a write-only database batch with pre-allocated buffer.
+func (d *Database) NewBatchWithSize(size int) ethdb.Batch {
+	return &batch{
 		db:         d,
-		ops:        make([]func(*bbolt.Tx) error, 0),
-		operations: make([]operation, 0, 100),
+		operations: make([]operation, 0, size),
 	}
 }
 
@@ -391,11 +448,6 @@ func (b *batch) Put(key, value []byte) error {
 		del:   false,
 	})
 
-	b.ops = append(b.ops, func(tx *bbolt.Tx) error {
-		bucket := tx.Bucket([]byte("ethdb"))
-		//fmt.Println("put key:", string(key))
-		return bucket.Put(key, value)
-	})
 	b.size += len(key) + len(value)
 	return nil
 }
@@ -406,13 +458,7 @@ func (b *batch) Delete(key []byte) error {
 		key: key,
 		del: true,
 	})
-	b.ops = append(b.ops, func(tx *bbolt.Tx) error {
-		bucket := tx.Bucket([]byte("ethdb"))
-		if bucket == nil {
-			return fmt.Errorf("bucket does not exist")
-		}
-		return bucket.Delete(key)
-	})
+
 	b.size += len(key)
 	return nil
 }
@@ -424,26 +470,57 @@ func (b *batch) ValueSize() int {
 
 // Write flushes any accumulated data to disk.
 func (b *batch) Write() error {
-	return b.db.db.Batch(func(tx *bbolt.Tx) error {
-		for _, op := range b.ops {
-			if err := op(tx); err != nil {
-				return err
+	log.Info("batch write begin")
+	start := time.Now()
+	defer func() {
+		log.Info("batch write cost time", "time", time.Since(start).Milliseconds())
+	}()
+	if len(b.operations) == 0 {
+		return nil
+	}
+
+	return b.db.db.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("ethdb"))
+		for _, op := range b.operations {
+			log.Info("batch write op", "msg", string(op.key))
+			if op.del {
+				if err := bucket.Delete(op.key); err != nil {
+					log.Info("batch write err" + err.Error())
+					return err
+				}
+			} else {
+				if err := bucket.Put(op.key, op.value); err != nil {
+					log.Info("batch write err" + err.Error())
+					return err
+				}
 			}
 		}
+		log.Info("batch write finish")
 		return nil
 	})
 }
 
 func (b *batch) DeleteRange(start, end []byte) error {
-	b.db.DeleteRange(start, end)
+	err := b.db.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("ethdb"))
+		if bucket == nil {
+			return fmt.Errorf("bucket does not exist")
+		}
+		cursor := bucket.Cursor()
+		for k, _ := cursor.Seek(start); k != nil && bytes.Compare(k, end) < 0; k, _ = cursor.Next() {
+			b.operations = append(b.operations, operation{key: k, del: true})
+			b.size += len(k)
+		}
+		return nil
+	})
 	b.size += len(start)
 	b.size += len(end)
-	return nil
+	return err
 }
 
 // Reset resets the batch for reuse.
 func (b *batch) Reset() {
-	b.ops = nil
+	//b.ops = nil
 	b.size = 0
 	b.operations = b.operations[:0]
 }
@@ -466,67 +543,114 @@ func (b *batch) Replay(w ethdb.KeyValueWriter) error {
 	return nil
 }
 
-// NewBatchWithSize creates a write-only database batch with pre-allocated buffer.
-func (d *Database) NewBatchWithSize(size int) ethdb.Batch {
-	return &batch{db: d, ops: make([]func(*bbolt.Tx) error, 0, size)}
-}
-
-// snapshot wraps a bbolt transaction for implementing the Snapshot interface.
+// snapshot wraps a database snapshot for implementing the Snapshot interface.
 type snapshot struct {
-	db *bbolt.DB
-	tx *bbolt.Tx
+	snapshotDB *bbolt.DB // db snapshot
+	path       string    // file path
 }
 
 // NewSnapshot creates a database snapshot based on the current state.
-// The created snapshot will not be affected by all following mutations
-// happened on the database.
 func (d *Database) NewSnapshot() (ethdb.Snapshot, error) {
-	// Start a read-only transaction that will be used as the snapshot
+	originalPath := d.db.Path()
+	dir := filepath.Dir(originalPath)
+	timestamp := time.Now().UnixNano()
+	snapPath := filepath.Join(dir, fmt.Sprintf("%v.%d.snapshot", filepath.Base(originalPath), timestamp))
+
 	tx, err := d.db.Begin(false)
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
+
+	// 复制数据库文件
+	if err := func() error {
+		sourceFile, err := os.Open(originalPath)
+		if err != nil {
+			return err
+		}
+		defer sourceFile.Close()
+
+		destFile, err := os.Create(snapPath)
+		if err != nil {
+			return err
+		}
+		defer destFile.Close()
+
+		_, err = io.Copy(destFile, sourceFile)
+		return err
+	}(); err != nil {
+		return nil, fmt.Errorf("failed to copy database file: %v", err)
+	}
+
+	snapDB, err := bbolt.Open(snapPath, 0600, &bbolt.Options{
+		ReadOnly: true,
+	})
+	if err != nil {
+		os.Remove(snapPath)
+		return nil, fmt.Errorf("failed to open snapshot database: %v", err)
+	}
+
 	return &snapshot{
-		db: d.db,
-		tx: tx,
+		snapshotDB: snapDB,
+		path:       snapPath,
 	}, nil
 }
 
 // Has retrieves if a key is present in the snapshot backing by a key-value
 // data store.
 func (snap *snapshot) Has(key []byte) (bool, error) {
-	bucket := snap.tx.Bucket([]byte("ethdb"))
-	if bucket == nil {
-		return false, nil
+	if snap.snapshotDB == nil {
+		return false, errors.New("snapshot released")
 	}
 
-	value := bucket.Get(key)
-	return value != nil, nil
+	var exists bool
+	err := snap.snapshotDB.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("ethdb"))
+		if bucket == nil {
+			return nil
+		}
+		exists = bucket.Get(key) != nil
+		return nil
+	})
+	return exists, err
 }
 
 // Get retrieves the given key if it's present in the snapshot backing by
 // key-value data store.
 func (snap *snapshot) Get(key []byte) ([]byte, error) {
-	bucket := snap.tx.Bucket([]byte("ethdb"))
-	if bucket == nil {
-		return nil, errors.New("bucket not found")
+	if snap.snapshotDB == nil {
+		return nil, errors.New("snapshot released")
 	}
 
-	value := bucket.Get(key)
-	if value == nil {
-		return nil, errors.New("not found")
+	var value []byte
+	err := snap.snapshotDB.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("ethdb"))
+		if bucket == nil {
+			return errors.New("bucket not found")
+		}
+		v := bucket.Get(key)
+		if v == nil {
+			return errors.New("not found")
+		}
+		value = make([]byte, len(v))
+		copy(value, v)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	ret := make([]byte, len(value))
-	copy(ret, value)
-	return ret, nil
+	return value, nil
 }
 
 // Release releases associated resources. Release should always succeed and can
 // be called multiple times without causing error.
 func (snap *snapshot) Release() {
-	if snap.tx != nil {
-		snap.tx.Rollback()
-		snap.tx = nil
+	if snap.snapshotDB != nil {
+		snap.snapshotDB.Close()
+		snap.snapshotDB = nil
+	}
+	if snap.path != "" {
+		os.Remove(snap.path)
+		snap.path = ""
 	}
 }
