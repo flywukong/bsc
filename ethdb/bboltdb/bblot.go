@@ -402,6 +402,7 @@ func (it *BBoltIterator) Next() bool {
 		if k == nil {
 			fmt.Println("key is nil")
 		}
+		log.Info("iterator get first key", "key", string(k))
 	} else {
 		k, v = it.cursor.Next()
 	}
@@ -409,6 +410,8 @@ func (it *BBoltIterator) Next() bool {
 	if k != nil && len(it.prefix) > 0 && !bytes.HasPrefix(k, it.prefix) {
 		k = nil
 	}
+
+	log.Info("iterator get  key", "key", string(k))
 
 	if k == nil {
 		return false
