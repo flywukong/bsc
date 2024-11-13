@@ -53,6 +53,16 @@ type revision struct {
 	journalIndex int
 }
 
+var (
+	trieCommitTimer  = metrics.NewRegisteredTimer("chain/trie/commits", nil)
+	trieCommitTimer2 = metrics.NewRegisteredTimer("chain/trie/commits2", nil)
+	snapCommitTimer  = metrics.NewRegisteredTimer("chain/snapshot/commits", nil)
+	codeCommitTimer  = metrics.NewRegisteredTimer("chain/code/commits", nil)
+
+	GetStateTimer   = metrics.NewRegisteredTimer("chain/storage/readtotal", nil)
+	GetAccountTimer = metrics.NewRegisteredTimer("chain/account/readtotal", nil)
+)
+
 // StateDB structs within the ethereum protocol are used to store anything
 // within the merkle trie. StateDBs take care of caching and storing
 // nested states. It's the general query interface to retrieve:
@@ -679,6 +689,10 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 // flag set. This is needed by the state journal to revert to the correct s-
 // destructed object instead of wiping all knowledge about the state object.
 func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
+	start := time.Now()
+	defer func() {
+		GetAccountTimer.Update(time.Since(start))
+	}()
 	// Prefer live objects if any is available
 	if obj := s.stateObjects[addr]; obj != nil {
 		return obj
@@ -1382,6 +1396,10 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 
 	commmitTrie := func() error {
 		commitErr := func() error {
+			start := time.Now()
+			defer func() {
+				trieCommitTimer.Update(time.Since(start))
+			}()
 			if s.stateRoot = s.StateIntermediateRoot(); s.fullProcessed && s.expectedRoot != s.stateRoot {
 				log.Error("Invalid merkle root", "remote", s.expectedRoot, "local", s.stateRoot)
 				return fmt.Errorf("invalid merkle root (remote: %x local: %x)", s.expectedRoot, s.stateRoot)
@@ -1490,7 +1508,11 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 			}
 
 			if postCommitFunc != nil {
+				start2 := time.Now()
 				err := postCommitFunc()
+				defer func() {
+					trieCommitTimer2.Update(time.Since(start2))
+				}()
 				if err != nil {
 					return err
 				}
@@ -1504,6 +1526,10 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 
 	commitFuncs := []func() error{
 		func() error {
+			start := time.Now()
+			defer func() {
+				codeCommitTimer.Update(time.Since(start))
+			}()
 			codeWriter := s.db.DiskDB().NewBatch()
 			for addr := range s.stateObjectsDirty {
 				if obj := s.stateObjects[addr]; !obj.deleted {
@@ -1535,6 +1561,10 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 			return nil
 		},
 		func() error {
+			start := time.Now()
+			defer func() {
+				snapCommitTimer.Update(time.Since(start))
+			}()
 			// If snapshotting is enabled, update the snapshot tree with this new version
 			if s.snap != nil {
 				if metrics.EnabledExpensive {

@@ -96,6 +96,10 @@ var (
 	blockExecutionTimer  = metrics.NewRegisteredTimer("chain/execution", nil)
 	blockWriteTimer      = metrics.NewRegisteredTimer("chain/write", nil)
 
+	blockStoreCommiter = metrics.NewRegisteredTimer("chain/blockstore/commit", nil)
+	trieDBCommiter1    = metrics.NewRegisteredTimer("chain/triedb/commit", nil)
+	//trieDBCommiter2    = metrics.NewRegisteredTimer("chain/block/commit", nil)
+
 	blockReorgMeter     = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
 	blockReorgAddMeter  = metrics.NewRegisteredMeter("chain/reorg/add", nil)
 	blockReorgDropMeter = metrics.NewRegisteredMeter("chain/reorg/drop", nil)
@@ -1754,6 +1758,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
+		start := time.Now()
 		blockBatch := bc.db.BlockStore().NewBatch()
 		rawdb.WriteTd(blockBatch, block.Hash(), block.NumberU64(), externTd)
 		rawdb.WriteBlock(blockBatch, block)
@@ -1776,12 +1781,18 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		if bc.chainConfig.IsCancun(block.Number(), block.Time()) {
 			bc.sidecarsCache.Add(block.Hash(), block.Sidecars())
 		}
+
+		blockStoreCommiter.Update(time.Since(start))
 		wg.Done()
 	}()
 
 	tryCommitTrieDB := func() error {
+		start := time.Now()
 		bc.commitLock.Lock()
-		defer bc.commitLock.Unlock()
+		defer func() {
+			bc.commitLock.Unlock()
+			triedbCommitTimer.Update(time.Since(start))
+		}()
 
 		// If node is running in path mode, skip explicit gc operation
 		// which is unnecessary in this mode.
