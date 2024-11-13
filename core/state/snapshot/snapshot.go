@@ -54,6 +54,8 @@ var (
 
 	snapshotDBStorageTimer = metrics.NewRegisteredResettingTimer("state/snapshot/db/storage", nil)
 	snapshotDBAccountTimer = metrics.NewRegisteredResettingTimer("state/snapshot/db/account", nil)
+	SnapshotCommitTimer1   = metrics.NewRegisteredResettingTimer("state/snapshot/db/storage", nil)
+	SnapshotCommitTimer2   = metrics.NewRegisteredResettingTimer("state/snapshot/db/account", nil)
 
 	snapshotDirtyStorageHitMeter   = metrics.NewRegisteredMeter("state/snapshot/dirty/storage/hit", nil)
 	snapshotDirtyStorageMissMeter  = metrics.NewRegisteredMeter("state/snapshot/dirty/storage/miss", nil)
