@@ -95,6 +95,22 @@ var (
 	blockValidationTimer = metrics.NewRegisteredTimer("chain/validation", nil)
 	blockExecutionTimer  = metrics.NewRegisteredTimer("chain/execution", nil)
 	blockWriteTimer      = metrics.NewRegisteredTimer("chain/write", nil)
+	blockWriteTimer2     = metrics.NewRegisteredTimer("chain/write2", nil)
+	blockWriteTimer3     = metrics.NewRegisteredTimer("chain/write3", nil)
+	blockWriteTimer4     = metrics.NewRegisteredTimer("chain/write4", nil)
+
+	blockWriteTimer5 = metrics.NewRegisteredTimer("chain/write5", nil)
+	blockWriteTimer6 = metrics.NewRegisteredTimer("chain/write6", nil)
+
+	blockWriteTimer7 = metrics.NewRegisteredTimer("chain/write7", nil)
+
+	blockWriteTimer8   = metrics.NewRegisteredTimer("chain/write8", nil)
+	blockWriteTimer9   = metrics.NewRegisteredTimer("chain/write9", nil)
+	blockWriteTimer10  = metrics.NewRegisteredTimer("chain/write10", nil)
+	blockWriteTimer11  = metrics.NewRegisteredTimer("chain/write11", nil)
+	blockStoreCommiter = metrics.NewRegisteredTimer("chain/blockstore/commit", nil)
+	trieDBCommiter1    = metrics.NewRegisteredTimer("chain/triedb/commit", nil)
+	//trieDBCommiter2    = metrics.NewRegisteredTimer("chain/block/commit", nil)
 
 	blockReorgMeter     = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
 	blockReorgAddMeter  = metrics.NewRegisteredMeter("chain/reorg/add", nil)
@@ -1267,6 +1283,10 @@ func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 	bc.dbWg.Add(2)
 	defer bc.dbWg.Wait()
 	go func() {
+		start := time.Now()
+		defer func() {
+			blockWriteTimer9.Update(time.Since(start))
+		}()
 		defer bc.dbWg.Done()
 		// Add the block to the canonical chain number scheme and mark as the head
 		blockBatch := bc.db.BlockStore().NewBatch()
@@ -1280,6 +1300,10 @@ func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 		}
 	}()
 	go func() {
+		start := time.Now()
+		defer func() {
+			blockWriteTimer10.Update(time.Since(start))
+		}()
 		defer bc.dbWg.Done()
 
 		batch := bc.db.NewBatch()
@@ -1294,6 +1318,7 @@ func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 	// Update all in-memory chain markers in the last step
 	bc.hc.SetCurrentHeader(block.Header())
 
+	start := time.Now()
 	bc.currentSnapBlock.Store(block.Header())
 	headFastBlockGauge.Update(int64(block.NumberU64()))
 
@@ -1301,6 +1326,7 @@ func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 	headBlockGauge.Update(int64(block.NumberU64()))
 	justifiedBlockGauge.Update(int64(bc.GetJustifiedNumber(block.Header())))
 	finalizedBlockGauge.Update(int64(bc.getFinalizedNumber(block.Header())))
+	blockWriteTimer11.Update(time.Since(start))
 }
 
 // stopWithoutSaving stops the blockchain service. If any imports are currently in progress
@@ -1738,6 +1764,10 @@ func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
 // writeBlockWithState writes block, metadata and corresponding state data to the
 // database.
 func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, state *state.StateDB) error {
+	startWrite := time.Now()
+	defer func() {
+		blockWriteTimer2.Update(time.Since(startWrite))
+	}()
 	// Calculate the total difficulty of the block
 	ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
 	if ptd == nil {
@@ -1754,6 +1784,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
+		start := time.Now()
 		blockBatch := bc.db.BlockStore().NewBatch()
 		rawdb.WriteTd(blockBatch, block.Hash(), block.NumberU64(), externTd)
 		rawdb.WriteBlock(blockBatch, block)
@@ -1776,12 +1807,18 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		if bc.chainConfig.IsCancun(block.Number(), block.Time()) {
 			bc.sidecarsCache.Add(block.Hash(), block.Sidecars())
 		}
+
+		blockStoreCommiter.Update(time.Since(start))
 		wg.Done()
 	}()
 
 	tryCommitTrieDB := func() error {
+		start := time.Now()
 		bc.commitLock.Lock()
-		defer bc.commitLock.Unlock()
+		defer func() {
+			bc.commitLock.Unlock()
+			triedbCommitTimer.Update(time.Since(start))
+		}()
 
 		// If node is running in path mode, skip explicit gc operation
 		// which is unnecessary in this mode.
@@ -1867,6 +1904,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		return err
 	}
 
+	blockWriteTimer3.Update(time.Since(startWrite))
 	// Ensure no empty block body
 	if diffLayer != nil && block.Header().TxHash != types.EmptyRootHash {
 		// Filling necessary field
@@ -1882,8 +1920,9 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 
 		go bc.cacheDiffLayer(diffLayer, diffLayerCh)
 	}
-
+	blockWriteTimer4.Update(time.Since(startWrite))
 	wg.Wait()
+
 	return nil
 }
 
@@ -1901,6 +1940,11 @@ func (bc *BlockChain) WriteBlockAndSetHead(block *types.Block, receipts []*types
 // writeBlockAndSetHead is the internal implementation of WriteBlockAndSetHead.
 // This function expects the chain mutex to be held.
 func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.StateDB, emitHeadEvent bool) (status WriteStatus, err error) {
+	startWrite := time.Now()
+	defer func() {
+		blockWriteTimer6.Update(time.Since(startWrite))
+	}()
+
 	currentBlock := bc.CurrentBlock()
 	reorg, err := bc.forker.ReorgNeededWithFastFinality(currentBlock, block.Header())
 	if err != nil {
@@ -1911,9 +1955,11 @@ func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types
 		bc.highestVerifiedBlockFeed.Send(HighestVerifiedBlockEvent{Header: block.Header()})
 	}
 
+	start := time.Now()
 	if err := bc.writeBlockWithState(block, receipts, state); err != nil {
 		return NonStatTy, err
 	}
+	blockWriteTimer7.Update(time.Since(start))
 	if reorg {
 		// Reorganise the chain if the parent is not the head block
 		if block.ParentHash() != currentBlock.Hash() {
@@ -1926,9 +1972,11 @@ func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types
 		status = SideStatTy
 	}
 	// Set new head.
+	start = time.Now()
 	if status == CanonStatTy {
 		bc.writeHeadBlock(block)
 	}
+	blockWriteTimer8.Update(time.Since(start))
 	bc.futureBlocks.Remove(block.Hash())
 
 	if status == CanonStatTy {
@@ -2300,7 +2348,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		snapshotCommitTimer.Update(statedb.SnapshotCommits) // Snapshot commits are complete, we can mark them
 		triedbCommitTimer.Update(statedb.TrieDBCommits)     // Trie database commits are complete, we can mark them
 
-		blockWriteTimer.Update(time.Since(wstart) - statedb.AccountCommits - statedb.StorageCommits - statedb.SnapshotCommits - statedb.TrieDBCommits)
+		blockWriteTimer.Update(time.Since(wstart) - statedb.AccountCommits - statedb.StorageCommits -
+			statedb.SnapshotCommits - statedb.TrieDBCommits)
+		blockWriteTimer5.Update(time.Since(wstart))
 		blockInsertTimer.UpdateSince(start)
 
 		// Report the import stats before returning the various results
