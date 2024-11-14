@@ -95,6 +95,8 @@ var (
 	blockValidationTimer = metrics.NewRegisteredTimer("chain/validation", nil)
 	blockExecutionTimer  = metrics.NewRegisteredTimer("chain/execution", nil)
 	blockWriteTimer      = metrics.NewRegisteredTimer("chain/write", nil)
+	blockWriteTimer2     = metrics.NewRegisteredTimer("chain/write2", nil)
+	blockWriteTimer4     = metrics.NewRegisteredTimer("chain/write4", nil)
 
 	blockStoreCommiter = metrics.NewRegisteredTimer("chain/blockstore/commit", nil)
 	trieDBCommiter1    = metrics.NewRegisteredTimer("chain/triedb/commit", nil)
@@ -1742,6 +1744,10 @@ func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
 // writeBlockWithState writes block, metadata and corresponding state data to the
 // database.
 func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, state *state.StateDB) error {
+	startWrite := time.Now()
+	defer func() {
+		blockWriteTimer2.Update(time.Since(startWrite))
+	}()
 	// Calculate the total difficulty of the block
 	ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
 	if ptd == nil {
@@ -1878,6 +1884,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		return err
 	}
 
+	blockWriteTimer3.Update(time.Since(startWrite))
 	// Ensure no empty block body
 	if diffLayer != nil && block.Header().TxHash != types.EmptyRootHash {
 		// Filling necessary field
@@ -1893,8 +1900,9 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 
 		go bc.cacheDiffLayer(diffLayer, diffLayerCh)
 	}
-
+	blockWriteTimer4.Update(time.Since(startWrite))
 	wg.Wait()
+
 	return nil
 }
 

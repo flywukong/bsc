@@ -54,7 +54,9 @@ type revision struct {
 }
 
 var (
+	stateCommitTimer = metrics.NewRegisteredTimer("chain/state/commit", nil)
 	trieCommitTimer  = metrics.NewRegisteredTimer("chain/trie/commits", nil)
+
 	trieCommitTimer2 = metrics.NewRegisteredTimer("chain/trie/commits2", nil)
 	snapCommitTimer  = metrics.NewRegisteredTimer("chain/snapshot/commits", nil)
 	codeCommitTimer  = metrics.NewRegisteredTimer("chain/code/commits", nil)
@@ -1379,6 +1381,10 @@ func (s *StateDB) handleDestruction(nodes *trienode.MergedNodeSet) (map[common.A
 // for more chain context.
 func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash, *types.DiffLayer, error) {
 	// Short circuit in case any database failure occurred earlier.
+	start := time.Now()
+	defer func() {
+		stateCommitTimer.Update(time.Since(start))
+	}()
 	if s.dbErr != nil {
 		s.StopPrefetcher()
 		return common.Hash{}, nil, fmt.Errorf("commit aborted due to earlier error: %v", s.dbErr)
