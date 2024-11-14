@@ -98,7 +98,9 @@ var (
 	blockWriteTimer2     = metrics.NewRegisteredTimer("chain/write2", nil)
 	blockWriteTimer3     = metrics.NewRegisteredTimer("chain/write3", nil)
 	blockWriteTimer4     = metrics.NewRegisteredTimer("chain/write4", nil)
-	blockWriteTimer5     = metrics.NewRegisteredTimer("chain/write5", nil)
+
+	blockWriteTimer5 = metrics.NewRegisteredTimer("chain/write5", nil)
+	blockWriteTimer6 = metrics.NewRegisteredTimer("chain/write6", nil)
 
 	blockStoreCommiter = metrics.NewRegisteredTimer("chain/blockstore/commit", nil)
 	trieDBCommiter1    = metrics.NewRegisteredTimer("chain/triedb/commit", nil)
@@ -1922,6 +1924,11 @@ func (bc *BlockChain) WriteBlockAndSetHead(block *types.Block, receipts []*types
 // writeBlockAndSetHead is the internal implementation of WriteBlockAndSetHead.
 // This function expects the chain mutex to be held.
 func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.StateDB, emitHeadEvent bool) (status WriteStatus, err error) {
+	startWrite := time.Now()
+	defer func() {
+		blockWriteTimer6.Update(time.Since(startWrite))
+	}()
+
 	currentBlock := bc.CurrentBlock()
 	reorg, err := bc.forker.ReorgNeededWithFastFinality(currentBlock, block.Header())
 	if err != nil {
