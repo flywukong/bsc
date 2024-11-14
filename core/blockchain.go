@@ -98,6 +98,7 @@ var (
 	blockWriteTimer2     = metrics.NewRegisteredTimer("chain/write2", nil)
 	blockWriteTimer3     = metrics.NewRegisteredTimer("chain/write3", nil)
 	blockWriteTimer4     = metrics.NewRegisteredTimer("chain/write4", nil)
+	blockWriteTimer5     = metrics.NewRegisteredTimer("chain/write5", nil)
 
 	blockStoreCommiter = metrics.NewRegisteredTimer("chain/blockstore/commit", nil)
 	trieDBCommiter1    = metrics.NewRegisteredTimer("chain/triedb/commit", nil)
@@ -2320,7 +2321,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		snapshotCommitTimer.Update(statedb.SnapshotCommits) // Snapshot commits are complete, we can mark them
 		triedbCommitTimer.Update(statedb.TrieDBCommits)     // Trie database commits are complete, we can mark them
 
-		blockWriteTimer.Update(time.Since(wstart) - statedb.AccountCommits - statedb.StorageCommits - statedb.SnapshotCommits - statedb.TrieDBCommits)
+		blockWriteTimer.Update(time.Since(wstart) - statedb.AccountCommits - statedb.StorageCommits -
+			statedb.SnapshotCommits - statedb.TrieDBCommits)
+		blockWriteTimer5.Update(time.Since(wstart))
 		blockInsertTimer.UpdateSince(start)
 
 		// Report the import stats before returning the various results
