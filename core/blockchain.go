@@ -105,7 +105,7 @@ var (
 	blockWriteTimer7 = metrics.NewRegisteredTimer("chain/write7", nil)
 
 	blockWriteTimer8   = metrics.NewRegisteredTimer("chain/write8", nil)
-	blockWriteTimer9   = metrics.NewRegisteredTimer("chain/write8", nil)
+	blockWriteTimer9   = metrics.NewRegisteredTimer("chain/write9", nil)
 	blockStoreCommiter = metrics.NewRegisteredTimer("chain/blockstore/commit", nil)
 	trieDBCommiter1    = metrics.NewRegisteredTimer("chain/triedb/commit", nil)
 	//trieDBCommiter2    = metrics.NewRegisteredTimer("chain/block/commit", nil)
