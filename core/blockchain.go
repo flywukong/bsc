@@ -102,6 +102,10 @@ var (
 	blockWriteTimer5 = metrics.NewRegisteredTimer("chain/write5", nil)
 	blockWriteTimer6 = metrics.NewRegisteredTimer("chain/write6", nil)
 
+	blockWriteTimer7 = metrics.NewRegisteredTimer("chain/write7", nil)
+
+	blockWriteTimer8   = metrics.NewRegisteredTimer("chain/write8", nil)
+	blockWriteTimer9   = metrics.NewRegisteredTimer("chain/write8", nil)
 	blockStoreCommiter = metrics.NewRegisteredTimer("chain/blockstore/commit", nil)
 	trieDBCommiter1    = metrics.NewRegisteredTimer("chain/triedb/commit", nil)
 	//trieDBCommiter2    = metrics.NewRegisteredTimer("chain/block/commit", nil)
@@ -1274,6 +1278,10 @@ func (bc *BlockChain) ExportN(w io.Writer, first uint64, last uint64) error {
 //
 // Note, this function assumes that the `mu` mutex is held!
 func (bc *BlockChain) writeHeadBlock(block *types.Block) {
+	start := time.Now()
+	defer func() {
+		blockWriteTimer9.Update(time.Since(start))
+	}()
 	bc.dbWg.Add(2)
 	defer bc.dbWg.Wait()
 	go func() {
@@ -1939,9 +1947,11 @@ func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types
 		bc.highestVerifiedBlockFeed.Send(HighestVerifiedBlockEvent{Header: block.Header()})
 	}
 
+	start := time.Now()
 	if err := bc.writeBlockWithState(block, receipts, state); err != nil {
 		return NonStatTy, err
 	}
+	blockWriteTimer7.Update(time.Since(start))
 	if reorg {
 		// Reorganise the chain if the parent is not the head block
 		if block.ParentHash() != currentBlock.Hash() {
@@ -1954,9 +1964,11 @@ func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types
 		status = SideStatTy
 	}
 	// Set new head.
+	start = time.Now()
 	if status == CanonStatTy {
 		bc.writeHeadBlock(block)
 	}
+	blockWriteTimer8.Update(time.Since(start))
 	bc.futureBlocks.Remove(block.Hash())
 
 	if status == CanonStatTy {
