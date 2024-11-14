@@ -106,6 +106,8 @@ var (
 
 	blockWriteTimer8   = metrics.NewRegisteredTimer("chain/write8", nil)
 	blockWriteTimer9   = metrics.NewRegisteredTimer("chain/write9", nil)
+	blockWriteTimer10  = metrics.NewRegisteredTimer("chain/write10", nil)
+	blockWriteTimer11  = metrics.NewRegisteredTimer("chain/write11", nil)
 	blockStoreCommiter = metrics.NewRegisteredTimer("chain/blockstore/commit", nil)
 	trieDBCommiter1    = metrics.NewRegisteredTimer("chain/triedb/commit", nil)
 	//trieDBCommiter2    = metrics.NewRegisteredTimer("chain/block/commit", nil)
@@ -1278,13 +1280,14 @@ func (bc *BlockChain) ExportN(w io.Writer, first uint64, last uint64) error {
 //
 // Note, this function assumes that the `mu` mutex is held!
 func (bc *BlockChain) writeHeadBlock(block *types.Block) {
-	start := time.Now()
-	defer func() {
-		blockWriteTimer9.Update(time.Since(start))
-	}()
+
 	bc.dbWg.Add(2)
 	defer bc.dbWg.Wait()
 	go func() {
+		start := time.Now()
+		defer func() {
+			blockWriteTimer9.Update(time.Since(start))
+		}()
 		defer bc.dbWg.Done()
 		// Add the block to the canonical chain number scheme and mark as the head
 		blockBatch := bc.db.BlockStore().NewBatch()
@@ -1298,6 +1301,10 @@ func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 		}
 	}()
 	go func() {
+		start := time.Now()
+		defer func() {
+			blockWriteTimer10.Update(time.Since(start))
+		}()
 		defer bc.dbWg.Done()
 
 		batch := bc.db.NewBatch()
@@ -1312,6 +1319,7 @@ func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 	// Update all in-memory chain markers in the last step
 	bc.hc.SetCurrentHeader(block.Header())
 
+	start := time.Now()
 	bc.currentSnapBlock.Store(block.Header())
 	headFastBlockGauge.Update(int64(block.NumberU64()))
 
@@ -1319,6 +1327,7 @@ func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 	headBlockGauge.Update(int64(block.NumberU64()))
 	justifiedBlockGauge.Update(int64(bc.GetJustifiedNumber(block.Header())))
 	finalizedBlockGauge.Update(int64(bc.getFinalizedNumber(block.Header())))
+	blockWriteTimer11.Update(time.Since(start))
 }
 
 // stopWithoutSaving stops the blockchain service. If any imports are currently in progress
