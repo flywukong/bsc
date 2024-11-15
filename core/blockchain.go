@@ -1294,26 +1294,28 @@ func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 		rawdb.WriteHeadHeaderHash(blockBatch, block.Hash())
 		rawdb.WriteHeadBlockHash(blockBatch, block.Hash())
 		rawdb.WriteHeadFastBlockHash(blockBatch, block.Hash())
+		rawdb.WriteTxLookupEntriesByBlock(blockBatch, block)
 		// Flush the whole batch into the disk, exit the node if failed
 		if err := blockBatch.Write(); err != nil {
 			log.Crit("Failed to update chain indexes and markers in block db", "err", err)
 		}
 	}()
-	go func() {
-		start := time.Now()
-		defer func() {
-			blockWriteTimer10.Update(time.Since(start))
-		}()
-		defer bc.dbWg.Done()
 
-		batch := bc.db.NewBatch()
-		rawdb.WriteTxLookupEntriesByBlock(batch, block)
-
-		// Flush the whole batch into the disk, exit the node if failed
-		if err := batch.Write(); err != nil {
-			log.Crit("Failed to update chain indexes in chain db", "err", err)
-		}
-	}()
+	//go func() {
+	//	start := time.Now()
+	//	defer func() {
+	//		blockWriteTimer10.Update(time.Since(start))
+	//	}()
+	//	defer bc.dbWg.Done()
+	//
+	//	batch := bc.db.NewBatch()
+	//	rawdb.WriteTxLookupEntriesByBlock(batch, block)
+	//
+	//	// Flush the whole batch into the disk, exit the node if failed
+	//	if err := batch.Write(); err != nil {
+	//		log.Crit("Failed to update chain indexes in chain db", "err", err)
+	//	}
+	//}()
 
 	// Update all in-memory chain markers in the last step
 	bc.hc.SetCurrentHeader(block.Header())
@@ -2770,7 +2772,7 @@ func (bc *BlockChain) reorg(oldHead *types.Header, newHead *types.Block) error {
 		blockBatch   = bc.db.BlockStore().NewBatch()
 	)
 	for _, tx := range diffs {
-		rawdb.DeleteTxLookupEntry(indexesBatch, tx)
+		rawdb.DeleteTxLookupEntry(blockBatch, tx)
 	}
 	// Delete all hash markers that are not part of the new canonical chain.
 	// Because the reorg function does not handle new chain head, all hash
