@@ -6,11 +6,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	ethBolt "github.com/ethereum/go-ethereum/ethdb/bboltdb"
+	"github.com/ethereum/go-ethereum/ethdb"
 )
 
 var (
-	boltDB          *ethBolt.Database
+	pebbleDB        ethdb.Database
 	createErr       error
 	DoneTaskNum     uint64
 	SuccTaskNum     uint64
@@ -21,19 +21,19 @@ var (
 
 var ctx = context.Background()
 
-func InitDb(addr string) *ethBolt.Database {
-	boltDB, createErr = ethBolt.New(addr, 4000, 65536, "eth/db/chaindata/",
-		false, false)
-	if createErr != nil {
-		fmt.Println("create pebble err", createErr.Error())
-		panic("create err")
+func InitDb(db ethdb.Database) ethdb.Database {
+	if db.BlockStore() != nil {
+		pebbleDB = db.BlockStore()
+		fmt.Println("init block store finish")
+	} else {
+		panic("no init")
 	}
-	return boltDB
+	return nil
 }
 
 func (job *Job) UploadToKvRocks() error {
 	if len(job.Kvbuffer) > 0 {
-		kvBatch := boltDB.NewBatch()
+		kvBatch := pebbleDB.NewBatch()
 		for key, value := range job.Kvbuffer {
 			batchErr := kvBatch.Put([]byte(key), value)
 			if batchErr != nil {
@@ -45,6 +45,7 @@ func (job *Job) UploadToKvRocks() error {
 			fmt.Println("send kv rocks error", err.Error())
 			return err
 		}
+		
 	}
 
 	return nil

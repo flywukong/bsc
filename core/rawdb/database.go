@@ -1375,7 +1375,7 @@ func MigrateDatabase(db ethdb.Database, addr string) error {
 		snapcount   uint64
 	)
 	// init remote db for data sending
-	InitDb(addr)
+	InitDb(db)
 
 	count = 0
 	snapcount = 0
@@ -1392,7 +1392,7 @@ func MigrateDatabase(db ethdb.Database, addr string) error {
 		value := make([]byte, len(v))
 		copy(value, v)
 
-		if isTxnKey(key) {
+		if !isTxnKey(key) {
 			continue
 		}
 		// ignore snapshot data
