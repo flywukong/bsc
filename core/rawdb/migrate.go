@@ -11,6 +11,7 @@ import (
 
 var (
 	pebbleDB        ethdb.Database
+	originDB        ethdb.Database
 	createErr       error
 	DoneTaskNum     uint64
 	SuccTaskNum     uint64
@@ -24,6 +25,7 @@ var ctx = context.Background()
 func InitDb(db ethdb.Database) ethdb.Database {
 	if db.BlockStore() != nil {
 		pebbleDB = db.BlockStore()
+		originDB = db
 		fmt.Println("init block store finish")
 	} else {
 		panic("no init")
@@ -45,7 +47,15 @@ func (job *Job) UploadToKvRocks() error {
 			fmt.Println("send kv rocks error", err.Error())
 			return err
 		}
-		
+		fmt.Println("write txn batch finish")
+
+		for key, _ := range job.Kvbuffer {
+			delErr := originDB.Delete([]byte(key))
+			if delErr != nil {
+				panic("delete key err")
+			}
+		}
+
 	}
 
 	return nil
