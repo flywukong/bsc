@@ -668,7 +668,7 @@ func (iter *pebbleIterator) Next() bool {
 		return iter.iter.Valid()
 	}
 	flag := iter.iter.Next()
-	log.Info("iterator get next key", "key:", string(iter.iter.Key()))
+	//log.Info("iterator get next key", "key:", string(iter.iter.Key()))
 	return flag
 }
 
