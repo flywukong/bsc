@@ -91,6 +91,7 @@ Remove blockchain and state databases`,
 			dbHbss2PbssCmd,
 			dbTrieGetCmd,
 			dbTrieDeleteCmd,
+			dbMigrateCmd,
 		},
 	}
 	dbInspectCmd = &cli.Command{
@@ -237,6 +238,20 @@ WARNING: This is a low-level operation which may cause database corruption!`,
 		}, utils.NetworkFlags, utils.DatabaseFlags),
 		Description: "This command looks up the specified database key from the database.",
 	}
+	dbMigrateCmd = &cli.Command{
+		Action:    utils.MigrateFlags(migrate),
+		Name:      "migrate",
+		ArgsUsage: "",
+		Flags: []cli.Flag{
+			utils.DataDirFlag,
+			utils.SyncModeFlag,
+			utils.DataDirFlag2,
+		},
+		Usage: "Migrate data in the database," +
+			"./geth  db migrate --datadir ./node --datadir ./node2",
+		Description: `This commands iterates the entire database. If the optional 'prefix' and 'start' arguments are provided, then the iteration is limited to the given subset of data.`,
+	}
+
 	dbDumpFreezerIndex = &cli.Command{
 		Action:    freezerInspect,
 		Name:      "freezer-index",
@@ -471,6 +486,37 @@ func inspectTrie(ctx *cli.Context) error {
 		theInspect.DisplayResult()
 	}
 	return nil
+}
+
+func migrate(ctx *cli.Context) error {
+	stack, _ := makeConfigNode(ctx)
+	defer stack.Close()
+
+	db := utils.MakeChainDatabase(ctx, stack, true, false)
+	defer db.Close()
+
+	// fmt.Println("ctx,", ctx.String(""))
+
+	var destDir string
+	/*
+		if !ctx.GlobalIsSet(utils.DataDirFlag.Name) {
+			return errors.New("datadir must be set")
+		}
+	
+	*/
+
+	destDir = ctx.Args().Get(0)
+
+	if !filepath.IsAbs(destDir) {
+		// force absolute paths, which often fail due to the splicing of relative paths
+		fmt.Println("datadir not abs path" + destDir)
+	}
+
+	var result error
+	fmt.Println("dest dir", destDir)
+	result = rawdb.MigrateDatabase(db, destDir)
+
+	return result
 }
 
 func inspect(ctx *cli.Context) error {

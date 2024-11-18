@@ -96,6 +96,13 @@ var (
 		Value:    flags.DirectoryString(node.DefaultDataDir()),
 		Category: flags.EthCategory,
 	}
+
+	DataDirFlag2 = &flags.DirectoryFlag{
+		Name:  "datadir2",
+		Usage: "Data directory for destination the databases and keystore",
+		Value: flags.DirectoryString(node.DefaultDataDir()),
+	}
+
 	MultiDataBaseFlag = &cli.BoolFlag{
 		Name: "multidatabase",
 		Usage: "Enable a separated state and block database, it will be created within two subdirectory called state and block, " +
@@ -2740,4 +2747,18 @@ func setInstance(ctx *cli.Context, cfg *node.Config) {
 	cfg.WSPort = node.DefaultWSPort + cfg.Instance*2 - 2
 	cfg.P2P.ListenAddr = fmt.Sprintf(":%d", node.DefaultListenPort+cfg.Instance-1)
 	cfg.P2P.DiscAddr = fmt.Sprintf(":%d", node.DefaultDiscPort+cfg.Instance-1)
+}
+
+func MigrateFlags(action func(ctx *cli.Context) error) func(*cli.Context) error {
+	return func(ctx *cli.Context) error {
+		/*
+			for _, name := range ctx.FlagNames() {
+				if ctx.IsSet(name) {
+					ctx.GlobalSet(name, ctx.String(name))
+				}
+			}
+
+		*/
+		return action(ctx)
+	}
 }
