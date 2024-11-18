@@ -502,7 +502,7 @@ func migrate(ctx *cli.Context) error {
 		if !ctx.GlobalIsSet(utils.DataDirFlag.Name) {
 			return errors.New("datadir must be set")
 		}
-	
+
 	*/
 
 	destDir = ctx.Args().Get(0)

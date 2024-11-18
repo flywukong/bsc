@@ -1284,6 +1284,13 @@ func isChainData(key, value []byte) bool {
 	return false
 }
 
+func isTxnKey(key []byte) bool {
+	if bytes.HasPrefix(key, txLookupPrefix) || bytes.Equal(key, txIndexTailKey) {
+		return true
+	}
+	return false
+}
+
 func MigrateDatabase(db ethdb.Database, addr string) error {
 	fmt.Println("begin migrate")
 
@@ -1385,6 +1392,9 @@ func MigrateDatabase(db ethdb.Database, addr string) error {
 		value := make([]byte, len(v))
 		copy(value, v)
 
+		if isTxnKey(key) {
+			continue
+		}
 		// ignore snapshot data
 		/*
 			if (bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)) || (bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)) {
