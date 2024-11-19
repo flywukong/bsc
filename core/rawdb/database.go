@@ -1116,6 +1116,8 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 				bodies.Add(size)
 			case bytes.HasPrefix(key, blockReceiptsPrefix) && len(key) == (len(blockReceiptsPrefix)+8+common.HashLength):
 				receipts.Add(size)
+			case bytes.HasPrefix(key, txLookupPrefix) && len(key) == (len(txLookupPrefix)+common.HashLength):
+				txLookups.Add(size)
 			case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerTDSuffix):
 				tds.Add(size)
 			case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerHashSuffix):
