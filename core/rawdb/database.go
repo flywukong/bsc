@@ -1442,9 +1442,11 @@ func MigrateDatabase(db ethdb.Database, addr string) error {
 	}
 
 	txnTailValue, err := db.Get(txIndexTailKey)
-	if err != nil {
+	if err == nil {
 		fmt.Println("put tail meta ")
 		tempBatch[string(txIndexTailKey)] = txnTailValue
+	} else {
+		fmt.Println("get  tail meta err" + err.Error())
 	}
 
 	if len(tempBatch) > 0 {
