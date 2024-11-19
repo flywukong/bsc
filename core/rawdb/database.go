@@ -1306,7 +1306,7 @@ func MigrateDatabase(db ethdb.Database, addr string) error {
 		fmt.Println("get first key error", err.Error())
 	}
 
-	it := db.NewIterator([]byte(""), startKey)
+	it := db.NewIterator(txLookupPrefix, startKey)
 
 	// taskCache store recent 15000 batch info,
 	// only store the first key of batch as the startKey if task fail
@@ -1440,6 +1440,13 @@ func MigrateDatabase(db ethdb.Database, addr string) error {
 		}
 
 	}
+
+	txnTailValue, err := db.Get(txIndexTailKey)
+	if err != nil {
+		fmt.Println("put tail meta ")
+		tempBatch[string(txIndexTailKey)] = txnTailValue
+	}
+
 	if len(tempBatch) > 0 {
 		batch_count++
 		dispatcher.SendKv(tempBatch, batch_count)
