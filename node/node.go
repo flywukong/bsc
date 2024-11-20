@@ -881,7 +881,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
 	} else {
 		typeEngine := n.config.DBEngine
 		if usingBolt {
-			typeEngine = "bolt"
+			typeEngine = "pebble"
 		}
 		db, err = rawdb.Open(rawdb.OpenOptions{
 			Type:              typeEngine,
