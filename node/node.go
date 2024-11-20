@@ -74,11 +74,11 @@ const (
 	initializingState = iota
 	runningState
 	closedState
-	blockDbCacheSize           = 256
-	blockDbHandlesMinSize      = 1000
-	blockDbHandlesMaxSize      = 2000
-	chainDbMemoryPercentage    = 50
-	chainDbHandlesPercentage   = 50
+	blockDbCacheSize           = 256 * 5
+	blockDbHandlesMinSize      = 8000
+	blockDbHandlesMaxSize      = 12000
+	chainDbMemoryPercentage    = 40
+	chainDbHandlesPercentage   = 40
 	diffStoreHandlesPercentage = 20
 )
 
