@@ -718,9 +718,13 @@ func (dl *diskLayer) generate(stats *generatorStats) {
 	close(dl.genPending)
 	dl.lock.Unlock()
 
+	log.Info("Generated state snapshot finish0")
+
 	// Someone will be looking for us, wait it out
 	abort = <-dl.genAbort
+	log.Info("Generated state snapshot finish1")
 	abort <- nil
+	log.Info("Generated state snapshot finish2")
 }
 
 // increaseKey increase the input key by one bit. Return nil if the entire

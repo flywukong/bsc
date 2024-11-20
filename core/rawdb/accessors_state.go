@@ -49,6 +49,7 @@ func ReadCode(db ethdb.KeyValueReader, hash common.Hash) []byte {
 	if len(data) != 0 {
 		return data
 	}
+	log.Info("read code hash", "hash:", hash)
 	data, _ = db.Get(hash.Bytes())
 	return data
 }

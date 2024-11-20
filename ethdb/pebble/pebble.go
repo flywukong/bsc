@@ -652,7 +652,11 @@ func (d *Database) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
 		LowerBound: append(prefix, start...),
 		UpperBound: upperBound(prefix),
 	})
+	log.Info("new iterator with", "prefix", string(prefix),
+		"start key", string(start))
 	iter.First()
+	log.Info("first key", "key", string(iter.Key()))
+
 	return &pebbleIterator{iter: iter, moved: true, released: false}
 }
 
@@ -663,7 +667,9 @@ func (iter *pebbleIterator) Next() bool {
 		iter.moved = false
 		return iter.iter.Valid()
 	}
-	return iter.iter.Next()
+	flag := iter.iter.Next()
+	log.Info("iterator get next key", "key:", string(iter.iter.Key()))
+	return flag
 }
 
 // Error returns any accumulated error. Exhausting all the key/value pairs
