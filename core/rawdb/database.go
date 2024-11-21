@@ -1120,6 +1120,8 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 				tds.Add(size)
 			case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerHashSuffix):
 				numHashPairings.Add(size)
+			case bytes.HasPrefix(key, txLookupPrefix) && len(key) == (len(txLookupPrefix)+common.HashLength):
+				txLookups.Add(size)
 			case bytes.HasPrefix(key, headerNumberPrefix) && len(key) == (len(headerNumberPrefix)+common.HashLength):
 				hashNumPairings.Add(size)
 			default:
