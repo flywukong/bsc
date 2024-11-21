@@ -43,9 +43,7 @@ func TestPebbleDB(t *testing.T) {
 
 func BenchmarkPebbleDB(b *testing.B) {
 	dbtest.BenchDatabaseSuite(b, func() ethdb.KeyValueStore {
-		db, err := pebble.Open("", &pebble.Options{
-			FS: vfs.NewMem(),
-		})
+		db, err := pebble.Open("pebbledir", &pebble.Options{})
 		if err != nil {
 			b.Fatal(err)
 		}

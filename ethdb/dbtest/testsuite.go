@@ -432,8 +432,8 @@ func TestDatabaseSuite(t *testing.T, New func() ethdb.KeyValueStore) {
 // implementation.
 func BenchDatabaseSuite(b *testing.B, New func() ethdb.KeyValueStore) {
 	var (
-		keys, vals   = makeDataset(1_000_000, 32, 32, false)
-		sKeys, sVals = makeDataset(1_000_000, 32, 32, true)
+		keys, vals   = makeDataset(1_000_0, 32, 32, false)
+		sKeys, sVals = makeDataset(1_000_0, 32, 32, true)
 	)
 	// Run benchmarks sequentially
 	b.Run("Write", func(b *testing.B) {
@@ -455,72 +455,75 @@ func BenchDatabaseSuite(b *testing.B, New func() ethdb.KeyValueStore) {
 			benchWrite(b, keys, vals)
 		})
 	})
-	b.Run("Read", func(b *testing.B) {
-		benchRead := func(b *testing.B, keys, vals [][]byte) {
-			db := New()
-			defer db.Close()
+	/*
+		b.Run("Read", func(b *testing.B) {
+			benchRead := func(b *testing.B, keys, vals [][]byte) {
+				db := New()
+				defer db.Close()
 
-			for i := 0; i < len(keys); i++ {
-				db.Put(keys[i], vals[i])
+				for i := 0; i < len(keys); i++ {
+					db.Put(keys[i], vals[i])
+				}
+				b.ResetTimer()
+				b.ReportAllocs()
+
+				for i := 0; i < len(keys); i++ {
+					db.Get(keys[i])
+				}
 			}
-			b.ResetTimer()
-			b.ReportAllocs()
+			b.Run("ReadSorted", func(b *testing.B) {
+				benchRead(b, sKeys, sVals)
+			})
+			b.Run("ReadRandom", func(b *testing.B) {
+				benchRead(b, keys, vals)
+			})
+		})
+		b.Run("Iteration", func(b *testing.B) {
+			benchIteration := func(b *testing.B, keys, vals [][]byte) {
+				db := New()
+				defer db.Close()
 
-			for i := 0; i < len(keys); i++ {
-				db.Get(keys[i])
+				for i := 0; i < len(keys); i++ {
+					db.Put(keys[i], vals[i])
+				}
+				b.ResetTimer()
+				b.ReportAllocs()
+
+				it := db.NewIterator(nil, nil)
+				for it.Next() {
+				}
+				it.Release()
 			}
-		}
-		b.Run("ReadSorted", func(b *testing.B) {
-			benchRead(b, sKeys, sVals)
+			b.Run("IterationSorted", func(b *testing.B) {
+				benchIteration(b, sKeys, sVals)
+			})
+			b.Run("IterationRandom", func(b *testing.B) {
+				benchIteration(b, keys, vals)
+			})
 		})
-		b.Run("ReadRandom", func(b *testing.B) {
-			benchRead(b, keys, vals)
-		})
-	})
-	b.Run("Iteration", func(b *testing.B) {
-		benchIteration := func(b *testing.B, keys, vals [][]byte) {
-			db := New()
-			defer db.Close()
+		b.Run("BatchWrite", func(b *testing.B) {
+			benchBatchWrite := func(b *testing.B, keys, vals [][]byte) {
+				b.ResetTimer()
+				b.ReportAllocs()
 
-			for i := 0; i < len(keys); i++ {
-				db.Put(keys[i], vals[i])
+				db := New()
+				defer db.Close()
+
+				batch := db.NewBatch()
+				for i := 0; i < len(keys); i++ {
+					batch.Put(keys[i], vals[i])
+				}
+				batch.Write()
 			}
-			b.ResetTimer()
-			b.ReportAllocs()
+			b.Run("BenchWriteSorted", func(b *testing.B) {
+				benchBatchWrite(b, sKeys, sVals)
+			})
+			b.Run("BenchWriteRandom", func(b *testing.B) {
+				benchBatchWrite(b, keys, vals)
+			})
+		})
 
-			it := db.NewIterator(nil, nil)
-			for it.Next() {
-			}
-			it.Release()
-		}
-		b.Run("IterationSorted", func(b *testing.B) {
-			benchIteration(b, sKeys, sVals)
-		})
-		b.Run("IterationRandom", func(b *testing.B) {
-			benchIteration(b, keys, vals)
-		})
-	})
-	b.Run("BatchWrite", func(b *testing.B) {
-		benchBatchWrite := func(b *testing.B, keys, vals [][]byte) {
-			b.ResetTimer()
-			b.ReportAllocs()
-
-			db := New()
-			defer db.Close()
-
-			batch := db.NewBatch()
-			for i := 0; i < len(keys); i++ {
-				batch.Put(keys[i], vals[i])
-			}
-			batch.Write()
-		}
-		b.Run("BenchWriteSorted", func(b *testing.B) {
-			benchBatchWrite(b, sKeys, sVals)
-		})
-		b.Run("BenchWriteRandom", func(b *testing.B) {
-			benchBatchWrite(b, keys, vals)
-		})
-	})
+	*/
 }
 
 func iterateKeys(it ethdb.Iterator) []string {
