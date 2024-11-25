@@ -122,10 +122,10 @@ func New(file string, cache int, handles int, namespace string, readonly bool, e
 	options := &bbolt.Options{Timeout: 0,
 		ReadOnly: readonly,
 		NoSync:   ephemeral,
-		//		PageSize: * 1.5,
+		PageSize: 32 * 1024,
 	}
 
-	fmt.Println("page size is:", os.Getpagesize())
+	fmt.Println("page size is:", options.PageSize)
 
 	fullpath := filepath.Join(file, "bbolt.db")
 	dir := filepath.Dir(fullpath)
