@@ -127,10 +127,10 @@ func (indexer *txIndexer) loop(chain *BlockChain) {
 
 	// Listening to chain events and manipulate the transaction indexes.
 	var (
-		stop     chan struct{}                       // Non-nil if background routine is active.
-		done     chan struct{}                       // Non-nil if background routine is active.
-		lastHead uint64                              // The latest announced chain head (whose tx indexes are assumed created)
-		lastTail = rawdb.ReadTxIndexTail(indexer.db) // The oldest indexed block, nil means nothing indexed
+		stop     chan struct{}                                    // Non-nil if background routine is active.
+		done     chan struct{}                                    // Non-nil if background routine is active.
+		lastHead uint64                                           // The latest announced chain head (whose tx indexes are assumed created)
+		lastTail = rawdb.ReadTxIndexTail(indexer.db.BlockStore()) // The oldest indexed block, nil means nothing indexed
 
 		headCh = make(chan ChainHeadEvent)
 		sub    = chain.SubscribeChainHeadEvent(headCh)
@@ -143,7 +143,7 @@ func (indexer *txIndexer) loop(chain *BlockChain) {
 		stop = make(chan struct{})
 		done = make(chan struct{})
 		lastHead = head.Number().Uint64()
-		go indexer.run(rawdb.ReadTxIndexTail(indexer.db), head.NumberU64(), stop, done)
+		go indexer.run(rawdb.ReadTxIndexTail(indexer.db.BlockStore()), head.NumberU64(), stop, done)
 	}
 	for {
 		select {
@@ -151,13 +151,13 @@ func (indexer *txIndexer) loop(chain *BlockChain) {
 			if done == nil {
 				stop = make(chan struct{})
 				done = make(chan struct{})
-				go indexer.run(rawdb.ReadTxIndexTail(indexer.db), head.Block.NumberU64(), stop, done)
+				go indexer.run(rawdb.ReadTxIndexTail(indexer.db.BlockStore()), head.Block.NumberU64(), stop, done)
 			}
 			lastHead = head.Block.NumberU64()
 		case <-done:
 			stop = nil
 			done = nil
-			lastTail = rawdb.ReadTxIndexTail(indexer.db)
+			lastTail = rawdb.ReadTxIndexTail(indexer.db.BlockStore())
 		case ch := <-indexer.progress:
 			ch <- indexer.report(lastHead, lastTail)
 		case ch := <-indexer.term:

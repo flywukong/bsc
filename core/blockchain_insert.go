@@ -45,6 +45,7 @@ func (st *insertStats) report(chain []*types.Block, index int, snapDiffItems, sn
 		now     = mclock.Now()
 		elapsed = now.Sub(st.startTime)
 	)
+	log.Info("report start3")
 	// If we're at the last block of the batch or report period reached, log
 	if index == len(chain)-1 || elapsed >= statsReportLimit {
 		// Count the number of transactions in this segment
@@ -57,6 +58,7 @@ func (st *insertStats) report(chain []*types.Block, index int, snapDiffItems, sn
 		}
 		end := chain[index]
 
+		log.Info("report start4")
 		// Assemble the log context and send it to the logger
 		mgasps := float64(st.usedGas) * 1000 / float64(elapsed)
 		context := []interface{}{

@@ -74,11 +74,11 @@ const (
 	initializingState = iota
 	runningState
 	closedState
-	blockDbCacheSize           = 256
-	blockDbHandlesMinSize      = 1000
-	blockDbHandlesMaxSize      = 2000
-	chainDbMemoryPercentage    = 50
-	chainDbHandlesPercentage   = 50
+	blockDbCacheSize           = 256 * 5
+	blockDbHandlesMinSize      = 8000
+	blockDbHandlesMaxSize      = 12000
+	chainDbMemoryPercentage    = 40
+	chainDbHandlesPercentage   = 40
 	diffStoreHandlesPercentage = 20
 )
 
@@ -824,19 +824,24 @@ func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool
 		disableChainDbFreeze = true
 	}
 
-	chainDB, err := n.OpenDatabaseWithFreezer(name, chainDbCache, chainDataHandles, config.DatabaseFreezer, namespace, readonly, disableChainDbFreeze, false, config.PruneAncientData)
+	var usingBolt bool
+	if isMultiDatabase {
+		usingBolt = true
+	}
+
+	chainDB, err := n.OpenDatabaseWithFreezer(name, chainDbCache, chainDataHandles, config.DatabaseFreezer, namespace, readonly, disableChainDbFreeze, false, config.PruneAncientData, usingBolt)
 	if err != nil {
 		return nil, err
 	}
 
 	if isMultiDatabase {
 		// Allocate half of the  handles and chainDbCache to this separate state data database
-		stateDiskDb, err = n.OpenDatabaseWithFreezer(name+"/state", stateDbCache, stateDbHandles, "", "eth/db/statedata/", readonly, true, false, config.PruneAncientData)
+		stateDiskDb, err = n.OpenDatabaseWithFreezer(name+"/state", stateDbCache, stateDbHandles, "", "eth/db/statedata/", readonly, true, false, config.PruneAncientData, false)
 		if err != nil {
 			return nil, err
 		}
 
-		blockDb, err = n.OpenDatabaseWithFreezer(name+"/block", blockDbCacheSize, blockDbHandlesSize, "", "eth/db/blockdata/", readonly, false, false, config.PruneAncientData)
+		blockDb, err = n.OpenDatabaseWithFreezer(name+"/block", blockDbCacheSize, blockDbHandlesSize, "", "eth/db/blockdata/", readonly, false, false, config.PruneAncientData, false)
 		if err != nil {
 			return nil, err
 		}
@@ -862,7 +867,8 @@ func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool
 // also attaching a chain freezer to it that moves ancient chain data from the
 // database to immutable append-only files. If the node is an ephemeral one, a
 // memory database is returned.
-func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient, namespace string, readonly, disableFreeze, isLastOffset, pruneAncientData bool) (ethdb.Database, error) {
+func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
+	namespace string, readonly, disableFreeze, isLastOffset, pruneAncientData, usingBolt bool) (ethdb.Database, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 	if n.state == closedState {
@@ -873,8 +879,12 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
 	if n.config.DataDir == "" {
 		db = rawdb.NewMemoryDatabase()
 	} else {
+		typeEngine := n.config.DBEngine
+		if usingBolt {
+			typeEngine = "bolt"
+		}
 		db, err = rawdb.Open(rawdb.OpenOptions{
-			Type:              n.config.DBEngine,
+			Type:              typeEngine,
 			Directory:         n.ResolvePath(name),
 			AncientsDirectory: n.ResolveAncient(name, ancient),
 			Namespace:         namespace,

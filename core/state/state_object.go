@@ -205,6 +205,10 @@ func (s *stateObject) setOriginStorage(key common.Hash, value common.Hash) {
 
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
+	start := time.Now()
+	defer func() {
+		GetStateTimer.Update(time.Since(start))
+	}()
 	// If we have a pending write or clean cached, return that
 	if value, pending := s.pendingStorage[key]; pending {
 		return value
