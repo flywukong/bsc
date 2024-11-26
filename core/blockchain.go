@@ -2361,14 +2361,12 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		stats.processed++
 		stats.usedGas += usedGas
 
-		log.Info("report start0")
 		var snapDiffItems, snapBufItems common.StorageSize
 		if bc.snaps != nil {
 			snapDiffItems, snapBufItems, _ = bc.snaps.Size()
 		}
-		log.Info("report start1")
 		trieDiffNodes, trieBufNodes, trieImmutableBufNodes, _ := bc.triedb.Size()
-		log.Info("report start2")
+
 		stats.report(chain, it.index, snapDiffItems, snapBufItems, trieDiffNodes, trieBufNodes, trieImmutableBufNodes, status == CanonStatTy)
 
 		if !setHead {
