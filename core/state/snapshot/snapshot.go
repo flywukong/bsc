@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -548,6 +549,10 @@ func (t *Tree) cap(diff *diffLayer, layers int) *diskLayer {
 // The disk layer persistence should be operated in an atomic way. All updates should
 // be discarded if the whole transition if not finished.
 func diffToDisk(bottom *diffLayer) *diskLayer {
+	start := time.Now()
+	defer func() {
+		log.Info("diff to disk cost time", "time", time.Since(start).Milliseconds())
+	}()
 	var (
 		base  = bottom.parent.(*diskLayer)
 		batch = base.diskdb.NewBatch()
@@ -560,7 +565,9 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 		stats = <-abort
 	}
 	// Put the deletion in the batch writer, flush all updates in the final step.
+
 	rawdb.DeleteSnapshotRoot(batch)
+	log.Info("delte")
 
 	// Mark the original base as stale as we're going to create a new wrapper
 	base.lock.Lock()
@@ -570,6 +577,8 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 	base.stale = true
 	base.lock.Unlock()
 
+	start2 := time.Now()
+	start3 := time.Now()
 	// Destroy all the destructed accounts from the database
 	for hash := range bottom.destructSet {
 		// Skip any account not covered yet by the snapshot
@@ -599,6 +608,10 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 		}
 		it.Release()
 	}
+
+	log.Info("destructSet diff to disk  cost time", "time", time.Since(start2).Milliseconds())
+	start2 = time.Now()
+
 	// Push all updated accounts into the database
 	for hash, data := range bottom.accountData {
 		// Skip any account not covered yet by the snapshot
@@ -623,7 +636,9 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 			batch.Reset()
 		}
 	}
+	log.Info("account data  diff to disk  cost time", "time", time.Since(start2).Milliseconds())
 	// Push all the storage slots into the database
+	start2 = time.Now()
 	for accountHash, storage := range bottom.storageData {
 		// Skip any account not covered yet by the snapshot
 		if base.genMarker != nil && bytes.Compare(accountHash[:], base.genMarker) > 0 {
@@ -649,7 +664,10 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 			snapshotFlushStorageSizeMeter.Mark(int64(len(data)))
 		}
 	}
+
+	log.Info("storage data  diff to disk  cost time", "time", time.Since(start2).Milliseconds())
 	// Update the snapshot block marker and write any remainder data
+
 	rawdb.WriteSnapshotRoot(batch, bottom.root)
 
 	// Write out the generator progress marker and report
@@ -660,6 +678,7 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 	if err := batch.Write(); err != nil {
 		log.Crit("Failed to write leftover snapshot", "err", err)
 	}
+	log.Info("diff to disk  cost time2", "time", time.Since(start3).Milliseconds(), "ms", "s")
 	log.Debug("Journalled disk layer", "root", bottom.root, "complete", base.genMarker == nil)
 	res := &diskLayer{
 		root:       bottom.root,
