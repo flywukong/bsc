@@ -2301,7 +2301,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			return it.index, err
 		}
 		ptime := time.Since(pstart)
-		
+
 		// Validate the state using the default validator
 		vstart := time.Now()
 		if err := bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
@@ -2360,17 +2360,17 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		// Report the import stats before returning the various results
 		stats.processed++
 		stats.usedGas += usedGas
-		/*
-			log.Info("report start0")
-			var snapDiffItems, snapBufItems common.StorageSize
-			if bc.snaps != nil {
-				snapDiffItems, snapBufItems, _ = bc.snaps.Size()
-			}
-			log.Info("report start1")
-			trieDiffNodes, trieBufNodes, trieImmutableBufNodes, _ := bc.triedb.Size()
-			log.Info("report start2")
-			stats.report(chain, it.index, snapDiffItems, snapBufItems, trieDiffNodes, trieBufNodes, trieImmutableBufNodes, status == CanonStatTy)
-		*/
+
+		log.Info("report start0")
+		var snapDiffItems, snapBufItems common.StorageSize
+		if bc.snaps != nil {
+			snapDiffItems, snapBufItems, _ = bc.snaps.Size()
+		}
+		log.Info("report start1")
+		trieDiffNodes, trieBufNodes, trieImmutableBufNodes, _ := bc.triedb.Size()
+		log.Info("report start2")
+		stats.report(chain, it.index, snapDiffItems, snapBufItems, trieDiffNodes, trieBufNodes, trieImmutableBufNodes, status == CanonStatTy)
+
 		if !setHead {
 			// After merge we expect few side chains. Simply count
 			// all blocks the CL gives us for GC processing time

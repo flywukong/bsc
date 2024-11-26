@@ -892,9 +892,10 @@ func (t *Tree) DiskRoot() common.Hash {
 // the second return will always be 0. However, this will be made consistent with
 // the pathdb, which will require a second return.
 func (t *Tree) Size() (diffs common.StorageSize, buf common.StorageSize, preimages common.StorageSize) {
+	log.Info("get tree size 0")
 	t.lock.RLock()
 	defer t.lock.RUnlock()
-
+	log.Info("get tree size 1")
 	var size common.StorageSize
 	for _, layer := range t.layers {
 		if layer, ok := layer.(*diffLayer); ok {
