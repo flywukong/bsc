@@ -898,6 +898,7 @@ func (t *Tree) Size() (diffs common.StorageSize, buf common.StorageSize, preimag
 	log.Info("get tree size 1")
 	var size common.StorageSize
 	for _, layer := range t.layers {
+		log.Info("get tree size 2")
 		if layer, ok := layer.(*diffLayer); ok {
 			size += common.StorageSize(layer.memory)
 		}
