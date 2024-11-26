@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -603,7 +602,7 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 	}
 
 	//log.Info("destructSet diff to disk  cost time", "time", time.Since(start2).Milliseconds())
-	start2 = time.Now()
+	//start2 = time.Now()
 
 	// Push all updated accounts into the database
 	for hash, data := range bottom.accountData {
@@ -631,7 +630,7 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 	}
 	//log.Info("account data  diff to disk  cost time", "time", time.Since(start2).Milliseconds())
 	// Push all the storage slots into the database
-	start2 = time.Now()
+	//start2 = time.Now()
 	for accountHash, storage := range bottom.storageData {
 		// Skip any account not covered yet by the snapshot
 		if base.genMarker != nil && bytes.Compare(accountHash[:], base.genMarker) > 0 {
