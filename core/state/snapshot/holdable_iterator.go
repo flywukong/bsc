@@ -19,7 +19,6 @@ package snapshot
 import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/log"
 )
 
 // holdableIterator is a wrapper of underlying database iterator. It extends
@@ -74,7 +73,6 @@ func (it *holdableIterator) Release() {
 	it.atHeld = false
 	it.key = nil
 	it.val = nil
-	log.Info("iterator release")
 	it.it.Release()
 }
 

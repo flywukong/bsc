@@ -126,7 +126,6 @@ func (ctx *generatorContext) openIterator(kind string, start []byte) {
 func (ctx *generatorContext) reopenIterator(kind string) {
 	// Shift iterator one more step, so that we can reopen
 	// the iterator at the right position.
-	log.Info("reopen iterator")
 	var iter = ctx.account
 	if kind == snapStorage {
 		iter = ctx.storage
@@ -143,7 +142,6 @@ func (ctx *generatorContext) reopenIterator(kind string) {
 		return
 	}
 	next := iter.Key()
-	log.Info("get next key", "key", string(next))
 	iter.Release()
 	ctx.openIterator(kind, next[1:])
 }
