@@ -47,7 +47,6 @@ func (job *Job) UploadToKvRocks() error {
 			fmt.Println("send kv rocks error", err.Error())
 			return err
 		}
-		fmt.Println("write txn batch finish")
 
 		for key, _ := range job.Kvbuffer {
 			delErr := originDB.Delete([]byte(key))

@@ -1286,7 +1286,6 @@ func isChainData(key, value []byte) bool {
 
 func isTxnKey(key []byte) bool {
 	if (bytes.HasPrefix(key, txLookupPrefix) && len(key) == (len(txLookupPrefix)+common.HashLength)) || bytes.Equal(key, txIndexTailKey) {
-		fmt.Println("it is tx look up key")
 		return true
 	}
 	return false
