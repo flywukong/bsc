@@ -119,6 +119,21 @@ type Snapshot interface {
 	// Parent returns the subsequent layer of a snapshot, or nil if the base was
 	// reached.
 	Parent() snapshot
+	/*
+		// 0 not verified
+		// 1 verified and valid
+		// 2 verified and invalid
+		// 3 not found
+		VerificationStatus(hash common.Hash) int32
+	*/
+
+	// 0 not verified
+	// 1 verified and valid
+	// 2 verified and invalid
+	// 3 not found
+	Status() int32
+
+	CorrectAccounts(map[common.Hash][]byte)
 }
 
 // snapshot is the internal version of the snapshot data layer that supports some
@@ -380,6 +395,29 @@ func (t *Tree) Update(blockRoot common.Hash, parentRoot common.Hash, destructs m
 	log.Debug("Snapshot updated", "blockRoot", blockRoot)
 	return nil
 }
+
+/*
+func (t *Tree) VerificationStatus(hash common.Hash) int32 {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+
+	if diff, ok := t.layers[hash]; ok {
+		return diff.Status()
+	}
+	return 3
+}
+
+func (t *Tree) Remove(hash common.Hash) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
+	if diff, ok := t.layers[hash]; ok {
+		if 1 != diff.Status() {
+			delete(t.layers, hash)
+		}
+	}
+}
+*/
 
 func (t *Tree) CapLimit() int {
 	return t.capLimit

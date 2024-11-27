@@ -500,6 +500,7 @@ func (g *Genesis) Commit(db ethdb.Database, triedb *triedb.Database) (*types.Blo
 	if err := flushAlloc(&g.Alloc, db, triedb, block.Hash()); err != nil {
 		return nil, err
 	}
+	log.Info("Richard:", "block=", block.NumberU64(), " hash=", block.Hash(), " diffculty=", block.Difficulty())
 	rawdb.WriteTd(db.BlockStore(), block.Hash(), block.NumberU64(), block.Difficulty())
 	rawdb.WriteBlock(db.BlockStore(), block)
 	rawdb.WriteReceipts(db.BlockStore(), block.Hash(), block.NumberU64(), nil)

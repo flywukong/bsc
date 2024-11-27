@@ -121,6 +121,8 @@ type diffLayer struct {
 
 	diffed *bloomfilter.Filter // Bloom filter tracking all the diffed items up to the disk layer
 
+	status atomic.Int32
+
 	lock sync.RWMutex
 }
 
@@ -244,6 +246,18 @@ func (dl *diffLayer) Parent() snapshot {
 // it's still live.
 func (dl *diffLayer) Stale() bool {
 	return dl.stale.Load()
+}
+
+func (dl *diffLayer) Status() int32 {
+	return dl.status.Load()
+}
+
+func (dl *diffLayer) CorrectAccounts(accounts map[common.Hash][]byte) {
+	dl.lock.Lock()
+	defer dl.lock.Unlock()
+
+	dl.accountData = accounts
+	dl.status.Swap(1)
 }
 
 // Account directly retrieves the account associated with a particular hash in

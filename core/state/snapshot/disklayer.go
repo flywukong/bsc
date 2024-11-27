@@ -74,6 +74,13 @@ func (dl *diskLayer) Stale() bool {
 	return dl.stale
 }
 
+func (dl *diskLayer) Status() int32 {
+	return 1
+}
+
+func (dl *diskLayer) CorrectAccounts(map[common.Hash][]byte) {
+}
+
 // Accounts directly retrieves all accounts in current snapshot in
 // the snapshot slim data format.
 func (dl *diskLayer) Accounts() (map[common.Hash]*types.SlimAccount, error) {

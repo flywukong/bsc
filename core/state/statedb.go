@@ -80,7 +80,8 @@ type StateDB struct {
 	expectedRoot common.Hash // The state root in the block header
 	stateRoot    common.Hash // The calculation result of IntermediateRoot
 
-	fullProcessed bool
+	fullProcessed   bool
+	pipelineEnabled bool
 
 	// These maps hold the state changes (including the corresponding
 	// original value) that occurred in this **block**.
@@ -192,14 +193,19 @@ func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) 
 
 	if sdb.snaps != nil {
 		sdb.snap = sdb.snaps.Snapshot(root)
+		sdb.pipelineEnabled = true
 	}
 
-	tr, err := db.OpenTrie(root)
-	if err != nil {
-		return nil, err
+	if !sdb.pipelineEnabled {
+		tr, err := db.OpenTrie(root)
+		if err != nil {
+			return nil, err
+		}
+		_, sdb.noTrie = tr.(*trie.EmptyTrie)
+		sdb.trie = tr
+	} else {
+		sdb.trie = nil
 	}
-	_, sdb.noTrie = tr.(*trie.EmptyTrie)
-	sdb.trie = tr
 	return sdb, nil
 }
 
@@ -1017,12 +1023,66 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 	s.clearJournalAndRefund()
 }
 
+func (s *StateDB) UpdateSnapAfterExecution() error {
+	if !s.pipelineEnabled {
+		return nil
+	}
+
+	destructs := make(map[common.Hash]struct{})
+	accounts := make(map[common.Hash][]byte)
+	storages := make(map[common.Hash]map[common.Hash][]byte)
+
+	for addr := range s.stateObjectsPending {
+		if obj := s.stateObjects[addr]; !obj.deleted {
+			accounts[obj.addrHash] = types.SlimAccountRLP(obj.data)
+			pendingstorages := obj.GetPendingStorages()
+			if pendingstorages != nil {
+				storages[obj.addrHash] = pendingstorages
+			}
+		} else {
+			destructs[obj.addrHash] = struct{}{}
+		}
+	}
+
+	if len(destructs)>0 || len(accounts)>0 || len(storages)>0 {
+		err := s.snaps.Update(s.expectedRoot, s.originalRoot, destructs, accounts, storages)
+		if err != nil {
+			return err
+		}
+	}	
+
+	// log.Info("Richard:", "update snapshot after execution, expectedROOT=", s.expectedRoot)
+	return nil
+}
+
 // IntermediateRoot computes the current root hash of the state trie.
 // It is called in between transactions to get the root hash that
 // goes into transaction receipts.
 func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
-	// Finalise all the dirty storage states and write them into the tries
-	s.Finalise(deleteEmptyObjects)
+		// Finalise all the dirty storage states and write them into the tries
+		s.Finalise(deleteEmptyObjects)
+	if s.pipelineEnabled {
+		// check if parent has been validated
+		for {
+			status := s.snap.Status()
+			// log.Info("Richard:", "status=", status, " root=", s.snap.Root())
+			if status == 1 {
+				break
+			} else {
+				// time.Sleep(1)
+				continue
+			} 
+		}
+	}
+
+	if s.pipelineEnabled {
+		// log.Info("Richard:", "start to validate block,expectRoot=", s.expectedRoot)
+		tr, err := s.db.OpenTrie(s.originalRoot)
+		if err != nil {
+			panic("Failed to open state trie")
+		}
+		s.trie = tr
+	}
 	s.AccountsIntermediateRoot()
 	return s.StateIntermediateRoot()
 }
@@ -1383,6 +1443,9 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 	commmitTrie := func() error {
 		commitErr := func() error {
 			if s.stateRoot = s.StateIntermediateRoot(); s.fullProcessed && s.expectedRoot != s.stateRoot {
+				// if s.pipelineEnabled {
+				// s.snaps.Remove(s.expectedRoot)
+				//}
 				log.Error("Invalid merkle root", "remote", s.expectedRoot, "local", s.stateRoot)
 				return fmt.Errorf("invalid merkle root (remote: %x local: %x)", s.expectedRoot, s.stateRoot)
 			}
@@ -1540,14 +1603,21 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 				if metrics.EnabledExpensive {
 					defer func(start time.Time) { s.SnapshotCommits += time.Since(start) }(time.Now())
 				}
+
 				diffLayer.Destructs, diffLayer.Accounts, diffLayer.Storages = s.SnapToDiffLayer()
 				// Only update if there's a state transition (skip empty Clique blocks)
 				if parent := s.snap.Root(); parent != s.expectedRoot {
+				if !s.pipelineEnabled {
 					err := s.snaps.Update(s.expectedRoot, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages)
 
 					if err != nil {
 						log.Warn("Failed to update snapshot tree", "from", parent, "to", s.expectedRoot, "err", err)
 					}
+				} else {
+					s.snap = s.snaps.Snapshot(s.expectedRoot)
+					s.snap.CorrectAccounts(s.accounts)
+					// log.Info("Richard:", "correct accounts", block, " root=", s.snap.Root(), " o_root=",s.originalRoot, " e_root=", s.expectedRoot)
+				}
 
 					// Keep n diff layers in the memory
 					// - head layer is paired with HEAD state
@@ -1580,7 +1650,7 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 			return common.Hash{}, nil, r
 		}
 	}
-
+	log.Info("Richard:", "commit done, root=", s.stateRoot)
 	root := s.stateRoot
 	s.snap = nil
 	if root == (common.Hash{}) {
