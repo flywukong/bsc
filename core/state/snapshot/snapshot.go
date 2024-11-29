@@ -667,10 +667,18 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 			}
 			snapshotFlushStorageItemMeter.Mark(1)
 			snapshotFlushStorageSizeMeter.Mark(int64(len(data)))
-		}
-		log.Info("batch value size total0", "size:", batch.ValueSize())
-	}
 
+			if batch.ValueSize() > 1*1024*1024 {
+				log.Info("batch write3")
+				log.Info("batch value size total0", "size:", batch.ValueSize())
+				if err := batch.Write(); err != nil {
+					log.Crit("Failed to write storage deletions", "err", err)
+				}
+				batch.Reset()
+			}
+		}
+
+	}
 	start2 = time.Now()
 	log.Info("storage data  diff to disk  cost time", "time", time.Since(start2).Milliseconds())
 	// Update the snapshot block marker and write any remainder data
