@@ -406,6 +406,7 @@ func (t *Tree) Cap(root common.Hash, layers int) error {
 	if snap == nil {
 		return fmt.Errorf("snapshot [%#x] missing", root)
 	}
+	log.Info("snap cap begin")
 	diff, ok := snap.(*diffLayer)
 	if !ok {
 		return fmt.Errorf("snapshot [%#x] is disk layer", root)
