@@ -668,6 +668,7 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 			snapshotFlushStorageItemMeter.Mark(1)
 			snapshotFlushStorageSizeMeter.Mark(int64(len(data)))
 		}
+		log.Info("batch value size total0", "size:", batch.ValueSize())
 	}
 
 	start2 = time.Now()
@@ -678,13 +679,14 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 
 	rawdb.WriteSnapshotRoot(batch, bottom.root)
 
+	log.Info("batch value size total1", "size:", batch.ValueSize())
 	// Write out the generator progress marker and report
 	journalProgress(batch, base.genMarker, stats)
 
 	// Flush all the updates in the single db operation. Ensure the
 	// disk layer transition is atomic.
 
-	log.Info("batch value size total", "size:", batch.ValueSize())
+	log.Info("batch value size total2", "size:", batch.ValueSize())
 	if err := batch.Write(); err != nil {
 		log.Crit("Failed to write leftover snapshot", "err", err)
 	}
