@@ -601,11 +601,13 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 			// huge). It's ok to flush, the root will go missing in case of a
 			// crash and we'll detect and regenerate the snapshot.
 			if batch.ValueSize() > 1*1024*1024 {
+				log.Info("batch write1")
 				if err := batch.Write(); err != nil {
 					log.Crit("Failed to write storage deletions", "err", err)
 				}
 				batch.Reset()
 			}
+			log.Info("batch value size1", "size:", batch.ValueSize())
 		}
 		it.Release()
 	}
@@ -631,11 +633,13 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 		// root will go missing in case of a crash and we'll detect and regen
 		// the snapshot.
 		if batch.ValueSize() > 1*1024*1024 {
+			log.Info("batch write2")
 			if err := batch.Write(); err != nil {
 				log.Crit("Failed to write storage deletions", "err", err)
 			}
 			batch.Reset()
 		}
+		log.Info("batch value size2", "size:", batch.ValueSize())
 	}
 	log.Info("account data  diff to disk  cost time", "time", time.Since(start2).Milliseconds())
 	// Push all the storage slots into the database
@@ -666,8 +670,11 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 		}
 	}
 
+	start2 = time.Now()
 	log.Info("storage data  diff to disk  cost time", "time", time.Since(start2).Milliseconds())
 	// Update the snapshot block marker and write any remainder data
+
+	log.Info("diff to disk cost time3", "time", time.Since(start).Milliseconds())
 
 	rawdb.WriteSnapshotRoot(batch, bottom.root)
 

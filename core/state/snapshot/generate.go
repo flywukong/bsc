@@ -113,6 +113,7 @@ func journalProgress(db ethdb.KeyValueWriter, marker []byte, stats *generatorSta
 	}
 	log.Debug("Journaled generator progress", "progress", logstr)
 	rawdb.WriteSnapshotGenerator(db, blob)
+	log.Info("blob size:", "size", len(blob))
 }
 
 // proofResult contains the output of range proving which can be used
