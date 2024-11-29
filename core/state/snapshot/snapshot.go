@@ -580,6 +580,7 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 
 	start2 := time.Now()
 	start3 := time.Now()
+	var kvnum int
 	// Destroy all the destructed accounts from the database
 	for hash := range bottom.destructSet {
 		// Skip any account not covered yet by the snapshot
@@ -593,6 +594,7 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 		it := rawdb.IterateStorageSnapshots(base.diskdb, hash)
 		for it.Next() {
 			key := it.Key()
+			kvnum++
 			batch.Delete(key)
 			base.cache.Del(key[1:])
 			snapshotFlushStorageItemMeter.Mark(1)
@@ -623,6 +625,8 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 		}
 		// Push the account to disk
 		rawdb.WriteAccountSnapshot(batch, hash, data)
+
+		kvnum++
 		base.cache.Set(hash[:], data)
 		snapshotCleanAccountWriteMeter.Mark(int64(len(data)))
 
@@ -649,6 +653,7 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 		if base.genMarker != nil && bytes.Compare(accountHash[:], base.genMarker) > 0 {
 			continue
 		}
+
 		// Generation might be mid-account, track that case too
 		midAccount := base.genMarker != nil && bytes.Equal(accountHash[:], base.genMarker[:common.HashLength])
 
@@ -659,10 +664,12 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 			}
 			if len(data) > 0 {
 				rawdb.WriteStorageSnapshot(batch, accountHash, storageHash, data)
+				kvnum++
 				base.cache.Set(append(accountHash[:], storageHash[:]...), data)
 				snapshotCleanStorageWriteMeter.Mark(int64(len(data)))
 			} else {
 				rawdb.DeleteStorageSnapshot(batch, accountHash, storageHash)
+				kvnum++
 				base.cache.Set(append(accountHash[:], storageHash[:]...), nil)
 			}
 			snapshotFlushStorageItemMeter.Mark(1)
@@ -670,6 +677,7 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 
 			if batch.ValueSize() > 1*1024*1024 {
 				log.Info("batch write3")
+				log.Info("kv size", "num", kvnum)
 				log.Info("batch value size total0", "size:", batch.ValueSize())
 				if err := batch.Write(); err != nil {
 					log.Crit("Failed to write storage deletions", "err", err)
@@ -686,11 +694,12 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 	log.Info("diff to disk cost time3", "time", time.Since(start).Milliseconds())
 
 	rawdb.WriteSnapshotRoot(batch, bottom.root)
-
+	kvnum++
 	log.Info("batch value size total1", "size:", batch.ValueSize())
 	// Write out the generator progress marker and report
 	journalProgress(batch, base.genMarker, stats)
-
+	kvnum++
+	log.Info("kv size", "num", kvnum)
 	// Flush all the updates in the single db operation. Ensure the
 	// disk layer transition is atomic.
 
