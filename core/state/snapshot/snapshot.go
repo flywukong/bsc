@@ -683,6 +683,8 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 
 	// Flush all the updates in the single db operation. Ensure the
 	// disk layer transition is atomic.
+
+	log.Info("batch value size total", "size:", batch.ValueSize())
 	if err := batch.Write(); err != nil {
 		log.Crit("Failed to write leftover snapshot", "err", err)
 	}
