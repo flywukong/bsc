@@ -2248,6 +2248,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		// Process block using the parent state as reference point
 		statedb.SetExpectedStateRoot(block.Root())
 		pstart := time.Now()
+		log.Info("execution block begin", "block", block.Number())
 		statedb, receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
 		close(interruptCh) // state prefetch can be stopped
 		if err != nil {
@@ -2373,7 +2374,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 					"root", blockToHandle.Root())
 			}
 			bc.chainBlockFeed.Send(ChainHeadEvent{blockToHandle})
-			log.Info("Richard: sucessfully validation and commit")
+			log.Info("sucessfully validation and commit")
 		}(blockToHandle, statedb, receipts, usedGas)
 
 		// bc.chainBlockFeed.Send(ChainHeadEvent{block})
