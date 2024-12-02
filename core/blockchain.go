@@ -1742,7 +1742,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
 	if ptd == nil {
 		state.StopPrefetcher()
-		log.Info("Richard:","failed to find parent hash", block.ParentHash())
+		log.Info("Richard:", "failed to find parent hash", block.ParentHash())
 		return consensus.ErrUnknownAncestor
 	}
 	// Make sure no inconsistent state is leaked during insertion
@@ -2241,7 +2241,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			// 2.do trie prefetch for MPT trie node cache
 			// it is for the big state trie tree, prefetch based on transaction's From/To address.
 			// trie prefetcher is thread safe now, ok to prefetch in a separate routine
-		
+
 			// go throwaway.TriePrefetchInAdvance(block, signer)
 		}
 
@@ -2262,20 +2262,21 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		if err = statedb.UpdateSnapAfterExecution(); err != nil {
 			panic("Richard: failed to update snapshot after execution")
 		}
+
+		log.Info("update snap after exection finish:", "block", block.Number())
 		var blockToHandle *types.Block
 		blockToHandle = block
 
 		go func(blockToHandle *types.Block, statedb *state.StateDB, receipts types.Receipts, usedGas uint64) {
 			ptime := time.Since(pstart)
-			
+
 			// Validate the state using the default validator
 			vstart := time.Now()
-			// log.Info("Richard:", "usedGas", usedGas, " blockToHandle=", blockToHandle.Header())
+			log.Info("validation begin", "usedGas", usedGas, " blockToHandle=", blockToHandle.Header())
 			if err := bc.validator.ValidateState(blockToHandle, statedb, receipts, usedGas); err != nil {
 				log.Error("Richard: validate state failed", "error", err)
 				bc.reportBlock(blockToHandle, receipts, err)
 				statedb.StopPrefetcher()
-
 
 				return
 				// return it.index, err
@@ -2371,10 +2372,10 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 					"txs", len(blockToHandle.Transactions()), "gas", blockToHandle.GasUsed(), "uncles", len(blockToHandle.Uncles()),
 					"root", blockToHandle.Root())
 			}
-			 bc.chainBlockFeed.Send(ChainHeadEvent{blockToHandle})
+			bc.chainBlockFeed.Send(ChainHeadEvent{blockToHandle})
 			log.Info("Richard: sucessfully validation and commit")
 		}(blockToHandle, statedb, receipts, usedGas)
-		
+
 		// bc.chainBlockFeed.Send(ChainHeadEvent{block})
 		block, err = it.next()
 	}

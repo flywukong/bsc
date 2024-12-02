@@ -1025,6 +1025,7 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 
 func (s *StateDB) UpdateSnapAfterExecution() error {
 	if !s.pipelineEnabled {
+		log.Info("pipe line not enable")
 		return nil
 	}
 
@@ -1044,14 +1045,15 @@ func (s *StateDB) UpdateSnapAfterExecution() error {
 		}
 	}
 
-	if len(destructs)>0 || len(accounts)>0 || len(storages)>0 {
+	if len(destructs) > 0 || len(accounts) > 0 || len(storages) > 0 {
 		err := s.snaps.Update(s.expectedRoot, s.originalRoot, destructs, accounts, storages)
 		if err != nil {
+			log.Info("fail to update snap", "err", err.Error())
 			return err
 		}
-	}	
+	}
 
-	// log.Info("Richard:", "update snapshot after execution, expectedROOT=", s.expectedRoot)
+	log.Info("update snapshot after execution", " expectedROOT=", s.expectedRoot)
 	return nil
 }
 
@@ -1059,24 +1061,27 @@ func (s *StateDB) UpdateSnapAfterExecution() error {
 // It is called in between transactions to get the root hash that
 // goes into transaction receipts.
 func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
-		// Finalise all the dirty storage states and write them into the tries
-		s.Finalise(deleteEmptyObjects)
+	// Finalise all the dirty storage states and write them into the tries
+	s.Finalise(deleteEmptyObjects)
+	log.Info("intermediate root begin")
 	if s.pipelineEnabled {
+		//	log.Info("intermediate root in pipeline, for loop", "block", s.originalRoot)
 		// check if parent has been validated
 		for {
 			status := s.snap.Status()
 			// log.Info("Richard:", "status=", status, " root=", s.snap.Root())
+			log.Info("intermediate root", "status=", status, " root=", s.snap.Root())
 			if status == 1 {
 				break
 			} else {
 				// time.Sleep(1)
 				continue
-			} 
+			}
 		}
 	}
 
 	if s.pipelineEnabled {
-		// log.Info("Richard:", "start to validate block,expectRoot=", s.expectedRoot)
+		log.Info("start to validate block", "expectRoot=", s.expectedRoot)
 		tr, err := s.db.OpenTrie(s.originalRoot)
 		if err != nil {
 			panic("Failed to open state trie")
@@ -1607,17 +1612,17 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 				diffLayer.Destructs, diffLayer.Accounts, diffLayer.Storages = s.SnapToDiffLayer()
 				// Only update if there's a state transition (skip empty Clique blocks)
 				if parent := s.snap.Root(); parent != s.expectedRoot {
-				if !s.pipelineEnabled {
-					err := s.snaps.Update(s.expectedRoot, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages)
+					if !s.pipelineEnabled {
+						err := s.snaps.Update(s.expectedRoot, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages)
 
-					if err != nil {
-						log.Warn("Failed to update snapshot tree", "from", parent, "to", s.expectedRoot, "err", err)
+						if err != nil {
+							log.Warn("Failed to update snapshot tree", "from", parent, "to", s.expectedRoot, "err", err)
+						}
+					} else {
+						s.snap = s.snaps.Snapshot(s.expectedRoot)
+						s.snap.CorrectAccounts(s.accounts)
+						// log.Info("Richard:", "correct accounts", block, " root=", s.snap.Root(), " o_root=",s.originalRoot, " e_root=", s.expectedRoot)
 					}
-				} else {
-					s.snap = s.snaps.Snapshot(s.expectedRoot)
-					s.snap.CorrectAccounts(s.accounts)
-					// log.Info("Richard:", "correct accounts", block, " root=", s.snap.Root(), " o_root=",s.originalRoot, " e_root=", s.expectedRoot)
-				}
 
 					// Keep n diff layers in the memory
 					// - head layer is paired with HEAD state
