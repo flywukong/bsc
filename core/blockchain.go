@@ -2259,7 +2259,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		}
 
 		statedb.Finalise(bc.Config().IsEIP158(block.Number()))
-
 		if err = statedb.UpdateSnapAfterExecution(); err != nil {
 			panic("Richard: failed to update snapshot after execution")
 		}
@@ -2304,7 +2303,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 			// Write the block to the chain and get the status.
 			var (
-				wstart = time.Now()
+				//	wstart = time.Now()
 				status WriteStatus
 			)
 			if !setHead {
@@ -2321,25 +2320,28 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			}
 			// log.Info("Richard: write block and set head successfully", "block=", blockToHandle.Number() )
 			// Update the metrics touched during block commit
-			accountCommitTimer.Update(statedb.AccountCommits)   // Account commits are complete, we can mark them
-			storageCommitTimer.Update(statedb.StorageCommits)   // Storage commits are complete, we can mark them
-			snapshotCommitTimer.Update(statedb.SnapshotCommits) // Snapshot commits are complete, we can mark them
-			triedbCommitTimer.Update(statedb.TrieDBCommits)     // Trie database commits are complete, we can mark them
+			/*
+				accountCommitTimer.Update(statedb.AccountCommits)   // Account commits are complete, we can mark them
+				storageCommitTimer.Update(statedb.StorageCommits)   // Storage commits are complete, we can mark them
+				snapshotCommitTimer.Update(statedb.SnapshotCommits) // Snapshot commits are complete, we can mark them
+				triedbCommitTimer.Update(statedb.TrieDBCommits)     // Trie database commits are complete, we can mark them
 
-			blockWriteTimer.Update(time.Since(wstart) - statedb.AccountCommits - statedb.StorageCommits - statedb.SnapshotCommits - statedb.TrieDBCommits)
-			blockInsertTimer.UpdateSince(start)
+				blockWriteTimer.Update(time.Since(wstart) - statedb.AccountCommits - statedb.StorageCommits - statedb.SnapshotCommits - statedb.TrieDBCommits)
+				blockInsertTimer.UpdateSince(start)
 
-			// Report the import stats before returning the various results
-			stats.processed++
-			stats.usedGas += usedGas
+				// Report the import stats before returning the various results
+				stats.processed++
+				stats.usedGas += usedGas
 
-			var snapDiffItems, snapBufItems common.StorageSize
-			if bc.snaps != nil {
-				snapDiffItems, snapBufItems, _ = bc.snaps.Size()
-			}
-			trieDiffNodes, trieBufNodes, trieImmutableBufNodes, _ := bc.triedb.Size()
-			stats.report(chain, it.index, snapDiffItems, snapBufItems, trieDiffNodes, trieBufNodes, trieImmutableBufNodes, status == CanonStatTy)
+				var snapDiffItems, snapBufItems common.StorageSize
+				if bc.snaps != nil {
+					snapDiffItems, snapBufItems, _ = bc.snaps.Size()
+				}
+				trieDiffNodes, trieBufNodes, trieImmutableBufNodes, _ := bc.triedb.Size()
+				stats.report(chain, it.index, snapDiffItems, snapBufItems, trieDiffNodes, trieBufNodes, trieImmutableBufNodes, status == CanonStatTy)
 
+
+			*/
 			if !setHead {
 				// After merge we expect few side chains. Simply count
 				// all blocks the CL gives us for GC processing time
@@ -2374,7 +2376,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 					"root", blockToHandle.Root())
 			}
 			bc.chainBlockFeed.Send(ChainHeadEvent{blockToHandle})
-			log.Info("sucessfully validation and commit")
+			log.Info("sucessfully validation and commit", "block", block.Number())
 		}(blockToHandle, statedb, receipts, usedGas)
 
 		// bc.chainBlockFeed.Send(ChainHeadEvent{block})
