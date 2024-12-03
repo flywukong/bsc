@@ -81,6 +81,13 @@ func (dl *diskLayer) Status() int32 {
 func (dl *diskLayer) CorrectAccounts(map[common.Hash][]byte) {
 }
 
+func (dl *diskLayer) WaitAndGetVerifyRes() bool {
+	return true
+}
+
+func (dl *diskLayer) MarkValid() {
+}
+
 // Accounts directly retrieves all accounts in current snapshot in
 // the snapshot slim data format.
 func (dl *diskLayer) Accounts() (map[common.Hash]*types.SlimAccount, error) {
@@ -185,6 +192,6 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 // Update creates a new layer on top of the existing snapshot diff tree with
 // the specified data items. Note, the maps are retained by the method to avoid
 // copying everything.
-func (dl *diskLayer) Update(blockHash common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte) *diffLayer {
-	return newDiffLayer(dl, blockHash, destructs, accounts, storage)
+func (dl *diskLayer) Update(blockHash common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte, verified chan struct{}) *diffLayer {
+	return newDiffLayer(dl, blockHash, destructs, accounts, storage, verified)
 }

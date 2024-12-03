@@ -156,7 +156,8 @@ type StateDB struct {
 	StorageDeleted int
 
 	// Testing hooks
-	onCommit func(states *triestate.Set) // Hook invoked when commit is performed
+	onCommit   func(states *triestate.Set) // Hook invoked when commit is performed
+	noneedWait bool
 }
 
 // NewWithSharedPool creates a new state with sharedStorge on layer 1.5
@@ -971,6 +972,25 @@ func (s *StateDB) GetRefund() uint64 {
 	return s.refund
 }
 
+func (s *StateDB) SetNoWait() {
+	s.noneedWait = true
+}
+
+func (s *StateDB) WaitPipeVerification() error {
+	// We need wait for the parent trie to commit
+	start := time.Now()
+	if s.noneedWait {
+		log.Info("it is the first block, no need wait")
+	}
+	if s.snap != nil && !s.noneedWait {
+		if valid := s.snap.WaitAndGetVerifyRes(); !valid {
+			return fmt.Errorf("verification on parent snap failed")
+		}
+	}
+	log.Info("wait pipe verification cost :", "time", time.Since(start).Milliseconds())
+	return nil
+}
+
 // Finalise finalises the state by removing the destructed objects and clears
 // the journal as well as the refunds. Finalise, however, will not push any updates
 // into the tries just yet. Only IntermediateRoot or Commit will do that.
@@ -1029,6 +1049,8 @@ func (s *StateDB) UpdateSnapAfterExecution() error {
 		return nil
 	}
 
+	verified := make(chan struct{})
+
 	destructs := make(map[common.Hash]struct{})
 	accounts := make(map[common.Hash][]byte)
 	storages := make(map[common.Hash]map[common.Hash][]byte)
@@ -1046,7 +1068,8 @@ func (s *StateDB) UpdateSnapAfterExecution() error {
 	}
 
 	if len(destructs) > 0 || len(accounts) > 0 || len(storages) > 0 {
-		err := s.snaps.Update(s.expectedRoot, s.originalRoot, destructs, accounts, storages)
+		log.Info("update snapshot", "expect root", s.expectedRoot)
+		err := s.snaps.Update(s.expectedRoot, s.originalRoot, destructs, accounts, storages, verified)
 		if err != nil {
 			log.Info("fail to update snap", "err", err.Error())
 			return err
@@ -1065,29 +1088,44 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	s.Finalise(deleteEmptyObjects)
 	log.Info("intermediate root begin")
 	if s.pipelineEnabled {
-		//	log.Info("intermediate root in pipeline, for loop", "block", s.originalRoot)
-		// check if parent has been validated
-		for {
-			status := s.snap.Status()
-			// log.Info("Richard:", "status=", status, " root=", s.snap.Root())
-			log.Info("intermediate root", "status=", status, " root=", s.snap.Root())
-			if status == 1 {
-				break
-			} else {
-				// time.Sleep(1)
-				continue
-			}
+		if err := s.WaitPipeVerification(); err != nil {
+			panic("err wait verifcation")
 		}
-	}
-
-	if s.pipelineEnabled {
 		log.Info("start to validate block", "expectRoot=", s.expectedRoot)
 		tr, err := s.db.OpenTrie(s.originalRoot)
 		if err != nil {
 			panic("Failed to open state trie")
 		}
 		s.trie = tr
+		//	log.Info("intermediate root in pipeline, for loop", "block", s.originalRoot)
+		/*
+			// check if parent has been validated
+			for {
+				status := s.snap.Status()
+				// log.Info("Richard:", "status=", status, " root=", s.snap.Root())
+				log.Info("intermediate root", "status=", status, " root=", s.snap.Root())
+				if status == 1 {
+					break
+				} else {
+					// time.Sleep(1)
+					continue
+				}
+
+			}
+
+		*/
 	}
+	/*
+		if s.pipelineEnabled {
+			log.Info("start to validate block", "expectRoot=", s.expectedRoot)
+			tr, err := s.db.OpenTrie(s.originalRoot)
+			if err != nil {
+				panic("Failed to open state trie")
+			}
+			s.trie = tr
+		}
+
+	*/
 	s.AccountsIntermediateRoot()
 	return s.StateIntermediateRoot()
 }
@@ -1613,7 +1651,7 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 				// Only update if there's a state transition (skip empty Clique blocks)
 				if parent := s.snap.Root(); parent != s.expectedRoot {
 					if !s.pipelineEnabled {
-						err := s.snaps.Update(s.expectedRoot, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages)
+						err := s.snaps.Update(s.expectedRoot, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages, nil)
 
 						if err != nil {
 							log.Warn("Failed to update snapshot tree", "from", parent, "to", s.expectedRoot, "err", err)
@@ -1621,6 +1659,7 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 					} else {
 						s.snap = s.snaps.Snapshot(s.expectedRoot)
 						s.snap.CorrectAccounts(s.accounts)
+						s.snap.MarkValid()
 						// log.Info("Richard:", "correct accounts", block, " root=", s.snap.Root(), " o_root=",s.originalRoot, " e_root=", s.expectedRoot)
 					}
 
