@@ -2278,6 +2278,12 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		bc.blockCache.Add(block.Hash(), block)
 		bc.hc.numberCache.Add(block.Hash(), block.NumberU64())
 		bc.hc.headerCache.Add(block.Hash(), block.Header())
+
+		ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
+		// Make sure no inconsistent state is leaked during insertion
+		externTd := new(big.Int).Add(block.Difficulty(), ptd)
+
+		bc.hc.tdCache.Add(block.Hash(), externTd)
 		//	blockBatch := bc.db.BlockStore().NewBatch()
 		//	rawdb.WriteBlock(blockBatch, block)
 
@@ -2345,7 +2351,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				status, err = bc.writeBlockAndSetHead(blocksIn, receiptsIn, logsIn, state, false)
 			}
 			if err != nil {
-				log.Error("Richard:", "Failed to write block, err", err, "block", block.NumberU64())
+				log.Error("Richard:", ":Failed to write block, err", err, "block", block.NumberU64())
 				return
 				// return it.index, err
 			} else {
