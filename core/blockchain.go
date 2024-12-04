@@ -2348,6 +2348,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				log.Error("Richard:", "Failed to write block, err", err, "block", block.NumberU64())
 				return
 				// return it.index, err
+			} else {
+				log.Info("sucessfully validation and commit", "block", blocksIn.Number())
 			}
 			// log.Info("Richard: write block and set head successfully", "block=", blockToHandle.Number() )
 			// Update the metrics touched during block commit
@@ -2377,6 +2379,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				// After merge we expect few side chains. Simply count
 				// all blocks the CL gives us for GC processing time
 				//	bc.gcproc += proctime
+				log.Info("no set head")
 				return
 				// return it.index, nil // Direct block insertion of a single block
 			}
