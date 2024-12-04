@@ -2272,6 +2272,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			panic("Richard: failed to update snapshot after execution")
 		}
 
+		bc.blockCache.Add(block.Hash(), block)
+		bc.hc.numberCache.Add(block.Hash(), block.NumberU64())
 		// first block no need block validate
 		if bc.IsFirstBlock {
 			log.Info("it is the first block", block.Number())
