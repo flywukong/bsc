@@ -2163,7 +2163,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 	}
 
 	for block != nil && err == nil || errors.Is(err, ErrKnownBlock) {
-		// 如果 err 不为空且不是 ErrKnownBlock，打印错误日志
 		if err != nil && !errors.Is(err, ErrKnownBlock) {
 			log.Error("Error encountered during iteration", "error", err)
 		}
@@ -2274,6 +2273,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 		bc.blockCache.Add(block.Hash(), block)
 		bc.hc.numberCache.Add(block.Hash(), block.NumberU64())
+		blockBatch := bc.db.BlockStore().NewBatch()
+		rawdb.WriteBlock(blockBatch, block)
+
 		// first block no need block validate
 		if bc.IsFirstBlock {
 			log.Info("it is the first block", block.Number())
