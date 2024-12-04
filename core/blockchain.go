@@ -1740,9 +1740,11 @@ func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
 // writeBlockWithState writes block, metadata and corresponding state data to the
 // database.
 func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, state *state.StateDB) error {
+	log.Info("write block with state begin")
 	// Calculate the total difficulty of the block
 	ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
 	if ptd == nil {
+		log.Info("fail to get td finish")
 		state.StopPrefetcher()
 		log.Info("Richard:", "failed to find parent hash", block.ParentHash())
 		return consensus.ErrUnknownAncestor
