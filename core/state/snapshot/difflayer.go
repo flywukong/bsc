@@ -275,6 +275,7 @@ func (dl *diffLayer) WaitAndGetVerifyRes() bool {
 
 func (dl *diffLayer) MarkValid() {
 	close(dl.verifiedCh)
+	log.Info("mark valid")
 	//dl.valid = true
 }
 
