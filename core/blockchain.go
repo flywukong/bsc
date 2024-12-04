@@ -2344,9 +2344,10 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				"txs", len(block.Transactions()), "gas", block.GasUsed(), "uncles", len(block.Uncles()),
 				"root", block.Root())
 		}
-		bc.chainBlockFeed.Send(ChainHeadEvent{block})
+		//	bc.chainBlockFeed.Send(ChainHeadEvent{block})
 	}
 
+	log.Info("iterator blocks finish")
 	// Any blocks remaining here? The only ones we care about are the future ones
 	if block != nil && errors.Is(err, consensus.ErrFutureBlock) {
 		if err := bc.addFutureBlock(block); err != nil {
