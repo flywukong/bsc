@@ -1659,7 +1659,6 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 					} else {
 						s.snap = s.snaps.Snapshot(s.expectedRoot)
 						s.snap.CorrectAccounts(s.accounts)
-						s.snap.MarkValid()
 						// log.Info("Richard:", "correct accounts", block, " root=", s.snap.Root(), " o_root=",s.originalRoot, " e_root=", s.expectedRoot)
 					}
 
@@ -1694,6 +1693,8 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 			return common.Hash{}, nil, r
 		}
 	}
+
+	s.snap.MarkValid()
 	log.Info("Richard:", "commit done, root=", s.stateRoot)
 	root := s.stateRoot
 	s.snap = nil

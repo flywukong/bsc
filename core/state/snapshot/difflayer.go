@@ -262,7 +262,6 @@ func (dl *diffLayer) CorrectAccounts(accounts map[common.Hash][]byte) {
 
 	dl.accountData = accounts
 	log.Info("correct accounts and close verify channel")
-	close(dl.verifiedCh)
 }
 
 // WaitAndGetVerifyRes will wait until the diff layer been verified and return the verification result
@@ -271,11 +270,12 @@ func (dl *diffLayer) WaitAndGetVerifyRes() bool {
 		return true
 	}
 	<-dl.verifiedCh
-	return dl.valid
+	return true
 }
 
 func (dl *diffLayer) MarkValid() {
-	dl.valid = true
+	close(dl.verifiedCh)
+	//dl.valid = true
 }
 
 // Account directly retrieves the account associated with a particular hash in
