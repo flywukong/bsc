@@ -2273,7 +2273,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 		bc.blockCache.Add(block.Hash(), block)
 		bc.hc.numberCache.Add(block.Hash(), block.NumberU64())
-		//bc.hc.headerCache.Add()
+		bc.hc.headerCache.Add(block.Hash(), block.Header())
 		blockBatch := bc.db.BlockStore().NewBatch()
 		rawdb.WriteBlock(blockBatch, block)
 
