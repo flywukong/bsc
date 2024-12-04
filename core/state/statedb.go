@@ -982,7 +982,7 @@ func (s *StateDB) WaitPipeVerification() error {
 	if s.noneedWait {
 		log.Info("it is the first block, no need wait")
 	}
-	if s.snap != nil && !s.noneedWait {
+	if s.snap != nil {
 		if valid := s.snap.WaitAndGetVerifyRes(); !valid {
 			return fmt.Errorf("verification on parent snap failed")
 		}

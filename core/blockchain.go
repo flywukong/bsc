@@ -1889,6 +1889,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		go bc.cacheDiffLayer(diffLayer, diffLayerCh)
 	}
 	wg.Wait()
+	log.Info("commit wg wait finish")
 	return nil
 }
 
