@@ -2155,7 +2155,12 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		return it.index, err
 	}
 
-	for ; block != nil && err == nil || errors.Is(err, ErrKnownBlock); block, err = it.next() {
+	for block != nil && err == nil || errors.Is(err, ErrKnownBlock) {
+		// 如果 err 不为空且不是 ErrKnownBlock，打印错误日志
+		if err != nil && !errors.Is(err, ErrKnownBlock) {
+			log.Error("Error encountered during iteration", "error", err)
+		}
+
 		// If the chain is terminating, stop processing blocks
 		if bc.insertStopped() {
 			log.Debug("Abort during block processing")
@@ -2344,7 +2349,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				"txs", len(block.Transactions()), "gas", block.GasUsed(), "uncles", len(block.Uncles()),
 				"root", block.Root())
 		}
-		//	bc.chainBlockFeed.Send(ChainHeadEvent{block})
+		bc.chainBlockFeed.Send(ChainHeadEvent{block})
+
+		block, err = it.next()
 	}
 
 	log.Info("iterator blocks finish")
