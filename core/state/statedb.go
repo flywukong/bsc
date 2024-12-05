@@ -1075,6 +1075,7 @@ func (s *StateDB) UpdateSnapAfterExecution() error {
 		}
 	}
 
+	time.Sleep(10 * time.Millisecond)
 	log.Info("update snapshot after execution", " expectedROOT=", s.expectedRoot)
 	return nil
 }
@@ -1116,6 +1117,7 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 		}
 
 		log.Info("start to validate block", "expectRoot=", s.expectedRoot)
+		time.Sleep(2 * time.Millisecond)
 		tr, err := s.db.OpenTrie(s.originalRoot)
 		if err != nil {
 			panic("Failed to open state trie")
