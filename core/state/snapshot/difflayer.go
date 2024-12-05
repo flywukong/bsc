@@ -267,9 +267,12 @@ func (dl *diffLayer) CorrectAccounts(accounts map[common.Hash][]byte) {
 // WaitAndGetVerifyRes will wait until the diff layer been verified and return the verification result
 func (dl *diffLayer) WaitAndGetVerifyRes() bool {
 	if dl.verifiedCh == nil {
+		log.Info("verify channel is nil")
 		return true
 	}
+	log.Info("wait verify channel start")
 	<-dl.verifiedCh
+	log.Info("wait verify channel end")
 	return true
 }
 
@@ -281,7 +284,10 @@ func (dl *diffLayer) MarkValid() {
 
 func (dl *diffLayer) AddChannelToSnap(verified chan struct{}) {
 	if dl.verifiedCh == nil {
+		log.Info("set the verify")
 		dl.verifiedCh = verified
+	} else {
+
 	}
 	log.Info("add verify to channel success")
 }

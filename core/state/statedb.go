@@ -1096,6 +1096,10 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 		if err := s.WaitPipeVerification(); err != nil {
 			panic("err wait verifcation")
 		}
+		if s.noneedWait {
+			log.Info("first block add verify channel")
+			s.AddVerifyChannel()
+		}
 		s.AddVerifyChannel()
 		log.Info("start to validate block", "expectRoot=", s.expectedRoot)
 		tr, err := s.db.OpenTrie(s.originalRoot)
