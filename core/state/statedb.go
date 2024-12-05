@@ -1699,7 +1699,10 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 		}
 	}
 
-	s.snap.MarkValid()
+	if s.snap != nil {
+		s.snap.MarkValid()
+	}
+
 	log.Info("Richard:", "commit done, root=", s.stateRoot)
 	root := s.stateRoot
 	s.snap = nil
