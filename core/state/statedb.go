@@ -1049,8 +1049,6 @@ func (s *StateDB) UpdateSnapAfterExecution() error {
 		return nil
 	}
 
-	verified := make(chan struct{})
-
 	destructs := make(map[common.Hash]struct{})
 	accounts := make(map[common.Hash][]byte)
 	storages := make(map[common.Hash]map[common.Hash][]byte)
@@ -1069,7 +1067,7 @@ func (s *StateDB) UpdateSnapAfterExecution() error {
 
 	if len(destructs) > 0 || len(accounts) > 0 || len(storages) > 0 {
 		log.Info("update snapshot", "expect root", s.expectedRoot)
-		err := s.snaps.Update(s.expectedRoot, s.originalRoot, destructs, accounts, storages, verified)
+		err := s.snaps.Update(s.expectedRoot, s.originalRoot, destructs, accounts, storages, nil)
 		if err != nil {
 			log.Info("fail to update snap", "err", err.Error())
 			return err
@@ -1078,6 +1076,12 @@ func (s *StateDB) UpdateSnapAfterExecution() error {
 
 	log.Info("update snapshot after execution", " expectedROOT=", s.expectedRoot)
 	return nil
+}
+
+func (s *StateDB) AddVerifyChannel() {
+	verified := make(chan struct{})
+
+	s.snap.AddChannelToSnap(verified)
 }
 
 // IntermediateRoot computes the current root hash of the state trie.
@@ -1091,6 +1095,7 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 		if err := s.WaitPipeVerification(); err != nil {
 			panic("err wait verifcation")
 		}
+		s.AddVerifyChannel()
 		log.Info("start to validate block", "expectRoot=", s.expectedRoot)
 		tr, err := s.db.OpenTrie(s.originalRoot)
 		if err != nil {

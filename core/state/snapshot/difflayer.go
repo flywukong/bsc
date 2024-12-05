@@ -279,6 +279,13 @@ func (dl *diffLayer) MarkValid() {
 	//dl.valid = true
 }
 
+func (dl *diffLayer) AddChannelToSnap(verified chan struct{}) {
+	if dl.verifiedCh == nil {
+		dl.verifiedCh = verified
+	}
+	log.Info("add verify to channel success")
+}
+
 // Account directly retrieves the account associated with a particular hash in
 // the snapshot slim data format.
 func (dl *diffLayer) Account(hash common.Hash) (*types.SlimAccount, error) {

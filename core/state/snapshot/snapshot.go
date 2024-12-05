@@ -138,6 +138,8 @@ type Snapshot interface {
 	WaitAndGetVerifyRes() bool
 
 	MarkValid()
+
+	AddChannelToSnap(chan struct{})
 }
 
 // snapshot is the internal version of the snapshot data layer that supports some

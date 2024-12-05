@@ -2345,6 +2345,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				//	wstart = time.Now()
 				status WriteStatus
 			)
+
 			if !setHead {
 				// Don't set the head, only insert the block
 				err = bc.writeBlockWithState(blocksIn, receiptsIn, state)

@@ -88,6 +88,9 @@ func (dl *diskLayer) WaitAndGetVerifyRes() bool {
 func (dl *diskLayer) MarkValid() {
 }
 
+func (dl *diskLayer) AddChannelToSnap(chan struct{}) {
+}
+
 // Accounts directly retrieves all accounts in current snapshot in
 // the snapshot slim data format.
 func (dl *diskLayer) Accounts() (map[common.Hash]*types.SlimAccount, error) {
