@@ -981,6 +981,7 @@ func (s *StateDB) WaitPipeVerification() error {
 	start := time.Now()
 	if s.noneedWait {
 		log.Info("it is the first block, no need wait")
+		return nil
 	}
 	if s.snap != nil {
 		if valid := s.snap.WaitAndGetVerifyRes(); !valid {
