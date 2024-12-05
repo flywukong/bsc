@@ -1084,6 +1084,13 @@ func (s *StateDB) AddVerifyChannel() {
 	s.snap.AddChannelToSnap(verified)
 }
 
+func (s *StateDB) ReleaseVerifyChannel() {
+	snap := s.snaps.Snapshot(s.expectedRoot)
+	if snap != nil {
+		snap.MarkValid()
+	}
+}
+
 func (s *StateDB) AddVerifyChannelForFirstBlock() {
 	verified := make(chan struct{})
 	snap := s.snaps.Snapshot(s.expectedRoot)
@@ -1710,10 +1717,12 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 			return common.Hash{}, nil, r
 		}
 	}
+	/*
+		if s.snap != nil {
+			s.snap.MarkValid()
+		}
 
-	if s.snap != nil {
-		s.snap.MarkValid()
-	}
+	*/
 
 	log.Info("Richard:", "commit done, root=", s.stateRoot)
 	root := s.stateRoot

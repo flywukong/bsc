@@ -292,7 +292,7 @@ func (dl *diffLayer) AddChannelToSnap(verified chan struct{}) {
 
 	log.Info("set the verify")
 	dl.verifiedCh = verified
-	
+
 	log.Info("add verify to channel success")
 }
 

@@ -2357,7 +2357,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				return
 				// return it.index, err
 			} else {
-				log.Info("sucessfully validation and commit", "block", blocksIn.Number())
+				state.ReleaseVerifyChannel()
+				log.Info("success validation and commit and release verify channel", "block", blocksIn.Number())
 			}
 			// log.Info("Richard: write block and set head successfully", "block=", blockToHandle.Number() )
 			// Update the metrics touched during block commit
