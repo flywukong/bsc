@@ -1081,8 +1081,13 @@ func (s *StateDB) UpdateSnapAfterExecution() error {
 
 func (s *StateDB) AddVerifyChannel() {
 	verified := make(chan struct{})
-
 	s.snap.AddChannelToSnap(verified)
+}
+
+func (s *StateDB) AddVerifyChannelForFirstBlock() {
+	verified := make(chan struct{})
+	snap := s.snaps.Snapshot(s.expectedRoot)
+	snap.AddChannelToSnap(verified)
 }
 
 // IntermediateRoot computes the current root hash of the state trie.
@@ -1098,9 +1103,11 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 		}
 		if s.noneedWait {
 			log.Info("first block add verify channel")
-			s.AddVerifyChannel()
+			s.AddVerifyChannelForFirstBlock()
+		} else {
+			s.AddVerifyChannelForFirstBlock()
 		}
-		s.AddVerifyChannel()
+
 		log.Info("start to validate block", "expectRoot=", s.expectedRoot)
 		tr, err := s.db.OpenTrie(s.originalRoot)
 		if err != nil {
