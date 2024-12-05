@@ -2308,7 +2308,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 			// Validate the state using the default validator
 			//	vstart := time.Now()
-			log.Info("validation begin", "usedGas", usedGas, " blockToHandle=", blocksIn.Header())
+			//	log.Info("validation begin", "usedGas", usedGas, " blockToHandle=", blocksIn.Header())
 			if err := bc.validator.ValidateState(blocksIn, state, receiptsIn, usedGas); err != nil {
 				log.Error("Richard: validate state failed", "error", err)
 				//	bc.reportBlock(blocksIn, receiptsIn, err)

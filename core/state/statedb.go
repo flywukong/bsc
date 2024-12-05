@@ -1103,7 +1103,7 @@ func (s *StateDB) AddVerifyChannelForFirstBlock() {
 func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	// Finalise all the dirty storage states and write them into the tries
 	s.Finalise(deleteEmptyObjects)
-	log.Info("intermediate root begin")
+	//	log.Info("intermediate root begin")
 	if s.pipelineEnabled {
 		if err := s.WaitPipeVerification(); err != nil {
 			panic("err wait verifcation")
