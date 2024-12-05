@@ -1075,7 +1075,7 @@ func (s *StateDB) UpdateSnapAfterExecution() error {
 		}
 	}
 
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(3 * time.Millisecond)
 	log.Info("update snapshot after execution", " expectedROOT=", s.expectedRoot)
 	return nil
 }
@@ -1106,6 +1106,7 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	s.Finalise(deleteEmptyObjects)
 	//	log.Info("intermediate root begin")
 	if s.pipelineEnabled {
+		log.Info("start to wait for the verify channel")
 		if err := s.WaitPipeVerification(); err != nil {
 			panic("err wait verifcation")
 		}
