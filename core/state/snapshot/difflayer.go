@@ -277,6 +277,8 @@ func (dl *diffLayer) WaitAndGetVerifyRes() bool {
 }
 
 func (dl *diffLayer) MarkValid() {
+	dl.lock.Lock()
+	defer dl.lock.Unlock()
 	if dl.verifiedCh != nil {
 		close(dl.verifiedCh)
 		log.Info("mark valid")
@@ -285,6 +287,8 @@ func (dl *diffLayer) MarkValid() {
 }
 
 func (dl *diffLayer) AddChannelToSnap(verified chan struct{}) {
+	dl.lock.Lock()
+	defer dl.lock.Unlock()
 	if dl.verifiedCh == nil {
 		log.Info("set the verify")
 		dl.verifiedCh = verified
