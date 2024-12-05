@@ -1120,6 +1120,7 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 		if err != nil {
 			panic("Failed to open state trie")
 		}
+		log.Info("open trie finish")
 		s.trie = tr
 		//	log.Info("intermediate root in pipeline, for loop", "block", s.originalRoot)
 		/*
