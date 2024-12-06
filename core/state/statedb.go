@@ -1068,7 +1068,7 @@ func (s *StateDB) UpdateSnapAfterExecution() error {
 
 	if len(destructs) > 0 || len(accounts) > 0 || len(storages) > 0 {
 		log.Info("update snapshot", "expect root", s.expectedRoot)
-		err := s.snaps.Update(s.expectedRoot, s.originalRoot, destructs, accounts, storages, nil)
+		err := s.snaps.Update(s.expectedRoot, s.originalRoot, destructs, accounts, storages)
 		if err != nil {
 			log.Info("fail to update snap", "err", err.Error())
 			return err
@@ -1679,7 +1679,7 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 				// Only update if there's a state transition (skip empty Clique blocks)
 				if parent := s.snap.Root(); parent != s.expectedRoot {
 					if !s.pipelineEnabled {
-						err := s.snaps.Update(s.expectedRoot, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages, nil)
+						err := s.snaps.Update(s.expectedRoot, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages)
 
 						if err != nil {
 							log.Warn("Failed to update snapshot tree", "from", parent, "to", s.expectedRoot, "err", err)
@@ -1687,11 +1687,6 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 					} else {
 						s.snap = s.snaps.Snapshot(s.expectedRoot)
 						s.snap.CorrectAccounts(s.accounts)
-						err := s.snaps.Update(s.expectedRoot, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages, nil)
-
-						if err != nil {
-							log.Warn("Failed to update snapshot tree", "from", parent, "to", s.expectedRoot, "err", err)
-						}
 						// log.Info("Richard:", "correct accounts", block, " root=", s.snap.Root(), " o_root=",s.originalRoot, " e_root=", s.expectedRoot)
 					}
 
