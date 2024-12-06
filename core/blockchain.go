@@ -2433,12 +2433,14 @@ func (bc *BlockChain) VerifyLoop() {
 		case <-bc.quit:
 			return
 		case task := <-bc.verifyTaskCh:
+			log.Info("deal with verify and commit", "height", task.block.NumberU64())
 			if err := bc.validator.ValidateState(task.block, task.state, task.receipts, task.usedGas); err != nil {
 				log.Crit("validate state failed", "error", err)
 			}
 			if err := bc.commitState(task.block, task.receipts, task.state); err != nil {
 				log.Crit("commit state failed", "error", err)
 			}
+			log.Info("commit state success")
 			if _, err := bc.writeBlockAndSetHead(task.block, task.receipts, task.logs, task.state, false); err != nil {
 				log.Crit("write block and set head failed", "error", err)
 			}
