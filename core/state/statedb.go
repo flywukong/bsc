@@ -1068,7 +1068,7 @@ func (s *StateDB) UpdateSnapAfterExecution() error {
 
 	if len(destructs) > 0 || len(accounts) > 0 || len(storages) > 0 {
 		log.Info("update snapshot", "expect root", s.expectedRoot)
-		err := s.snaps.Update(s.expectedRoot, s.originalRoot, destructs, accounts, storages, nil)
+		err := s.snaps.Update(s.expectedRoot, s.originalRoot, destructs, accounts, storages)
 		if err != nil {
 			log.Info("fail to update snap", "err", err.Error())
 			return err

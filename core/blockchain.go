@@ -1748,8 +1748,6 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		state.StopPrefetcher()
 		log.Info("Richard:", "failed to find parent hash", block.ParentHash())
 		return consensus.ErrUnknownAncestor
-	} else {
-		log.Info("get td finish")
 	}
 	// Make sure no inconsistent state is leaked during insertion
 	externTd := new(big.Int).Add(block.Difficulty(), ptd)
