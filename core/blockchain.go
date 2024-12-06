@@ -2293,7 +2293,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			usedGas:  usedGas,
 			logs:     logs,
 		}
+		log.Info("start send task chan")
 		bc.verifyTaskCh <- task
+		log.Info("finish send task chan")
 		// Validate the state using the default validator
 		//vstart := time.Now()
 		//if err := bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
