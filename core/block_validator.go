@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
@@ -126,15 +125,15 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 			}
 			return nil
 		},
-		func() error {
-			if !v.bc.HasBlockAndState(block.ParentHash(), block.NumberU64()-1) {
-				if !v.bc.HasBlock(block.ParentHash(), block.NumberU64()-1) {
-					return consensus.ErrUnknownAncestor
-				}
-				return consensus.ErrPrunedAncestor
-			}
-			return nil
-		},
+		//func() error {
+		//	if !v.bc.HasBlockAndState(block.ParentHash(), block.NumberU64()-1) {
+		//		if !v.bc.HasBlock(block.ParentHash(), block.NumberU64()-1) {
+		//			return consensus.ErrUnknownAncestor
+		//		}
+		//		return consensus.ErrPrunedAncestor
+		//	}
+		//	return nil
+		//},
 		func() error {
 			if v.remoteValidator != nil && !v.remoteValidator.AncestorVerified(block.Header()) {
 				return fmt.Errorf("%w, number: %s, hash: %s", ErrAncestorHasNotBeenVerified, block.Number(), block.Hash())
@@ -201,7 +200,6 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 			return nil
 		})
 	}
-
 	validateRes := make(chan error, len(validateFuns))
 	for _, f := range validateFuns {
 		tmpFunc := f

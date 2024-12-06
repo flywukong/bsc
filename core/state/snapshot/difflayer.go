@@ -106,6 +106,8 @@ type diffLayer struct {
 	diffed *bloomfilter.Filter // Bloom filter tracking all the diffed items up to the disk layer
 
 	lock sync.RWMutex
+
+	verified atomic.Bool
 }
 
 // accountBloomHash is used to convert an account hash into a 64 bit mini hash.
@@ -422,7 +424,7 @@ func (dl *diffLayer) flatten() snapshot {
 		maps.Copy(parent.storageData[accountHash], storage)
 	}
 	// Return the combo parent
-	return &diffLayer{
+	diff := &diffLayer{
 		parent:      parent.parent,
 		origin:      parent.origin,
 		root:        dl.root,
@@ -432,6 +434,8 @@ func (dl *diffLayer) flatten() snapshot {
 		diffed:      dl.diffed,
 		memory:      parent.memory + dl.memory,
 	}
+	diff.verified.Store(true)
+	return diff
 }
 
 // AccountList returns a sorted list of all accounts in this diffLayer, including
@@ -489,4 +493,15 @@ func (dl *diffLayer) StorageList(accountHash common.Hash) []common.Hash {
 	dl.storageList[accountHash] = storageList
 	dl.memory += uint64(len(dl.storageList)*common.HashLength + common.HashLength)
 	return storageList
+}
+
+// CorrectAccounts
+func (dl *diffLayer) CorrectAccounts(blockRoot common.Hash, parentRoot common.Hash, accounts map[common.Hash][]byte) error {
+	dl.lock.Lock()
+	defer dl.lock.Unlock()
+
+	dl.accountData = accounts
+	dl.verified.Store(true)
+
+	return nil
 }

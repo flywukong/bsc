@@ -132,6 +132,9 @@ type snapshot interface {
 	// Note, the maps are retained by the method to avoid copying everything.
 	Update(blockRoot common.Hash, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte) *diffLayer
 
+	// CorrectAccounts
+	CorrectAccounts(blockRoot common.Hash, parentRoot common.Hash, accounts map[common.Hash][]byte) error
+
 	// Journal commits an entire diff hierarchy to disk into a single journal entry.
 	// This is meant to be used during shutdown to persist the snapshot without
 	// flattening everything down (bad for reorgs).
@@ -342,7 +345,7 @@ func (t *Tree) Snapshots(root common.Hash, limits int, nodisk bool) []Snapshot {
 
 // Update adds a new snapshot into the tree, if that can be linked to an existing
 // old parent. It is disallowed to insert a disk layer (the origin of all).
-func (t *Tree) Update(blockRoot common.Hash, parentRoot common.Hash, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte) error {
+func (t *Tree) Update(blockRoot common.Hash, parentRoot common.Hash, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte, verified bool) error {
 	// Reject noop updates to avoid self-loops in the snapshot tree. This is a
 	// special case that can only happen for Clique networks where empty blocks
 	// don't modify the state (0 block subsidy).
@@ -359,12 +362,25 @@ func (t *Tree) Update(blockRoot common.Hash, parentRoot common.Hash, accounts ma
 	}
 	snap := parent.(snapshot).Update(blockRoot, accounts, storage)
 
+	if verified {
+		snap.verified.Store(verified)
+	}
+
 	// Save the new snapshot for later
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
 	t.layers[snap.root] = snap
 	log.Debug("Snapshot updated", "blockRoot", blockRoot)
+	return nil
+}
+
+func (t *Tree) CorrectAccounts(blockRoot common.Hash, parentRoot common.Hash, accounts map[common.Hash][]byte) error {
+	snap := t.Snapshot(blockRoot)
+	if snap == nil {
+		return fmt.Errorf("snap [%#x] missing", blockRoot)
+	}
+	snap.(snapshot).CorrectAccounts(blockRoot, parentRoot, accounts)
 	return nil
 }
 
@@ -467,6 +483,19 @@ func (t *Tree) Cap(root common.Hash, layers int) error {
 // survival is only known *after* capping, we need to omit it from the count if
 // we want to ensure that *at least* the requested number of diff layers remain.
 func (t *Tree) cap(diff *diffLayer, layers int) *diskLayer {
+	for {
+		if parent, ok := diff.parent.(*diffLayer); ok {
+			if !parent.verified.Load() {
+				diff = parent
+				layers--
+			} else {
+				break
+			}
+		} else {
+			return nil
+		}
+	}
+
 	// Dive until we run out of layers or reach the persistent database
 	for i := 0; i < layers-1; i++ {
 		// If we still have diff layers below, continue down
@@ -514,6 +543,9 @@ func (t *Tree) cap(diff *diffLayer, layers int) *diskLayer {
 	}
 	// If the bottom-most layer is larger than our memory cap, persist to disk
 	bottom := diff.parent.(*diffLayer)
+	if bottom.verified.Load() == false {
+		return nil
+	}
 
 	bottom.lock.RLock()
 	base := diffToDisk(bottom)

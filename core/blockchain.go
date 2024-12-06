@@ -228,6 +228,14 @@ type txLookup struct {
 	transaction *types.Transaction
 }
 
+type VerifyTask struct {
+	block    *types.Block
+	state    *state.StateDB
+	receipts types.Receipts
+	usedGas  uint64
+	logs     []*types.Log
+}
+
 // BlockChain represents the canonical chain given a database with a genesis
 // block. The Blockchain manages chain imports, reverts, chain reorganisations.
 //
@@ -315,6 +323,8 @@ type BlockChain struct {
 	// monitor
 	doubleSignMonitor *monitor.DoubleSignMonitor
 	logger            *tracing.Hooks
+
+	verifyTaskCh chan *VerifyTask
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -379,6 +389,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		diffQueue:          prque.New[int64, *types.DiffLayer](nil),
 		diffQueueBuffer:    make(chan *types.DiffLayer),
 		logger:             vmConfig.Tracer,
+		verifyTaskCh:       make(chan *VerifyTask, 32),
 	}
 	var err error
 	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
@@ -579,6 +590,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	if txLookupLimit != nil {
 		bc.txIndexer = newTxIndexer(*txLookupLimit, bc)
 	}
+	go bc.VerifyLoop()
 	return bc, nil
 }
 
@@ -1797,7 +1809,6 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	if err != nil {
 		return err
 	}
-
 	// Ensure no empty block body
 	if diffLayer != nil && block.Header().TxHash != types.EmptyRootHash {
 		// Filling necessary field
@@ -2041,6 +2052,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 	)
 	// Fire a single chain head event if we've progressed the chain
 	defer func() {
+		lastCanon = nil
 		if lastCanon != nil && bc.CurrentBlock().Hash() == lastCanon.Hash() {
 			bc.chainHeadFeed.Send(ChainHeadEvent{Header: lastCanon.Header()})
 			if posa, ok := bc.Engine().(consensus.PoSA); ok {
@@ -2214,12 +2226,13 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 			continue
 		}
 		// Retrieve the parent block and it's state to execute on top
-		start := time.Now()
+		// start := time.Now()
 		parent := it.previous()
 		if parent == nil {
 			parent = bc.GetHeader(block.ParentHash(), block.NumberU64()-1)
 		}
 
+		start := time.Now()
 		statedb, err := state.NewWithSharedPool(parent.Root, bc.statedb)
 		if err != nil {
 			return nil, it.index, err
@@ -2256,7 +2269,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 			// 2.do trie prefetch for MPT trie node cache
 			// it is for the big state trie tree, prefetch based on transaction's From/To address.
 			// trie prefetcher is thread safe now, ok to prefetch in a separate routine
-			go throwaway.TriePrefetchInAdvance(block, signer)
+			//	go throwaway.TriePrefetchInAdvance(block, signer)
 		}
 
 		// The traced section of block import.
@@ -2340,6 +2353,45 @@ func (bc *BlockChain) updateHighestVerifiedHeader(header *types.Header) {
 	}
 }
 
+func (bc *BlockChain) VerifyLoop() {
+	wg := sync.WaitGroup{}
+	for {
+		select {
+		case <-bc.quit:
+			return
+		case task := <-bc.verifyTaskCh:
+			vstart := time.Now()
+			if err := bc.validator.ValidateState(task.block, task.state, task.receipts, task.usedGas); err != nil {
+				log.Crit("validate state failed", "error", err)
+			}
+			blockValidationTimer.UpdateSince(vstart)
+
+			wg.Add(1)
+			go func() {
+				cstart := time.Now()
+				if err := bc.commitState(task.block, task.receipts, task.state); err != nil {
+					log.Crit("commit state failed", "error", err)
+				}
+				blockWriteTimer.UpdateSince(cstart)
+				wg.Done()
+			}()
+
+			wg.Add(1)
+			go func() {
+				cstart := time.Now()
+				if _, err := bc.writeBlockAndSetHead(task.block, task.receipts, task.logs, task.state, false); err != nil {
+					log.Crit("write block and set head failed", "error", err)
+				}
+				bc.chainBlockFeed.Send(ChainHeadEvent{task.block})
+				triedbCommitTimer.UpdateSince(cstart)
+				wg.Done()
+			}()
+
+			wg.Wait()
+		}
+	}
+}
+
 func (bc *BlockChain) GetHighestVerifiedHeader() *types.Header {
 	return bc.highestVerifiedHeader.Load()
 }
@@ -2381,6 +2433,39 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 		statedb.StopPrefetcher()
 		return nil, err
 	}
+	statedb.CommitUnVerifiedSnapDifflayer(bc.chainConfig.IsEIP158(block.Number()))
+
+	// Add to cache
+	bc.blockCache.Add(block.Hash(), block)
+	bc.hc.numberCache.Add(block.Hash(), block.NumberU64())
+	bc.hc.headerCache.Add(block.Hash(), block.Header())
+
+	ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
+	// Make sure no inconsistent state is leaked during insertion
+	externTd := new(big.Int).Add(block.Difficulty(), ptd)
+
+	bc.hc.tdCache.Add(block.Hash(), externTd)
+
+	blockExecutionTimer.Update(time.Since(pstart))
+
+	//		vstart := time.Now()
+	task := &VerifyTask{
+		block:    block,
+		state:    statedb,
+		receipts: res.Receipts,
+		usedGas:  res.GasUsed,
+		logs:     res.Logs,
+	}
+	bc.verifyTaskCh <- task
+	blockInsertTimer.UpdateSince(start)
+
+	// to do fix stats
+	// Report the import stats before returning the various results
+	stats.processed++
+	stats.usedGas += res.GasUsed
+
+	//	stats.report(chain, it.index, 0, 0, 0, 0, 0, true)
+
 	ptime := time.Since(pstart)
 
 	// Validate the state using the default validator

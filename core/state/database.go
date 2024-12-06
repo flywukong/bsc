@@ -302,3 +302,11 @@ func mustCopyTrie(t Trie) Trie {
 		panic(fmt.Errorf("unknown trie type %T", t))
 	}
 }
+
+// SetCodeCache
+func (db *CachingDB) SetCodeCache(codeHash common.Hash, code []byte) {
+	if len(code) > 0 {
+		db.codeCache.Add(codeHash, code)
+		db.codeSizeCache.Add(codeHash, len(code))
+	}
+}

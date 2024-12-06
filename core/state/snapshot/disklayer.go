@@ -204,3 +204,8 @@ func (dl *diskLayer) stopGeneration() {
 		<-abort
 	}
 }
+
+// CorrectAccounts
+func (dl *diskLayer) CorrectAccounts(blockRoot common.Hash, parentRoot common.Hash, accounts map[common.Hash][]byte) error {
+	return nil
+}
