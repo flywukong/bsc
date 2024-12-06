@@ -2281,6 +2281,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			statedb.StopPrefetcher()
 			return it.index, err
 		}
+		log.Info("exection finish on block", "block", block.NumberU64())
 		ptime := time.Since(pstart)
 		statedb.CommitUnVerifiedSnapDifflayer(bc.chainConfig.IsEIP158(block.Number()))
 
