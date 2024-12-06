@@ -1687,6 +1687,11 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 					} else {
 						s.snap = s.snaps.Snapshot(s.expectedRoot)
 						s.snap.CorrectAccounts(s.accounts)
+						err := s.snaps.Update(s.expectedRoot, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages, nil)
+
+						if err != nil {
+							log.Warn("Failed to update snapshot tree", "from", parent, "to", s.expectedRoot, "err", err)
+						}
 						// log.Info("Richard:", "correct accounts", block, " root=", s.snap.Root(), " o_root=",s.originalRoot, " e_root=", s.expectedRoot)
 					}
 
