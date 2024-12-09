@@ -2392,7 +2392,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		bc.updateHighestVerifiedHeader(block.Header())
 
 		// Enable prefetching to pull in trie node paths while processing transactions
-		statedb.StartPrefetcher("chain")
+		//statedb.StartPrefetcher("chain")
 		interruptCh := make(chan struct{})
 		// For diff sync, it may fallback to full sync, so we still do prefetch
 		if len(block.Transactions()) >= prefetchTxNumber {
@@ -2406,7 +2406,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			// it is for the big state trie tree, prefetch based on transaction's From/To address.
 			// trie prefetcher is thread safe now, ok to prefetch in a separate routine
 
-			// go throwaway.TriePrefetchInAdvance(block, signer)
+			//	 go throwaway.TriePrefetchInAdvance(block, signer)
 		}
 
 		// Process block using the parent state as reference point
