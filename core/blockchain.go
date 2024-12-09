@@ -313,6 +313,7 @@ type BlockChain struct {
 
 	// monitor
 	doubleSignMonitor *monitor.DoubleSignMonitor
+	IsFirstBlock      bool
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -377,6 +378,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		vmConfig:           vmConfig,
 		diffQueue:          prque.New[int64, *types.DiffLayer](nil),
 		diffQueueBuffer:    make(chan *types.DiffLayer),
+		IsFirstBlock:       true,
 	}
 	bc.flushInterval.Store(int64(cacheConfig.TrieTimeLimit))
 	bc.forker = NewForkChoice(bc, shouldPreserve)
@@ -1738,10 +1740,13 @@ func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
 // writeBlockWithState writes block, metadata and corresponding state data to the
 // database.
 func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, state *state.StateDB) error {
+	log.Info("write block with state begin")
 	// Calculate the total difficulty of the block
 	ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
 	if ptd == nil {
+		log.Info("fail to get td finish")
 		state.StopPrefetcher()
+		log.Info("Richard:", "failed to find parent hash", block.ParentHash())
 		return consensus.ErrUnknownAncestor
 	}
 	// Make sure no inconsistent state is leaked during insertion
@@ -1771,6 +1776,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 			log.Crit("Failed to write block into disk", "err", err)
 		}
 		bc.hc.tdCache.Add(block.Hash(), externTd)
+		// log.Info("Richard:", "add td, hash=", block.Hash(), " td=", externTd)
 		bc.blockCache.Add(block.Hash(), block)
 		bc.cacheReceipts(block.Hash(), receipts, block)
 		if bc.chainConfig.IsCancun(block.Number(), block.Time()) {
@@ -1881,6 +1887,162 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		go bc.cacheDiffLayer(diffLayer, diffLayerCh)
 	}
 	wg.Wait()
+	log.Info("commit wg wait finish")
+	return nil
+}
+
+// writeBlockWithState writes block, metadata and corresponding state data to the
+// database.
+func (bc *BlockChain) writeBlockWithStateV2(block *types.Block, receipts []*types.Receipt, state *state.StateDB) error {
+	log.Info("write block with state begin")
+	// Calculate the total difficulty of the block
+	ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
+	if ptd == nil {
+		log.Info("fail to get td finish")
+		state.StopPrefetcher()
+		log.Info("Richard:", "failed to find parent hash", block.ParentHash())
+		return consensus.ErrUnknownAncestor
+	}
+	// Make sure no inconsistent state is leaked during insertion
+	externTd := new(big.Int).Add(block.Difficulty(), ptd)
+
+	// Irrelevant of the canonical status, write the block itself to the database.
+	//
+	// Note all the components of block(td, hash->number map, header, body, receipts)
+	// should be written atomically. BlockBatch is used for containing all components.
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		blockBatch := bc.db.BlockStore().NewBatch()
+		rawdb.WriteTd(blockBatch, block.Hash(), block.NumberU64(), externTd)
+		rawdb.WriteBlock(blockBatch, block)
+		rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
+		// if cancun is enabled, here need to write sidecars too
+		if bc.chainConfig.IsCancun(block.Number(), block.Time()) {
+			rawdb.WriteBlobSidecars(blockBatch, block.Hash(), block.NumberU64(), block.Sidecars())
+		}
+		if bc.db.StateStore() != nil {
+			rawdb.WritePreimages(bc.db.StateStore(), state.Preimages())
+		} else {
+			rawdb.WritePreimages(blockBatch, state.Preimages())
+		}
+		if err := blockBatch.Write(); err != nil {
+			log.Crit("Failed to write block into disk", "err", err)
+		}
+		bc.hc.tdCache.Add(block.Hash(), externTd)
+		// log.Info("Richard:", "add td, hash=", block.Hash(), " td=", externTd)
+		bc.blockCache.Add(block.Hash(), block)
+		bc.cacheReceipts(block.Hash(), receipts, block)
+		if bc.chainConfig.IsCancun(block.Number(), block.Time()) {
+			bc.sidecarsCache.Add(block.Hash(), block.Sidecars())
+		}
+		wg.Done()
+	}()
+	/*
+		tryCommitTrieDB := func() error {
+			bc.commitLock.Lock()
+			defer bc.commitLock.Unlock()
+
+			// If node is running in path mode, skip explicit gc operation
+			// which is unnecessary in this mode.
+			if bc.triedb.Scheme() == rawdb.PathScheme {
+				return nil
+			}
+
+			triedb := bc.stateCache.TrieDB()
+			// If we're running an archive node, always flush
+			if bc.cacheConfig.TrieDirtyDisabled {
+				return triedb.Commit(block.Root(), false)
+			}
+			// Full but not archive node, do proper garbage collection
+			triedb.Reference(block.Root(), common.Hash{}) // metadata reference to keep trie alive
+			bc.triegc.Push(block.Root(), -int64(block.NumberU64()))
+
+			// Flush limits are not considered for the first TriesInMemory blocks.
+			current := block.NumberU64()
+			if current <= bc.TriesInMemory() {
+				return nil
+			}
+			// If we exceeded our memory allowance, flush matured singleton nodes to disk
+			var (
+				_, nodes, _, imgs = triedb.Size()
+				limit             = common.StorageSize(bc.cacheConfig.TrieDirtyLimit) * 1024 * 1024
+			)
+			if nodes > limit || imgs > 4*1024*1024 {
+				triedb.Cap(limit - ethdb.IdealBatchSize)
+			}
+			// Find the next state trie we need to commit
+			chosen := current - bc.triesInMemory
+			flushInterval := time.Duration(bc.flushInterval.Load())
+			// If we exceeded out time allowance, flush an entire trie to disk
+			if bc.gcproc > flushInterval {
+				canWrite := true
+				if posa, ok := bc.engine.(consensus.PoSA); ok {
+					if !posa.EnoughDistance(bc, block.Header()) {
+						canWrite = false
+					}
+				}
+				if canWrite {
+					// If the header is missing (canonical chain behind), we're reorging a low
+					// diff sidechain. Suspend committing until this operation is completed.
+					header := bc.GetHeaderByNumber(chosen)
+					if header == nil {
+						log.Warn("Reorg in progress, trie commit postponed", "number", chosen)
+					} else {
+						// If we're exceeding limits but haven't reached a large enough memory gap,
+						// warn the user that the system is becoming unstable.
+						if chosen < bc.lastWrite+bc.triesInMemory && bc.gcproc >= 2*flushInterval {
+							log.Info("State in memory for too long, committing", "time", bc.gcproc, "allowance", flushInterval, "optimum", float64(chosen-bc.lastWrite)/float64(bc.triesInMemory))
+						}
+						// Flush an entire trie and restart the counters
+						triedb.Commit(header.Root, true)
+						rawdb.WriteSafePointBlockNumber(bc.db, chosen)
+						bc.lastWrite = chosen
+						bc.gcproc = 0
+					}
+				}
+			}
+			// Garbage collect anything below our required write retention
+			wg2 := sync.WaitGroup{}
+			for !bc.triegc.Empty() {
+				root, number := bc.triegc.Pop()
+				if uint64(-number) > chosen {
+					bc.triegc.Push(root, number)
+					break
+				}
+				wg2.Add(1)
+				go func() {
+					triedb.Dereference(root)
+					wg2.Done()
+				}()
+			}
+			wg2.Wait()
+			return nil
+		}
+		// Commit all cached state changes into underlying memory database.
+		_, diffLayer, err := state.Commit(block.NumberU64(), tryCommitTrieDB)
+		if err != nil {
+			return err
+		}
+
+		// Ensure no empty block body
+		if diffLayer != nil && block.Header().TxHash != types.EmptyRootHash {
+			// Filling necessary field
+			diffLayer.Receipts = receipts
+			diffLayer.BlockHash = block.Hash()
+			diffLayer.Number = block.NumberU64()
+
+			diffLayerCh := make(chan struct{})
+			if bc.diffLayerChanCache.Len() >= diffLayerCacheLimit {
+				bc.diffLayerChanCache.RemoveOldest()
+			}
+			bc.diffLayerChanCache.Add(diffLayer.BlockHash, diffLayerCh)
+
+			go bc.cacheDiffLayer(diffLayer, diffLayerCh)
+		}
+	*/
+	wg.Wait()
+	log.Info("commit wg wait finish")
 	return nil
 }
 
@@ -1899,6 +2061,7 @@ func (bc *BlockChain) WriteBlockAndSetHead(block *types.Block, receipts []*types
 // This function expects the chain mutex to be held.
 func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.StateDB, emitHeadEvent bool) (status WriteStatus, err error) {
 	currentBlock := bc.CurrentBlock()
+	// log.Info("Richard:", "currentBlock=", currentBlock, "block=", block.Header())
 	reorg, err := bc.forker.ReorgNeededWithFastFinality(currentBlock, block.Header())
 	if err != nil {
 		return NonStatTy, err
@@ -1908,9 +2071,11 @@ func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types
 		bc.highestVerifiedBlockFeed.Send(HighestVerifiedBlockEvent{Header: block.Header()})
 	}
 
+	// log.Info("Richard: write block with state started")
 	if err := bc.writeBlockWithState(block, receipts, state); err != nil {
 		return NonStatTy, err
 	}
+	// log.Info("Richard: write block with state finished")
 	if reorg {
 		// Reorganise the chain if the parent is not the head block
 		if block.ParentHash() != currentBlock.Hash() {
@@ -2058,6 +2223,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 	headers := make([]*types.Header, len(chain))
 	for i, block := range chain {
 		headers[i] = block.Header()
+		log.Info("Richard:", "block_num=", block.Number())
 	}
 	abort, results := bc.engine.VerifyHeaders(bc, headers)
 	defer close(abort)
@@ -2154,10 +2320,15 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		return it.index, err
 	}
 
-	for ; block != nil && err == nil || errors.Is(err, ErrKnownBlock); block, err = it.next() {
+	for block != nil && err == nil || errors.Is(err, ErrKnownBlock) {
+		if err != nil && !errors.Is(err, ErrKnownBlock) {
+			log.Error("Error encountered during iteration", "error", err)
+		}
+
+		log.Info("tell next block=", "num", block.Number())
 		// If the chain is terminating, stop processing blocks
 		if bc.insertStopped() {
-			log.Debug("Abort during block processing")
+			log.Info("Abort during block processing")
 			break
 		}
 		// If the header is a banned one, straight out abort
@@ -2205,6 +2376,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			continue
 		}
 
+		// log.Info("Richard: startto handle ","block===", block.Number(), " content=", block.Header())
 		// Retrieve the parent block and it's state to execute on top
 		start := time.Now()
 		parent := it.previous()
@@ -2214,12 +2386,13 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 		statedb, err := state.NewWithSharedPool(parent.Root, bc.stateCache, bc.snaps)
 		if err != nil {
+			log.Info("Richard: failed to new state database")
 			return it.index, err
 		}
 		bc.updateHighestVerifiedHeader(block.Header())
 
 		// Enable prefetching to pull in trie node paths while processing transactions
-		statedb.StartPrefetcher("chain")
+		//statedb.StartPrefetcher("chain")
 		interruptCh := make(chan struct{})
 		// For diff sync, it may fallback to full sync, so we still do prefetch
 		if len(block.Transactions()) >= prefetchTxNumber {
@@ -2232,117 +2405,189 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			// 2.do trie prefetch for MPT trie node cache
 			// it is for the big state trie tree, prefetch based on transaction's From/To address.
 			// trie prefetcher is thread safe now, ok to prefetch in a separate routine
-			go throwaway.TriePrefetchInAdvance(block, signer)
+
+			//	 go throwaway.TriePrefetchInAdvance(block, signer)
 		}
 
 		// Process block using the parent state as reference point
 		statedb.SetExpectedStateRoot(block.Root())
 		pstart := time.Now()
+		//	log.Info("execution block begin", "block", block.Number())
 		statedb, receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
 		close(interruptCh) // state prefetch can be stopped
 		if err != nil {
+			log.Error("failed to process block",
+				"err", err.Error(), "block_num=", block.Number())
 			bc.reportBlock(block, receipts, err)
 			statedb.StopPrefetcher()
 			return it.index, err
 		}
-		ptime := time.Since(pstart)
+		log.Info("execution block finish", "block", block.Number(), "cost time", time.Since(pstart).Milliseconds())
 
-		// Validate the state using the default validator
-		vstart := time.Now()
-		if err := bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
-			log.Error("validate state failed", "error", err)
-			bc.reportBlock(block, receipts, err)
-			statedb.StopPrefetcher()
-			return it.index, err
+		statedb.Finalise(bc.Config().IsEIP158(block.Number()))
+		if err = statedb.UpdateSnapAfterExecution(); err != nil {
+			panic("Richard: failed to update snapshot after execution")
 		}
-		vtime := time.Since(vstart)
-		proctime := time.Since(start) // processing + validation
 
-		// Update the metrics touched during block processing and validation
-		accountReadTimer.Update(statedb.AccountReads)                   // Account reads are complete(in processing)
-		storageReadTimer.Update(statedb.StorageReads)                   // Storage reads are complete(in processing)
-		snapshotAccountReadTimer.Update(statedb.SnapshotAccountReads)   // Account reads are complete(in processing)
-		snapshotStorageReadTimer.Update(statedb.SnapshotStorageReads)   // Storage reads are complete(in processing)
-		accountUpdateTimer.Update(statedb.AccountUpdates)               // Account updates are complete(in validation)
-		storageUpdateTimer.Update(statedb.StorageUpdates)               // Storage updates are complete(in validation)
-		accountHashTimer.Update(statedb.AccountHashes)                  // Account hashes are complete(in validation)
-		storageHashTimer.Update(statedb.StorageHashes)                  // Storage hashes are complete(in validation)
-		triehash := statedb.AccountHashes + statedb.StorageHashes       // The time spent on tries hashing
-		trieUpdate := statedb.AccountUpdates + statedb.StorageUpdates   // The time spent on tries update
-		trieRead := statedb.SnapshotAccountReads + statedb.AccountReads // The time spent on account read
-		trieRead += statedb.SnapshotStorageReads + statedb.StorageReads // The time spent on storage read
-		blockExecutionTimer.Update(ptime - trieRead)                    // The time spent on EVM processing
-		blockValidationTimer.Update(vtime - (triehash + trieUpdate))    // The time spent on block validation
+		bc.blockCache.Add(block.Hash(), block)
+		bc.hc.numberCache.Add(block.Hash(), block.NumberU64())
+		bc.hc.headerCache.Add(block.Hash(), block.Header())
 
-		// Write the block to the chain and get the status.
-		var (
-			wstart = time.Now()
-			status WriteStatus
-		)
-		if !setHead {
-			// Don't set the head, only insert the block
-			err = bc.writeBlockWithState(block, receipts, statedb)
-		} else {
-			status, err = bc.writeBlockAndSetHead(block, receipts, logs, statedb, false)
+		ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
+		// Make sure no inconsistent state is leaked during insertion
+		externTd := new(big.Int).Add(block.Difficulty(), ptd)
+
+		bc.hc.tdCache.Add(block.Hash(), externTd)
+		//	blockBatch := bc.db.BlockStore().NewBatch()
+		//	rawdb.WriteBlock(blockBatch, block)
+
+		// first block no need block validate
+		if bc.IsFirstBlock {
+			log.Info("it is the first block", block.Number())
+			statedb.SetNoWait()
+			bc.IsFirstBlock = false
 		}
+
+		log.Info("update snap after exection finish:", "block", block.Number())
+		var blockToHandle *types.Block
+		var logsToHandle []*types.Log
+		//blockToHandle = block
+		logsToHandle = logs
+
+		// Don't set the head, only insert the block
+		err = bc.writeBlockWithStateV2(block, receipts, statedb)
 		if err != nil {
-			return it.index, err
+			log.Info("err write block with state v2", "err", err.Error())
 		}
 
-		// Update the metrics touched during block commit
-		accountCommitTimer.Update(statedb.AccountCommits)   // Account commits are complete, we can mark them
-		storageCommitTimer.Update(statedb.StorageCommits)   // Storage commits are complete, we can mark them
-		snapshotCommitTimer.Update(statedb.SnapshotCommits) // Snapshot commits are complete, we can mark them
-		triedbCommitTimer.Update(statedb.TrieDBCommits)     // Trie database commits are complete, we can mark them
+		go func(blocksIn *types.Block,
+			state *state.StateDB, logsIn []*types.Log,
+			receiptsIn types.Receipts, usedGas uint64) {
+			//	ptime := time.Since(pstart)
 
-		blockWriteTimer.Update(time.Since(wstart) - statedb.AccountCommits - statedb.StorageCommits - statedb.SnapshotCommits - statedb.TrieDBCommits)
-		blockInsertTimer.UpdateSince(start)
+			// Validate the state using the default validator
+			//	vstart := time.Now()
+			//	log.Info("validation begin", "usedGas", usedGas, " blockToHandle=", blocksIn.Header())
+			if err := bc.validator.ValidateState(blocksIn, state, receiptsIn, usedGas); err != nil {
+				log.Error("Richard: validate state failed", "error", err)
+				//	bc.reportBlock(blocksIn, receiptsIn, err)
+				statedb.StopPrefetcher()
 
-		// Report the import stats before returning the various results
-		stats.processed++
-		stats.usedGas += usedGas
+				return
+				// return it.index, err
+			}
+			/*
+				// log.Info("Richard:", "validation successfuly", err)
+				vtime := time.Since(vstart)
+				proctime := time.Since(start) // processing + validation
 
-		var snapDiffItems, snapBufItems common.StorageSize
-		if bc.snaps != nil {
-			snapDiffItems, snapBufItems, _ = bc.snaps.Size()
-		}
-		trieDiffNodes, trieBufNodes, trieImmutableBufNodes, _ := bc.triedb.Size()
-		stats.report(chain, it.index, snapDiffItems, snapBufItems, trieDiffNodes, trieBufNodes, trieImmutableBufNodes, status == CanonStatTy)
+				// Update the metrics touched during block processing and validation
+				accountReadTimer.Update(statedb.AccountReads)                   // Account reads are complete(in processing)
+				storageReadTimer.Update(statedb.StorageReads)                   // Storage reads are complete(in processing)
+				snapshotAccountReadTimer.Update(statedb.SnapshotAccountReads)   // Account reads are complete(in processing)
+				snapshotStorageReadTimer.Update(statedb.SnapshotStorageReads)   // Storage reads are complete(in processing)
+				accountUpdateTimer.Update(statedb.AccountUpdates)               // Account updates are complete(in validation)
+				storageUpdateTimer.Update(statedb.StorageUpdates)               // Storage updates are complete(in validation)
+				accountHashTimer.Update(statedb.AccountHashes)                  // Account hashes are complete(in validation)
+				storageHashTimer.Update(statedb.StorageHashes)                  // Storage hashes are complete(in validation)
+				triehash := statedb.AccountHashes + statedb.StorageHashes       // The time spent on tries hashing
+				trieUpdate := statedb.AccountUpdates + statedb.StorageUpdates   // The time spent on tries update
+				trieRead := statedb.SnapshotAccountReads + statedb.AccountReads // The time spent on account read
+				trieRead += statedb.SnapshotStorageReads + statedb.StorageReads // The time spent on storage read
+				blockExecutionTimer.Update(ptime - trieRead)                    // The time spent on EVM processing
+				blockValidationTimer.Update(vtime - (triehash + trieUpdate))    // The time spent on block validation
 
-		if !setHead {
-			// After merge we expect few side chains. Simply count
-			// all blocks the CL gives us for GC processing time
-			bc.gcproc += proctime
 
-			return it.index, nil // Direct block insertion of a single block
-		}
-		switch status {
-		case CanonStatTy:
-			log.Debug("Inserted new block", "number", block.Number(), "hash", block.Hash(),
-				"uncles", len(block.Uncles()), "txs", len(block.Transactions()), "gas", block.GasUsed(),
-				"elapsed", common.PrettyDuration(time.Since(start)),
-				"root", block.Root())
+			*/
+			// Write the block to the chain and get the status.
+			var (
+				//	wstart = time.Now()
+				status WriteStatus
+			)
 
-			lastCanon = block
+			if !setHead {
+				// Don't set the head, only insert the block
+				err = bc.writeBlockWithState(blocksIn, receiptsIn, state)
+			} else {
+				status, err = bc.writeBlockAndSetHead(blocksIn, receiptsIn, logsIn, state, false)
+			}
+			if err != nil {
+				log.Error("Richard:", ":Failed to write block, err", err, "block", block.NumberU64())
+				return
+				// return it.index, err
+			} else {
+				state.ReleaseVerifyChannel()
+				log.Info("success validation and commit and release verify channel", "block", blocksIn.Number())
+			}
+			// log.Info("Richard: write block and set head successfully", "block=", blockToHandle.Number() )
+			// Update the metrics touched during block commit
+			/*
+				accountCommitTimer.Update(statedb.AccountCommits)   // Account commits are complete, we can mark them
+				storageCommitTimer.Update(statedb.StorageCommits)   // Storage commits are complete, we can mark them
+				snapshotCommitTimer.Update(statedb.SnapshotCommits) // Snapshot commits are complete, we can mark them
+				triedbCommitTimer.Update(statedb.TrieDBCommits)     // Trie database commits are complete, we can mark them
 
-			// Only count canonical blocks for GC processing time
-			bc.gcproc += proctime
+				blockWriteTimer.Update(time.Since(wstart) - statedb.AccountCommits - statedb.StorageCommits - statedb.SnapshotCommits - statedb.TrieDBCommits)
+				blockInsertTimer.UpdateSince(start)
 
-		case SideStatTy:
-			log.Debug("Inserted forked block", "number", block.Number(), "hash", block.Hash(),
-				"diff", block.Difficulty(), "elapsed", common.PrettyDuration(time.Since(start)),
-				"txs", len(block.Transactions()), "gas", block.GasUsed(), "uncles", len(block.Uncles()),
-				"root", block.Root())
+				// Report the import stats before returning the various results
+				stats.processed++
+				stats.usedGas += usedGas
 
-		default:
-			// This in theory is impossible, but lets be nice to our future selves and leave
-			// a log, instead of trying to track down blocks imports that don't emit logs.
-			log.Warn("Inserted block with unknown status", "number", block.Number(), "hash", block.Hash(),
-				"diff", block.Difficulty(), "elapsed", common.PrettyDuration(time.Since(start)),
-				"txs", len(block.Transactions()), "gas", block.GasUsed(), "uncles", len(block.Uncles()),
-				"root", block.Root())
-		}
+				var snapDiffItems, snapBufItems common.StorageSize
+				if bc.snaps != nil {
+					snapDiffItems, snapBufItems, _ = bc.snaps.Size()
+				}
+				trieDiffNodes, trieBufNodes, trieImmutableBufNodes, _ := bc.triedb.Size()
+				stats.report(chain, it.index, snapDiffItems, snapBufItems, trieDiffNodes, trieBufNodes, trieImmutableBufNodes, status == CanonStatTy)
+
+
+			*/
+			if !setHead {
+				// After merge we expect few side chains. Simply count
+				// all blocks the CL gives us for GC processing time
+				//	bc.gcproc += proctime
+				log.Info("no set head")
+				return
+				// return it.index, nil // Direct block insertion of a single block
+			}
+			switch status {
+			case CanonStatTy:
+				log.Debug("Inserted new block", "number", blocksIn.Number(), "hash", blocksIn.Hash(),
+					"uncles", len(blocksIn.Uncles()), "txs", len(blocksIn.Transactions()), "gas", blocksIn.GasUsed(),
+					"elapsed", common.PrettyDuration(time.Since(start)),
+					"root", blocksIn.Root())
+
+				lastCanon = blockToHandle
+
+				// Only count canonical blocks for GC processing time
+			//	bc.gcproc += proctime
+
+			case SideStatTy:
+				log.Debug("Inserted forked block", "number", blocksIn.Number(), "hash", blocksIn.Hash(),
+					"diff", blocksIn.Difficulty(), "elapsed", common.PrettyDuration(time.Since(start)),
+					"txs", len(blocksIn.Transactions()), "gas", blocksIn.GasUsed(), "uncles", len(blocksIn.Uncles()),
+					"root", blocksIn.Root())
+
+			default:
+				// This in theory is impossible, but lets be nice to our future selves and leave
+				// a log, instead of trying to track down blocks imports that don't emit logs.
+				log.Warn("Inserted block with unknown status", "number", blocksIn.Number(), "hash", blocksIn.Hash(),
+					"diff", blocksIn.Difficulty(), "elapsed", common.PrettyDuration(time.Since(start)),
+					"txs", len(blocksIn.Transactions()), "gas", blocksIn.GasUsed(), "uncles", len(blocksIn.Uncles()),
+					"root", blocksIn.Root())
+			}
+			//bc.chainBlockFeed.Send(ChainHeadEvent{blocksIn})
+			log.Info("sucessfully validation and commit", "block", blocksIn.Number())
+		}(block, statedb, logsToHandle, receipts, usedGas)
+
 		bc.chainBlockFeed.Send(ChainHeadEvent{block})
+		//	block, err = it.next()
+
+		block, err = it.next()
+		if block == nil {
+			log.Info("fail to get next block , block is nil after exection")
+		}
 	}
 
 	// Any blocks remaining here? The only ones we care about are the future ones

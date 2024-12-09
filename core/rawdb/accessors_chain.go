@@ -820,7 +820,11 @@ func ReadBlock(db ethdb.Reader, hash common.Hash, number uint64) *types.Block {
 // WriteBlock serializes a block into the database, header and body separately.
 func WriteBlock(db ethdb.KeyValueWriter, block *types.Block) {
 	WriteBody(db, block.Hash(), block.NumberU64(), block.Body())
+	if block.Header() == nil {
+		log.Info("write block headr is nil")
+	}
 	WriteHeader(db, block.Header())
+	log.Info("write block header to db finish", "block", block.NumberU64())
 }
 
 // WriteAncientBlocksWithBlobs writes entire block data with blobs into ancient store and returns the total written size.

@@ -26,6 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie/trienode"
@@ -295,6 +296,7 @@ func (s *stateObject) finalise(prefetch bool) {
 		}
 	}
 	if s.db.prefetcher != nil && prefetch && len(slotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
+		log.Info("trie prefetch begin")
 		s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, slotsToPrefetch)
 	}
 	if len(s.dirtyStorage) > 0 {
@@ -615,4 +617,34 @@ func (s *stateObject) Nonce() uint64 {
 
 func (s *stateObject) Root() common.Hash {
 	return s.data.Root
+}
+
+func (s *stateObject) GetPendingStorages() map[common.Hash][]byte {
+	var (
+		hasher = crypto.NewKeccakState()
+	)
+
+	if len(s.pendingStorage) > 0 {
+		dirtyStorage := make(map[common.Hash][]byte)
+		for key, value := range s.pendingStorage {
+			// Skip noop changes, persist actual changes
+			if value == s.originStorage[key] {
+				continue
+			}
+			var v []byte
+			if value != (common.Hash{}) {
+				v = common.TrimLeftZeroes(value[:])
+			}
+
+			// rlp-encoded value to be used by the snapshot
+			var encoded []byte
+			if len(v) != 0 {
+				encoded, _ = rlp.EncodeToBytes(v)
+			}
+
+			dirtyStorage[crypto.HashData(hasher, key[:])] = encoded
+		}
+		return dirtyStorage
+	}
+	return nil
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
+        "github.com/ethereum/go-ethereum/log"
 )
 
 type BlockValidatorOption func(*BlockValidator) *BlockValidator
@@ -165,6 +166,7 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateDB, receipts types.Receipts, usedGas uint64) error {
 	header := block.Header()
 	if block.GasUsed() != usedGas {
+		log.Info("Richard:", "validate header=", header)
 		return fmt.Errorf("invalid gas used (remote: %d local: %d)", block.GasUsed(), usedGas)
 	}
 	// Validate the received block's bloom with the one derived from the generated receipts.

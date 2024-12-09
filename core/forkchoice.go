@@ -92,6 +92,7 @@ func (f *ForkChoice) ReorgNeeded(current *types.Header, extern *types.Header) (b
 	if externTd == nil {
 		ptd := f.chain.GetTd(extern.ParentHash, extern.Number.Uint64()-1)
 		if ptd == nil {
+		log.Info("Richard:", "parentHash=", extern.ParentHash, " number=", extern.Number.Uint64()-1)
 			return false, consensus.ErrUnknownAncestor
 		}
 		externTd = new(big.Int).Add(ptd, extern.Difficulty)
