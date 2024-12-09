@@ -387,7 +387,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		vmConfig:           vmConfig,
 		diffQueue:          prque.New[int64, *types.DiffLayer](nil),
 		diffQueueBuffer:    make(chan *types.DiffLayer),
-		verifyTaskCh:       make(chan *VerifyTask, 1),
+		verifyTaskCh:       make(chan *VerifyTask, 3),
 	}
 	bc.flushInterval.Store(int64(cacheConfig.TrieTimeLimit))
 	bc.forker = NewForkChoice(bc, shouldPreserve)
@@ -2362,7 +2362,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			statedb.StopPrefetcher()
 			return it.index, err
 		}
-		log.Info("exection finish on block", "block", block.NumberU64())
+
 		statedb.CommitUnVerifiedSnapDifflayer(bc.chainConfig.IsEIP158(block.Number()))
 
 		task := &VerifyTask{
