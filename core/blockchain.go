@@ -1891,6 +1891,161 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	return nil
 }
 
+// writeBlockWithState writes block, metadata and corresponding state data to the
+// database.
+func (bc *BlockChain) writeBlockWithStateV2(block *types.Block, receipts []*types.Receipt, state *state.StateDB) error {
+	log.Info("write block with state begin")
+	// Calculate the total difficulty of the block
+	ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
+	if ptd == nil {
+		log.Info("fail to get td finish")
+		state.StopPrefetcher()
+		log.Info("Richard:", "failed to find parent hash", block.ParentHash())
+		return consensus.ErrUnknownAncestor
+	}
+	// Make sure no inconsistent state is leaked during insertion
+	externTd := new(big.Int).Add(block.Difficulty(), ptd)
+
+	// Irrelevant of the canonical status, write the block itself to the database.
+	//
+	// Note all the components of block(td, hash->number map, header, body, receipts)
+	// should be written atomically. BlockBatch is used for containing all components.
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		blockBatch := bc.db.BlockStore().NewBatch()
+		rawdb.WriteTd(blockBatch, block.Hash(), block.NumberU64(), externTd)
+		rawdb.WriteBlock(blockBatch, block)
+		rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
+		// if cancun is enabled, here need to write sidecars too
+		if bc.chainConfig.IsCancun(block.Number(), block.Time()) {
+			rawdb.WriteBlobSidecars(blockBatch, block.Hash(), block.NumberU64(), block.Sidecars())
+		}
+		if bc.db.StateStore() != nil {
+			rawdb.WritePreimages(bc.db.StateStore(), state.Preimages())
+		} else {
+			rawdb.WritePreimages(blockBatch, state.Preimages())
+		}
+		if err := blockBatch.Write(); err != nil {
+			log.Crit("Failed to write block into disk", "err", err)
+		}
+		bc.hc.tdCache.Add(block.Hash(), externTd)
+		// log.Info("Richard:", "add td, hash=", block.Hash(), " td=", externTd)
+		bc.blockCache.Add(block.Hash(), block)
+		bc.cacheReceipts(block.Hash(), receipts, block)
+		if bc.chainConfig.IsCancun(block.Number(), block.Time()) {
+			bc.sidecarsCache.Add(block.Hash(), block.Sidecars())
+		}
+		wg.Done()
+	}()
+	/*
+		tryCommitTrieDB := func() error {
+			bc.commitLock.Lock()
+			defer bc.commitLock.Unlock()
+
+			// If node is running in path mode, skip explicit gc operation
+			// which is unnecessary in this mode.
+			if bc.triedb.Scheme() == rawdb.PathScheme {
+				return nil
+			}
+
+			triedb := bc.stateCache.TrieDB()
+			// If we're running an archive node, always flush
+			if bc.cacheConfig.TrieDirtyDisabled {
+				return triedb.Commit(block.Root(), false)
+			}
+			// Full but not archive node, do proper garbage collection
+			triedb.Reference(block.Root(), common.Hash{}) // metadata reference to keep trie alive
+			bc.triegc.Push(block.Root(), -int64(block.NumberU64()))
+
+			// Flush limits are not considered for the first TriesInMemory blocks.
+			current := block.NumberU64()
+			if current <= bc.TriesInMemory() {
+				return nil
+			}
+			// If we exceeded our memory allowance, flush matured singleton nodes to disk
+			var (
+				_, nodes, _, imgs = triedb.Size()
+				limit             = common.StorageSize(bc.cacheConfig.TrieDirtyLimit) * 1024 * 1024
+			)
+			if nodes > limit || imgs > 4*1024*1024 {
+				triedb.Cap(limit - ethdb.IdealBatchSize)
+			}
+			// Find the next state trie we need to commit
+			chosen := current - bc.triesInMemory
+			flushInterval := time.Duration(bc.flushInterval.Load())
+			// If we exceeded out time allowance, flush an entire trie to disk
+			if bc.gcproc > flushInterval {
+				canWrite := true
+				if posa, ok := bc.engine.(consensus.PoSA); ok {
+					if !posa.EnoughDistance(bc, block.Header()) {
+						canWrite = false
+					}
+				}
+				if canWrite {
+					// If the header is missing (canonical chain behind), we're reorging a low
+					// diff sidechain. Suspend committing until this operation is completed.
+					header := bc.GetHeaderByNumber(chosen)
+					if header == nil {
+						log.Warn("Reorg in progress, trie commit postponed", "number", chosen)
+					} else {
+						// If we're exceeding limits but haven't reached a large enough memory gap,
+						// warn the user that the system is becoming unstable.
+						if chosen < bc.lastWrite+bc.triesInMemory && bc.gcproc >= 2*flushInterval {
+							log.Info("State in memory for too long, committing", "time", bc.gcproc, "allowance", flushInterval, "optimum", float64(chosen-bc.lastWrite)/float64(bc.triesInMemory))
+						}
+						// Flush an entire trie and restart the counters
+						triedb.Commit(header.Root, true)
+						rawdb.WriteSafePointBlockNumber(bc.db, chosen)
+						bc.lastWrite = chosen
+						bc.gcproc = 0
+					}
+				}
+			}
+			// Garbage collect anything below our required write retention
+			wg2 := sync.WaitGroup{}
+			for !bc.triegc.Empty() {
+				root, number := bc.triegc.Pop()
+				if uint64(-number) > chosen {
+					bc.triegc.Push(root, number)
+					break
+				}
+				wg2.Add(1)
+				go func() {
+					triedb.Dereference(root)
+					wg2.Done()
+				}()
+			}
+			wg2.Wait()
+			return nil
+		}
+		// Commit all cached state changes into underlying memory database.
+		_, diffLayer, err := state.Commit(block.NumberU64(), tryCommitTrieDB)
+		if err != nil {
+			return err
+		}
+
+		// Ensure no empty block body
+		if diffLayer != nil && block.Header().TxHash != types.EmptyRootHash {
+			// Filling necessary field
+			diffLayer.Receipts = receipts
+			diffLayer.BlockHash = block.Hash()
+			diffLayer.Number = block.NumberU64()
+
+			diffLayerCh := make(chan struct{})
+			if bc.diffLayerChanCache.Len() >= diffLayerCacheLimit {
+				bc.diffLayerChanCache.RemoveOldest()
+			}
+			bc.diffLayerChanCache.Add(diffLayer.BlockHash, diffLayerCh)
+
+			go bc.cacheDiffLayer(diffLayer, diffLayerCh)
+		}
+	*/
+	wg.Wait()
+	log.Info("commit wg wait finish")
+	return nil
+}
+
 // WriteBlockAndSetHead writes the given block and all associated state to the database,
 // and applies the block as the new chain head.
 func (bc *BlockChain) WriteBlockAndSetHead(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.StateDB, emitHeadEvent bool) (status WriteStatus, err error) {
@@ -2298,6 +2453,12 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		var logsToHandle []*types.Log
 		//blockToHandle = block
 		logsToHandle = logs
+
+		// Don't set the head, only insert the block
+		err = bc.writeBlockWithStateV2(block, receipts, statedb)
+		if err != nil {
+			log.Info("err write block with state v2", "err", err.Error())
+		}
 
 		go func(blocksIn *types.Block,
 			state *state.StateDB, logsIn []*types.Log,
