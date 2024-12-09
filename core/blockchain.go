@@ -387,7 +387,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		vmConfig:           vmConfig,
 		diffQueue:          prque.New[int64, *types.DiffLayer](nil),
 		diffQueueBuffer:    make(chan *types.DiffLayer),
-		verifyTaskCh:       make(chan *VerifyTask, 1024),
+		verifyTaskCh:       make(chan *VerifyTask, 1),
 	}
 	bc.flushInterval.Store(int64(cacheConfig.TrieTimeLimit))
 	bc.forker = NewForkChoice(bc, shouldPreserve)
@@ -2253,39 +2253,37 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			return it.index, err
 		}
 		bc.updateHighestVerifiedHeader(block.Header())
-
 		// Enable prefetching to pull in trie node paths while processing transactions
-		statedb.StartPrefetcher("chain")
-		interruptCh := make(chan struct{})
+		//	statedb.StartPrefetcher("chain")
+		//	interruptCh := make(chan struct{})
 		// For diff sync, it may fallback to full sync, so we still do prefetch
-		if len(block.Transactions()) >= prefetchTxNumber {
-			// do Prefetch in a separate goroutine to avoid blocking the critical path
+		//	if len(block.Transactions()) >= prefetchTxNumber {
+		// do Prefetch in a separate goroutine to avoid blocking the critical path
 
-			// 1.do state prefetch for snapshot cache
-			throwaway := statedb.CopyDoPrefetch()
-			go bc.prefetcher.Prefetch(block, throwaway, &bc.vmConfig, interruptCh)
+		// 1.do state prefetch for snapshot cache
+		//		throwaway := statedb.CopyDoPrefetch()
+		//		go bc.prefetcher.Prefetch(block, throwaway, &bc.vmConfig, interruptCh)
 
-			// 2.do trie prefetch for MPT trie node cache
-			// it is for the big state trie tree, prefetch based on transaction's From/To address.
-			// trie prefetcher is thread safe now, ok to prefetch in a separate routine
-			go throwaway.TriePrefetchInAdvance(block, signer)
-		}
+		// 2.do trie prefetch for MPT trie node cache
+		// it is for the big state trie tree, prefetch based on transaction's From/To address.
+		// trie prefetcher is thread safe now, ok to prefetch in a separate routine
+		//		go throwaway.TriePrefetchInAdvance(block, signer)
+		//		}
 
 		// Process block using the parent state as reference point
 		statedb.SetExpectedStateRoot(block.Root())
-		pstart := time.Now()
+
 		statedb, receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
-		close(interruptCh) // state prefetch can be stopped
+		log.Info("execution finish on block", "block", block.NumberU64())
+		//	close(interruptCh) // state prefetch can be stopped
 		if err != nil {
 			bc.reportBlock(block, receipts, err)
 			statedb.StopPrefetcher()
 			return it.index, err
 		}
 		log.Info("exection finish on block", "block", block.NumberU64())
-		ptime := time.Since(pstart)
 		statedb.CommitUnVerifiedSnapDifflayer(bc.chainConfig.IsEIP158(block.Number()))
 
-		vstart := time.Now()
 		task := &VerifyTask{
 			block:    block,
 			state:    statedb,
@@ -2304,25 +2302,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		//	statedb.StopPrefetcher()
 		//	return it.index, err
 		//}
-		vtime := time.Since(vstart)
-		proctime := time.Since(start) // processing + validation
-
-		// Update the metrics touched during block processing and validation
-		accountReadTimer.Update(statedb.AccountReads)                   // Account reads are complete(in processing)
-		storageReadTimer.Update(statedb.StorageReads)                   // Storage reads are complete(in processing)
-		snapshotAccountReadTimer.Update(statedb.SnapshotAccountReads)   // Account reads are complete(in processing)
-		snapshotStorageReadTimer.Update(statedb.SnapshotStorageReads)   // Storage reads are complete(in processing)
-		accountUpdateTimer.Update(statedb.AccountUpdates)               // Account updates are complete(in validation)
-		storageUpdateTimer.Update(statedb.StorageUpdates)               // Storage updates are complete(in validation)
-		accountHashTimer.Update(statedb.AccountHashes)                  // Account hashes are complete(in validation)
-		storageHashTimer.Update(statedb.StorageHashes)                  // Storage hashes are complete(in validation)
-		triehash := statedb.AccountHashes + statedb.StorageHashes       // The time spent on tries hashing
-		trieUpdate := statedb.AccountUpdates + statedb.StorageUpdates   // The time spent on tries update
-		trieRead := statedb.SnapshotAccountReads + statedb.AccountReads // The time spent on account read
-		trieRead += statedb.SnapshotStorageReads + statedb.StorageReads // The time spent on storage read
-		blockExecutionTimer.Update(ptime - trieRead)                    // The time spent on EVM processing
-		blockValidationTimer.Update(vtime - (triehash + trieUpdate))    // The time spent on block validation
-
 		err = bc.writeBlockWithState(block, receipts, statedb)
 		if err != nil {
 			log.Crit("Failed to write block", "number", block.Number(), "hash", block.Hash(), "err", err)
