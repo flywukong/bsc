@@ -1718,8 +1718,6 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 							log.Warn("Failed to cap snapshot tree", "root", s.expectedRoot, "layers", s.snaps.CapLimit(), "err", err)
 						}
 					}()
-				} else {
-					log.Info("Richard: not to update and verify diff", "parent=", parent)
 				}
 			}
 			return nil
