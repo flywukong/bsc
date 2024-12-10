@@ -26,7 +26,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie/trienode"
@@ -163,7 +162,7 @@ func (s *stateObject) getTrie() (Trie, error) {
 		if err != nil {
 			return nil, err
 		}
-		log.Info("richard: open ca trie for addr", "state_root=", s.db.originalRoot, " addr=", s.address, "t_root=", s.data.Root)
+		//	log.Info("richard: open ca trie for addr", "state_root=", s.db.originalRoot, " addr=", s.address, "t_root=", s.data.Root)
 		s.trie = tr
 		// }
 	}
@@ -356,25 +355,25 @@ func (s *stateObject) updateTrie() (Trie, error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		log.Info("richard: before update trie", "addr=", s.address, " root=", s.trie.Hash())
+		//	log.Info("richard: before update trie", "addr=", s.address, " root=", s.trie.Hash())
 		for key, value := range dirtyStorage {
 			if len(value) == 0 {
 				if err := tr.DeleteStorage(s.address, key[:]); err != nil {
 					s.db.setError(err)
 				}
 				s.db.StorageDeleted += 1
-				log.Info("richard: delete key", "key=", key)
+				//		log.Info("richard: delete key", "key=", key)
 			} else {
 				if err := tr.UpdateStorage(s.address, key[:], value); err != nil {
 					s.db.setError(err)
 				}
 				s.db.StorageUpdated += 1
-				log.Info("richard: update kv", "key=", key, " val=", value)
+				//		log.Info("richard: update kv", "key=", key, " val=", value)
 			}
 			// Cache the items for preloading
 			usedStorage = append(usedStorage, common.CopyBytes(key[:]))
 		}
-		log.Info("richard: after update trie", "addr=", s.address, " root=", s.trie.Hash())
+		//	log.Info("richard: after update trie", "addr=", s.address, " root=", s.trie.Hash())
 	}()
 	// If state snapshotting is active, cache the data til commit
 	wg.Add(1)

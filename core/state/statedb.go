@@ -1157,7 +1157,7 @@ func (s *StateDB) StateIntermediateRoot() common.Hash {
 					if _, exist := s.r_destructs[crypto.Keccak256Hash(addr[:])]; !exist {
 						panic(fmt.Sprintf("failed to find destruct account %x", addr))
 					}
-				
+
 				*/
 			} else {
 				// log.Info("Richard: update", " addr=", addr)
@@ -1218,7 +1218,7 @@ func (s *StateDB) StateIntermediateRoot() common.Hash {
 	if s.noTrie {
 		return s.expectedRoot
 	} else {
-		log.Info("richard: state root", "state_root=", s.trie.Hash())
+		//	log.Info("richard: state root", "state_root=", s.trie.Hash())
 		return s.trie.Hash()
 	}
 }
@@ -1460,7 +1460,7 @@ func (s *StateDB) handleDestruction(nodes *trienode.MergedNodeSet) (map[common.A
 // The associated block number of the state transition is also provided
 // for more chain context.
 func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash, *types.DiffLayer, error) {
-	log.Info("richard: commit block", "number=", block)
+	//	log.Info("richard: commit block", "number=", block)
 	// log.Info("Richard: start to commit state", "block=", block)
 	// Short circuit in case any database failure occurred earlier.
 	if s.dbErr != nil {
@@ -1703,7 +1703,7 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 												}
 											}
 					*/
-					log.Info("Richard: commit successfully with the same created diff for block", " block=", block)
+					//		log.Info("Richard: commit successfully with the same created diff for block", " block=", block)
 
 					if err != nil {
 						log.Warn("Failed to update snapshot tree", "from", parent, "to", s.expectedRoot, "err", err)
@@ -1759,7 +1759,7 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 	s.storagesOrigin = make(map[common.Address]map[common.Hash][]byte)
 	s.stateObjectsDirty = make(map[common.Address]struct{})
 	s.stateObjectsDestruct = make(map[common.Address]*types.StateAccount)
-	log.Info("Richard: successfully commit state", "block=", block)
+	//log.Info("Richard: successfully commit state", "block=", block)
 	return root, diffLayer, nil
 }
 
