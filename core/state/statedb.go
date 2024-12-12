@@ -1647,64 +1647,64 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 				if parent := s.snap.Root(); parent != s.expectedRoot {
 					// log.Info("Richard: start to update and verify the diff")
 					err := s.snaps.Update(s.expectedRoot, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages, true)
-					/*
-											// compare
-											if len(s.r_destructs) != len(s.convertAccountSet(s.stateObjectsDestruct)) || len(s.accounts) != len(s.r_accounts) || len(s.storages) != len(s.r_storages) {
-												panic(fmt.Sprintf("Richard: no the same len, len_r_d=%d len_d=%d len_r_a=%d len_a=%d len_r_s=%d  len_s=%d", len(s.r_destructs), len(s.convertAccountSet(s.stateObjectsDestruct)), len(s.r_accounts), len(s.accounts), len(s.r_storages), len(s.storages) ))
-											}
-											for addr := range s.convertAccountSet(s.stateObjectsDestruct) {
-												if _, ok := s.r_destructs[addr]; !ok {
-													panic(fmt.Sprintf("Richard: r_destructs has no addr=%x", addr))
-												}
-											}
 
-											for addr, acc_d := range s.accounts {
-												if r_acc_d, ok := s.r_accounts[addr]; !ok {
-													panic(fmt.Sprintf("Richard: r_accounts has no addr=%x", addr))
-												} else {
-													 if !bytes.Equal(acc, r_acc) {
-														panic(fmt.Sprintf("Richard: accounts mismatch for addr=%x", addr))
-													 }
-						                                                        r_acc := new(types.SlimAccount)
-						                                                        if err := rlp.DecodeBytes(r_acc_d, r_acc); err != nil {
-						                                                                panic(err)
-						                                                        }
-						                                                        acc := new(types.SlimAccount)
-						                                                        if err := rlp.DecodeBytes(acc_d, acc); err != nil {
-						                                                                panic(err)
-						                                                        }
+					// compare
+					if len(s.r_destructs) != len(s.convertAccountSet(s.stateObjectsDestruct)) || len(s.accounts) != len(s.r_accounts) || len(s.storages) != len(s.r_storages) {
+						panic(fmt.Sprintf("Richard: no the same len, len_r_d=%d len_d=%d len_r_a=%d len_a=%d len_r_s=%d  len_s=%d", len(s.r_destructs), len(s.convertAccountSet(s.stateObjectsDestruct)), len(s.r_accounts), len(s.accounts), len(s.r_storages), len(s.storages)))
+					}
+					for addr := range s.convertAccountSet(s.stateObjectsDestruct) {
+						if _, ok := s.r_destructs[addr]; !ok {
+							panic(fmt.Sprintf("Richard: r_destructs has no addr=%x", addr))
+						}
+					}
 
-						                                                        if r_acc.Nonce != acc.Nonce {
-						                                                                log.Crit("Richard:", "mismatch nonce for addr=", addr, " r_n=", r_acc.Nonce, " n=", acc.Nonce)
-						                                                        }
-						                                                        if !(new(uint256.Int).Sub(r_acc.Balance, acc.Balance).IsZero()) {
-						                                                                log.Crit("Richard:", "mismatch balance for addr=", addr, " r_b=", r_acc.Balance, " b=", acc.Balance)
-						                                                        }
-						                                                        if !bytes.Equal(r_acc.CodeHash, acc.CodeHash) {
-						                                                                if bytes.Equal(acc.CodeHash, types.EmptyCodeHash[:]) {
-						                                                                        // log.Info("Richard: empty code hash")
-						                                                                } else {
-						                                                                        log.Crit("Richard:", "mismatch codehash for addr=", addr, " r_c=", r_acc.CodeHash, " c=", acc.CodeHash)
-						                                                                }
-						                                                        }
-												}
-											}
-											for addr, storage := range s.storages {
-												if r_storage, ok := s.r_storages[addr]; !ok {
-													panic(fmt.Sprintf("Richard: r_storages has no addr=%x", addr))
-												} else {
-													for k, v := range storage {
-														if r_v, ok := r_storage[k]; !ok {
-															panic(fmt.Sprintf("Richard: no storage for addr=%x k=%x", addr, k))
-														} else {
-															if !bytes.Equal(v, r_v) {
-																panic(fmt.Sprintf("Richard: mismatch storage for addr=%x k=%x v=%x r_v=%x", addr, k, v, r_v))
-															}
-														}
-													}
-												}
-											}
-					*/
+					for addr, acc_d := range s.accounts {
+						if r_acc_d, ok := s.r_accounts[addr]; !ok {
+							panic(fmt.Sprintf("Richard: r_accounts has no addr=%x", addr))
+						} else {
+							if !bytes.Equal(acc, r_acc) {
+								panic(fmt.Sprintf("Richard: accounts mismatch for addr=%x", addr))
+							}
+							r_acc := new(types.SlimAccount)
+							if err := rlp.DecodeBytes(r_acc_d, r_acc); err != nil {
+								panic(err)
+							}
+							acc := new(types.SlimAccount)
+							if err := rlp.DecodeBytes(acc_d, acc); err != nil {
+								panic(err)
+							}
+
+							if r_acc.Nonce != acc.Nonce {
+								log.Crit("Richard:", "mismatch nonce for addr=", addr, " r_n=", r_acc.Nonce, " n=", acc.Nonce)
+							}
+							if !(new(uint256.Int).Sub(r_acc.Balance, acc.Balance).IsZero()) {
+								log.Crit("Richard:", "mismatch balance for addr=", addr, " r_b=", r_acc.Balance, " b=", acc.Balance)
+							}
+							if !bytes.Equal(r_acc.CodeHash, acc.CodeHash) {
+								if bytes.Equal(acc.CodeHash, types.EmptyCodeHash[:]) {
+									// log.Info("Richard: empty code hash")
+								} else {
+									log.Crit("Richard:", "mismatch codehash for addr=", addr, " r_c=", r_acc.CodeHash, " c=", acc.CodeHash)
+								}
+							}
+						}
+					}
+					for addr, storage := range s.storages {
+						if r_storage, ok := s.r_storages[addr]; !ok {
+							panic(fmt.Sprintf("Richard: r_storages has no addr=%x", addr))
+						} else {
+							for k, v := range storage {
+								if r_v, ok := r_storage[k]; !ok {
+									panic(fmt.Sprintf("Richard: no storage for addr=%x k=%x", addr, k))
+								} else {
+									if !bytes.Equal(v, r_v) {
+										panic(fmt.Sprintf("Richard: mismatch storage for addr=%x k=%x v=%x r_v=%x", addr, k, v, r_v))
+									}
+								}
+							}
+						}
+					}
+
 					//		log.Info("Richard: commit successfully with the same created diff for block", " block=", block)
 
 					if err != nil {
