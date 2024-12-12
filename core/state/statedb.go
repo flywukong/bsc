@@ -1044,6 +1044,29 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 	s.clearJournalAndRefund()
 }
 
+func (s *StateDB) GetLatestVerifiedStateRoot(addrHash common.Hash) common.Hash {
+	if s.snaps != nil {
+		s.snap = s.snaps.Snapshot(s.originalRoot)
+		acc, err := s.snap.Account(addrHash)
+		if err == nil {
+			if acc == nil {
+				return types.EmptyRootHash
+			}
+			data := &types.StateAccount{
+				Nonce:    acc.Nonce,
+				Balance:  acc.Balance,
+				CodeHash: acc.CodeHash,
+				Root:     common.BytesToHash(acc.Root),
+			}
+			if data.Root == (common.Hash{}) {
+				data.Root = types.EmptyRootHash
+			}
+			return data.Root
+		}
+	}
+	return types.EmptyRootHash
+}
+
 func (s *StateDB) UpdateSnapAfterExecution() error {
 	if !s.pipelineEnabled {
 		log.Info("pipe line not enable")
@@ -1075,7 +1098,7 @@ func (s *StateDB) UpdateSnapAfterExecution() error {
 		}
 	}
 
-	time.Sleep(3 * time.Millisecond)
+	//time.Sleep(3 * time.Millisecond)
 	log.Info("update snapshot after execution", " expectedROOT=", s.expectedRoot)
 	return nil
 }
@@ -1118,7 +1141,6 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 		}
 
 		log.Info("start to validate block", "expectRoot=", s.expectedRoot)
-		time.Sleep(2 * time.Millisecond)
 		tr, err := s.db.OpenTrie(s.originalRoot)
 		if err != nil {
 			panic("Failed to open state trie")
@@ -1185,6 +1207,7 @@ func (s *StateDB) AccountsIntermediateRoot() {
 		if obj := s.stateObjects[addr]; !obj.deleted {
 			wg.Add(1)
 			tasks <- func() {
+				obj.data.Root = s.GetLatestVerifiedStateRoot(obj.addrHash)
 				obj.updateRoot()
 
 				// Cache the data until commit. Note, this update mechanism is not symmetric
