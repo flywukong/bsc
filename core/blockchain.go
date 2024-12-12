@@ -2284,7 +2284,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		}
 		ptime := time.Since(pstart)
 		statedb.CommitUnVerifiedSnapDifflayer(bc.chainConfig.IsEIP158(block.Number()))
-		//log.Info("Richard: successfully process", " block=", block.Number())
+		log.Info("Richard: successfully process", " block=", block.Number())
 
 		blockExecutionTimer.Update(ptime)
 		// Add to cache
@@ -2464,7 +2464,7 @@ func (bc *BlockChain) VerifyLoop() {
 			}
 			blockWriteTimer.UpdateSince(cstart)
 			bc.chainBlockFeed.Send(ChainHeadEvent{task.block})
-			//	log.Info("Richard: successfully verify", "block=", task.block.Number())
+			log.Info("Richard: successfully verify", "block=", task.block.Number())
 		}
 	}
 }
