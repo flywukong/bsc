@@ -1775,10 +1775,16 @@ func (s *StateDB) CommitUnVerifiedSnapDifflayer(deleteEmptyObjects bool) {
 	for addr := range s.stateObjectsPending {
 		if obj := s.stateObjects[addr]; !obj.deleted {
 			s.r_accounts[obj.addrHash] = types.SlimAccountRLP(obj.data)
-			obj.WriteCode()
 			pendingstorages := obj.GetPendingStorages()
 			if pendingstorages != nil {
 				s.r_storages[obj.addrHash] = pendingstorages
+			}
+		}
+	}
+	for addr := range s.stateObjectsDirty {
+		if obj := s.stateObjects[addr]; !obj.deleted {
+			if obj.code != nil && obj.dirtyCode {
+				obj.WriteCode()
 			}
 		}
 	}
