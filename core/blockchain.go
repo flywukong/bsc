@@ -98,6 +98,7 @@ var (
 	blockExecutionAndCommitTimer = metrics.NewRegisteredTimer("chain/pipeexecution", nil)
 	blockStartTimer              = metrics.NewRegisteredTimer("chain/start", nil)
 	blockWriteTimer              = metrics.NewRegisteredTimer("chain/write", nil)
+	blockWriteTotalTimer         = metrics.NewRegisteredTimer("chain/writetotal", nil)
 
 	blockReorgMeter     = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
 	blockReorgAddMeter  = metrics.NewRegisteredMeter("chain/reorg/add", nil)
@@ -2469,6 +2470,7 @@ func (bc *BlockChain) VerifyLoop() {
 			}
 			blockValidationTimer.UpdateSince(vstart)
 
+			cstart := time.Now()
 			wg.Add(1)
 			go func() {
 				cstart := time.Now()
@@ -2491,6 +2493,7 @@ func (bc *BlockChain) VerifyLoop() {
 			}()
 
 			wg.Wait()
+			blockWriteTotalTimer.UpdateSince(cstart)
 		}
 	}
 }
