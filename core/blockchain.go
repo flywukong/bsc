@@ -2285,6 +2285,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			statedb.StopPrefetcher()
 			return it.index, err
 		}
+		blockExecutionTimer.Update(time.Since(pstart))
+
 		statedb.CommitUnVerifiedSnapDifflayer(bc.chainConfig.IsEIP158(block.Number()))
 		snapshotCommitTimer.Update(statedb.SnapshotCommits)
 		// Add to cache
@@ -2298,7 +2300,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 		bc.hc.tdCache.Add(block.Hash(), externTd)
 
-		blockExecutionTimer.Update(time.Since(pstart))
+		blockExecutionAndCommitTimer.Update(time.Since(pstart))
 
 		vstart := time.Now()
 		task := &VerifyTask{
