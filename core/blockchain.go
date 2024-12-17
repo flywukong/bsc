@@ -2282,7 +2282,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			return it.index, err
 		}
 		statedb.CommitUnVerifiedSnapDifflayer(bc.chainConfig.IsEIP158(block.Number()))
-
+		snapshotCommitTimer.Update(statedb.SnapshotCommits)
 		// Add to cache
 		bc.blockCache.Add(block.Hash(), block)
 		bc.hc.numberCache.Add(block.Hash(), block.NumberU64())
