@@ -89,12 +89,15 @@ var (
 	snapshotStorageReadTimer = metrics.NewRegisteredTimer("chain/snapshot/storage/reads", nil)
 	snapshotCommitTimer      = metrics.NewRegisteredTimer("chain/snapshot/commits", nil)
 
-	triedbCommitTimer = metrics.NewRegisteredTimer("chain/triedb/commits", nil)
+	verifyTaskBlockTimer = metrics.NewRegisteredTimer("chain/verify", nil)
+	triedbCommitTimer    = metrics.NewRegisteredTimer("chain/triedb/commits", nil)
 
-	blockInsertTimer     = metrics.NewRegisteredTimer("chain/inserts", nil)
-	blockValidationTimer = metrics.NewRegisteredTimer("chain/validation", nil)
-	blockExecutionTimer  = metrics.NewRegisteredTimer("chain/execution", nil)
-	blockWriteTimer      = metrics.NewRegisteredTimer("chain/write", nil)
+	blockInsertTimer             = metrics.NewRegisteredTimer("chain/inserts", nil)
+	blockValidationTimer         = metrics.NewRegisteredTimer("chain/validation", nil)
+	blockExecutionTimer          = metrics.NewRegisteredTimer("chain/execution", nil)
+	blockExecutionAndCommitTimer = metrics.NewRegisteredTimer("chain/pipeexecution", nil)
+	blockStartTimer              = metrics.NewRegisteredTimer("chain/start", nil)
+	blockWriteTimer              = metrics.NewRegisteredTimer("chain/write", nil)
 
 	blockReorgMeter     = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
 	blockReorgAddMeter  = metrics.NewRegisteredMeter("chain/reorg/add", nil)
@@ -2274,6 +2277,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		// Process block using the parent state as reference point
 		statedb.SetExpectedStateRoot(block.Root())
 		pstart := time.Now()
+		blockStartTimer.UpdateSince(start)
 		statedb, receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
 		close(interruptCh) // state prefetch can be stopped
 		if err != nil {
@@ -2296,7 +2300,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 		blockExecutionTimer.Update(time.Since(pstart))
 
-		//		vstart := time.Now()
+		vstart := time.Now()
 		task := &VerifyTask{
 			block:    block,
 			state:    statedb,
@@ -2305,6 +2309,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			logs:     logs,
 		}
 		bc.verifyTaskCh <- task
+		verifyTaskBlockTimer.UpdateSince(vstart)
 		blockInsertTimer.UpdateSince(start)
 
 		// Report the import stats before returning the various results
