@@ -91,6 +91,9 @@ var (
 
 	verifyTaskBlockTimer = metrics.NewRegisteredTimer("chain/verify", nil)
 	triedbCommitTimer    = metrics.NewRegisteredTimer("chain/triedb/commits", nil)
+	trieCommitTimer      = metrics.NewRegisteredTimer("chain/trie/commits", nil)
+	CodeCommitTimer      = metrics.NewRegisteredTimer("chain/code/commits", nil)
+	blockCommitTimer     = metrics.NewRegisteredTimer("chain/block/commits", nil)
 
 	blockInsertTimer             = metrics.NewRegisteredTimer("chain/inserts", nil)
 	blockValidationTimer         = metrics.NewRegisteredTimer("chain/validation", nil)
@@ -2289,7 +2292,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		blockExecutionTimer.Update(time.Since(pstart))
 
 		statedb.CommitUnVerifiedSnapDifflayer(bc.chainConfig.IsEIP158(block.Number()))
-		snapshotCommitTimer.Update(statedb.SnapshotCommits)
+		snapshotCommitTimer.Update(statedb.PipeSnapshotCommits)
 		// Add to cache
 		bc.blockCache.Add(block.Hash(), block)
 		bc.hc.numberCache.Add(block.Hash(), block.NumberU64())
@@ -2488,12 +2491,15 @@ func (bc *BlockChain) VerifyLoop() {
 					log.Crit("write block and set head failed", "error", err)
 				}
 				bc.chainBlockFeed.Send(ChainHeadEvent{task.block})
-				triedbCommitTimer.UpdateSince(cstart)
+				blockCommitTimer.UpdateSince(cstart)
 				wg.Done()
 			}()
 
 			wg.Wait()
 			blockWriteTotalTimer.UpdateSince(cstart)
+			triedbCommitTimer.Update(task.state.TrieDBCommits)
+			trieCommitTimer.Update(task.state.TrieCommits)
+			CodeCommitTimer.Update(task.state.CodeCommit)
 		}
 	}
 }
