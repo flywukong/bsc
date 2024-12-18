@@ -148,6 +148,7 @@ type StateDB struct {
 	SnapshotStorageReads time.Duration
 	SnapshotCommits      time.Duration
 	TrieDBCommits        time.Duration
+	TrieCommits          time.Duration
 
 	AccountUpdated int
 	StorageUpdated int
@@ -1382,6 +1383,9 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 
 	commmitTrie := func() error {
 		commitErr := func() error {
+			defer func(start time.Time) {
+				s.TrieCommits += time.Since(start)
+			}(time.Now())
 			if s.stateRoot = s.StateIntermediateRoot(); s.fullProcessed && s.expectedRoot != s.stateRoot {
 				log.Error("Invalid merkle root", "remote", s.expectedRoot, "local", s.stateRoot)
 				return fmt.Errorf("invalid merkle root (remote: %x local: %x)", s.expectedRoot, s.stateRoot)
