@@ -88,6 +88,7 @@ var (
 	snapshotAccountReadTimer = metrics.NewRegisteredTimer("chain/snapshot/account/reads", nil)
 	snapshotStorageReadTimer = metrics.NewRegisteredTimer("chain/snapshot/storage/reads", nil)
 	snapshotCommitTimer      = metrics.NewRegisteredTimer("chain/snapshot/commits", nil)
+	pipeSnapshotCommitTimer  = metrics.NewRegisteredTimer("chain/pipesnapshot/commits", nil)
 
 	verifyTaskBlockTimer = metrics.NewRegisteredTimer("chain/verify", nil)
 	triedbCommitTimer    = metrics.NewRegisteredTimer("chain/triedb/commits", nil)
@@ -2292,7 +2293,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		blockExecutionTimer.Update(time.Since(pstart))
 
 		statedb.CommitUnVerifiedSnapDifflayer(bc.chainConfig.IsEIP158(block.Number()))
-		snapshotCommitTimer.Update(statedb.PipeSnapshotCommits)
+		pipeSnapshotCommitTimer.Update(statedb.PipeSnapshotCommits)
 		// Add to cache
 		bc.blockCache.Add(block.Hash(), block)
 		bc.hc.numberCache.Add(block.Hash(), block.NumberU64())
@@ -2500,6 +2501,7 @@ func (bc *BlockChain) VerifyLoop() {
 			triedbCommitTimer.Update(task.state.TrieDBCommits)
 			trieCommitTimer.Update(task.state.TrieCommits)
 			CodeCommitTimer.Update(task.state.CodeCommit)
+			snapshotCommitTimer.Update(task.state.SnapshotCommits)
 		}
 	}
 }
