@@ -24,7 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/metrics"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -88,6 +87,9 @@ type stateObject struct {
 	// object was previously existent and is being deployed as a contract within
 	// the current transaction.
 	newContract bool
+
+	// Slots to prefetch for pipeline
+	SlotsToPrefetch []common.Hash
 }
 
 // empty returns whether the account is considered empty.
@@ -280,6 +282,9 @@ func (s *stateObject) setState(key common.Hash, value common.Hash, origin common
 // committed later. It is invoked at the end of every transaction.
 func (s *stateObject) finalise() {
 	slotsToPrefetch := make([]common.Hash, 0, len(s.dirtyStorage))
+	if s.db.TriePrefetch && s.db.IsPipeLineMode() {
+		s.SlotsToPrefetch = make([]common.Hash, 0, len(s.dirtyStorage))
+	}
 	for key, value := range s.dirtyStorage {
 		if origin, exist := s.uncommittedStorage[key]; exist && origin == value {
 			// The slot is reverted to its original value, delete the entry
@@ -292,7 +297,11 @@ func (s *stateObject) finalise() {
 			// The slot is different from its original value and hasn't been
 			// tracked for commit yet.
 			s.uncommittedStorage[key] = s.GetCommittedState(key)
-			slotsToPrefetch = append(slotsToPrefetch, key) // Copy needed for closure
+			if s.db.TriePrefetch && s.db.IsPipeLineMode() {
+				s.SlotsToPrefetch = append(s.SlotsToPrefetch, key)
+			} else {
+				slotsToPrefetch = append(slotsToPrefetch, key) // Copy needed for closure
+			}
 		}
 		// Aggregate the dirty storage slots into the pending area. It might
 		// be possible that the value of tracked slot here is same with the
@@ -302,9 +311,12 @@ func (s *stateObject) finalise() {
 		// byzantium fork) and entry is necessary to modify the value back.
 		s.pendingStorage[key] = value
 	}
-	if s.db.prefetcher != nil && len(slotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
-		if err := s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, nil, slotsToPrefetch, false); err != nil {
-			log.Error("Failed to prefetch slots", "addr", s.address, "slots", len(slotsToPrefetch), "err", err)
+
+	if !s.db.TriePrefetch || !s.db.IsPipeLineMode() {
+		if s.db.prefetcher != nil && len(slotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
+			if err := s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, nil, slotsToPrefetch, false); err != nil {
+				log.Error("Failed to prefetch slots", "addr", s.address, "slots", len(slotsToPrefetch), "err", err)
+			}
 		}
 	}
 	if len(s.dirtyStorage) > 0 {
@@ -332,6 +344,10 @@ func (s *stateObject) updateTrie() (Trie, error) {
 		if s.db.witness == nil || len(s.originStorage) == 0 {
 			return s.trie, nil
 		}
+	}
+
+	if s.db.IsPipeLineMode() && s.SlotsToPrefetch != nil && s.db.prefetcher != nil && len(s.SlotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
+		s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, nil, s.SlotsToPrefetch, false)
 	}
 	// Retrieve a pretecher populated trie, or fall back to the database. This will
 	// block until all prefetch tasks are done, which are needed for witnesses even
@@ -658,8 +674,10 @@ func (s *stateObject) GetPendingStorages() map[common.Hash][]byte {
 	return nil
 }
 
+/*
 func (s *stateObject) WriteCode() {
 	if s.code != nil && s.dirtyCode {
 		rawdb.WriteCode(s.db.db.DiskDB(), common.BytesToHash(s.CodeHash()), s.code)
 	}
 }
+*/

@@ -260,6 +260,10 @@ func (dl *diffLayer) Accounts() (map[common.Hash]*types.SlimAccount, error) {
 func (dl *diffLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	// Check staleness before reaching further.
 	dl.lock.RLock()
+	start := time.Now()
+	defer func() {
+		snapshotAccountReadMeter.UpdateSince(start)
+	}()
 	if dl.Stale() {
 		dl.lock.RUnlock()
 		return nil, ErrSnapshotStale
@@ -325,6 +329,10 @@ func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	// Check the bloom filter first whether there's even a point in reaching into
 	// all the maps in all the layers below
 	dl.lock.RLock()
+	start := time.Now()
+	defer func() {
+		snapshotStorageReadMeter.UpdateSince(start)
+	}()
 	// Check staleness before reaching further.
 	if dl.Stale() {
 		dl.lock.RUnlock()
@@ -386,6 +394,11 @@ func (dl *diffLayer) storage(accountHash, storageHash common.Hash, depth int) ([
 // the specified data items.
 func (dl *diffLayer) Update(blockRoot common.Hash, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte) *diffLayer {
 	return newDiffLayer(dl, blockRoot, accounts, storage)
+}
+
+// Verified return whether the layer has been verified
+func (dl *diffLayer) Verified() bool {
+	return dl.verified.Load()
 }
 
 // flatten pushes all data from this point downwards, flattening everything into
@@ -495,13 +508,31 @@ func (dl *diffLayer) StorageList(accountHash common.Hash) []common.Hash {
 	return storageList
 }
 
+// newVerifiedDiffLayer creates a new diff based on journal on top of an existing snapshot, whether that's a low
+// level persistent database or a hierarchical diff already.
+func newVerifiedDiffLayer(parent snapshot, root common.Hash, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte) *diffLayer {
+	dl := newDiffLayer(parent, root, accounts, storage)
+	dl.verified.Store(true)
+	return dl
+}
+
 // CorrectAccounts
-func (dl *diffLayer) CorrectAccounts(blockRoot common.Hash, parentRoot common.Hash, accounts map[common.Hash][]byte) error {
+func (dl *diffLayer) CorrectAccounts(accounts map[common.Hash][]byte) error {
 	dl.lock.Lock()
 	defer dl.lock.Unlock()
 
-	dl.accountData = accounts
-	dl.verified.Store(true)
-
+	if !dl.verified.Load() {
+		dl.accountData = accounts
+		dl.verified.Store(true)
+	}
 	return nil
+}
+
+// SetStale set unverified diff to stale
+func (dl *diffLayer) SetStale() {
+	dl.lock.Lock()
+	defer dl.lock.Unlock()
+	if !dl.verified.Load() && !dl.Stale() {
+		dl.stale.Store(true)
+	}
 }

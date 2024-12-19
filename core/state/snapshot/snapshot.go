@@ -52,6 +52,9 @@ var (
 	snapshotDirtyAccountReadMeter  = metrics.NewRegisteredMeter("state/snapshot/dirty/account/read", nil)
 	snapshotDirtyAccountWriteMeter = metrics.NewRegisteredMeter("state/snapshot/dirty/account/write", nil)
 
+	snapshotAccountReadMeter = metrics.NewRegisteredTimer("state/snapshot/account/read", nil)
+	snapshotStorageReadMeter = metrics.NewRegisteredTimer("state/snapshot/storage/read", nil)
+
 	snapshotDirtyStorageHitMeter   = metrics.NewRegisteredMeter("state/snapshot/dirty/storage/hit", nil)
 	snapshotDirtyStorageMissMeter  = metrics.NewRegisteredMeter("state/snapshot/dirty/storage/miss", nil)
 	snapshotDirtyStorageInexMeter  = metrics.NewRegisteredMeter("state/snapshot/dirty/storage/inex", nil)
@@ -100,6 +103,15 @@ type Snapshot interface {
 	// Root returns the root hash for which this snapshot was made.
 	Root() common.Hash
 
+	// Verified return whether the layer has been verified
+	Verified() bool
+
+	// CorrectAccounts
+	CorrectAccounts(accounts map[common.Hash][]byte) error
+
+	// SetStale set unverified diff to stale
+	SetStale()
+
 	// Account directly retrieves the account associated with a particular hash in
 	// the snapshot slim data format.
 	Account(hash common.Hash) (*types.SlimAccount, error)
@@ -131,9 +143,6 @@ type snapshot interface {
 	//
 	// Note, the maps are retained by the method to avoid copying everything.
 	Update(blockRoot common.Hash, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte) *diffLayer
-
-	// CorrectAccounts
-	CorrectAccounts(blockRoot common.Hash, parentRoot common.Hash, accounts map[common.Hash][]byte) error
 
 	// Journal commits an entire diff hierarchy to disk into a single journal entry.
 	// This is meant to be used during shutdown to persist the snapshot without
@@ -307,7 +316,14 @@ func (t *Tree) Snapshot(blockRoot common.Hash) Snapshot {
 	t.lock.RLock()
 	defer t.lock.RUnlock()
 
-	return t.layers[blockRoot]
+	snap := t.layers[blockRoot]
+	if snap != nil {
+		if snap.Stale() && !snap.Verified() {
+			return nil
+		}
+	}
+
+	return snap
 }
 
 // Snapshots returns all visited layers from the topmost layer with specific
@@ -372,15 +388,6 @@ func (t *Tree) Update(blockRoot common.Hash, parentRoot common.Hash, accounts ma
 
 	t.layers[snap.root] = snap
 	log.Debug("Snapshot updated", "blockRoot", blockRoot)
-	return nil
-}
-
-func (t *Tree) CorrectAccounts(blockRoot common.Hash, parentRoot common.Hash, accounts map[common.Hash][]byte) error {
-	snap := t.Snapshot(blockRoot)
-	if snap == nil {
-		return fmt.Errorf("snap [%#x] missing", blockRoot)
-	}
-	snap.(snapshot).CorrectAccounts(blockRoot, parentRoot, accounts)
 	return nil
 }
 

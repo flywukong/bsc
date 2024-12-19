@@ -88,10 +88,12 @@ type StateDB struct {
 	noTrie         bool
 	reader         Reader
 
+	addressToPrefetch [][]byte
 	// originalRoot is the pre-state root, before any changes were made.
 	// It will be updated when the Commit is called.
 	originalRoot common.Hash
 	expectedRoot common.Hash // The state root in the block header
+	pipeline     bool
 
 	fullProcessed bool
 
@@ -178,6 +180,7 @@ type StateDB struct {
 	StorageLoaded  int          // Number of storage slots retrieved from the database during the state transition
 	StorageUpdated atomic.Int64 // Number of storage slots updated during the state transition
 	StorageDeleted atomic.Int64 // Number of storage slots deleted during the state transition
+	TriePrefetch   bool
 }
 
 // NewWithSharedPool creates a new state with sharedStorge on layer 1.5
@@ -215,6 +218,7 @@ func New(root common.Hash, db Database) (*StateDB, error) {
 		journal:              newJournal(),
 		accessList:           newAccessList(),
 		transientStorage:     newTransientStorage(),
+		addressToPrefetch:    make([][]byte, 0),
 	}
 	if db.TrieDB().IsVerkle() {
 		sdb.accessEvents = NewAccessEvents(db.PointCache())
@@ -315,6 +319,18 @@ func (s *StateDB) TriePrefetchInAdvance(block *types.Block, signer types.Signer)
 	if len(addressesToPrefetch) > 0 {
 		prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, addressesToPrefetch, nil, false)
 	}
+}
+
+// Enable the pipeline commit function of statedb
+func (s *StateDB) EnablePipeline() {
+	if s.snap != nil && s.snaps.Layers() > 1 {
+		s.pipeline = true
+	}
+}
+
+// IsPipeCommit checks whether pipecommit is enabled on the statedb or not
+func (s *StateDB) IsPipeLineMode() bool {
+	return s.pipeline
 }
 
 // Mark that the block is processed by diff layer
@@ -918,14 +934,27 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 			log.Error("Failed to prefetch addresses", "addresses", len(addressesToPrefetch), "err", err)
 		}
 	}
+	// todo pipeline judge
+	/*
+		if s.TriePrefetch {
+			prefetcher := s.prefetcher
+			if prefetcher != nil && len(s.addressToPrefetch) > 0 {
+				prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, s.addressToPrefetch)
+			}
+		}
+
+	*/
 	// Invalidate journal because reverting across transactions is not allowed.
 	s.clearJournalAndRefund()
 }
 
 func (s *StateDB) GetLatestVerifiedStateRoot(addrHash common.Hash) common.Hash {
-	if s.snaps != nil {
-		s.snap = s.snaps.Snapshot(s.originalRoot)
-		acc, err := s.snap.Account(addrHash)
+	if s.db.Snapshot() != nil {
+		//	s.snap = s.snaps.Snapshot(s.originalRoot)
+		if !s.GetSnap().Verified() {
+			panic("Layer of the snap is not verified")
+		}
+		acc, err := s.GetSnap().Account(addrHash)
 		if err == nil {
 			if acc == nil {
 				return types.EmptyRootHash
@@ -1514,21 +1543,35 @@ func (s *StateDB) commitAndFlush(block uint64, deleteEmptyObjects bool) (*stateU
 	if !ret.empty() {
 		// If snapshotting is enabled, update the snapshot tree with this new version
 		if snap := s.db.Snapshot(); snap != nil && snap.Snapshot(ret.originRoot) != nil {
-			start := time.Now()
-			if err := snap.Update(ret.root, ret.originRoot, ret.accounts, ret.storages); err != nil {
-				log.Warn("Failed to update snapshot tree", "from", ret.originRoot, "to", ret.root, "err", err)
-			}
-			// Keep 128 diff layers in the memory, persistent layer is 129th.
-			// - head layer is paired with HEAD state
-			// - head-1 layer is paired with HEAD-1 state
-			// - head-127 layer(bottom-most diff layer) is paired with HEAD-127 state
-			go func() {
-				if err := snap.Cap(ret.root, snap.CapLimit()); err != nil {
-					log.Warn("Failed to cap snapshot tree", "root", ret.root, "layers", TriesInMemory, "err", err)
+			// todo add pipeline judge
+			if s.pipeline {
+				//	toCorrectSnap := s.snaps.Snapshot(s.expectedRoot)
+				toCorrectSnap := s.GetExpectedSnap()
+				if toCorrectSnap != nil {
+					if !toCorrectSnap.Verified() {
+						if err := toCorrectSnap.CorrectAccounts(s.accounts); err != nil {
+							log.Crit("Failed to correct accounts for diff of block", "block=", block, "error", err)
+						}
+					}
 				}
-			}()
-			if metrics.EnabledExpensive() {
-				s.SnapshotCommits += time.Since(start)
+			} else {
+				start := time.Now()
+				if err := snap.Update(ret.root, ret.originRoot, ret.accounts, ret.storages, false); err != nil {
+					log.Warn("Failed to update snapshot tree", "from", ret.originRoot, "to", ret.root, "err", err)
+				}
+
+				// Keep 128 diff layers in the memory, persistent layer is 129th.
+				// - head layer is paired with HEAD state
+				// - head-1 layer is paired with HEAD-1 state
+				// - head-127 layer(bottom-most diff layer) is paired with HEAD-127 state
+				go func() {
+					if err := snap.Cap(ret.root, snap.CapLimit()); err != nil {
+						log.Warn("Failed to cap snapshot tree", "root", ret.root, "layers", TriesInMemory, "err", err)
+					}
+				}()
+				if metrics.EnabledExpensive() {
+					s.SnapshotCommits += time.Since(start)
+				}
 			}
 		}
 		// If trie database is enabled, commit the state update as a new layer
@@ -1564,11 +1607,22 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, *t
 	return ret.root, ret.diffLayer, nil
 }
 
+// SetStaleForUnverifiedDiff set the unverified difflayer to stale
+func (s *StateDB) SetStaleForUnverifiedDiff() {
+	toStaleSnap := s.GetExpectedSnap()
+	if toStaleSnap != nil {
+		if !toStaleSnap.Verified() {
+			toStaleSnap.SetStale()
+		}
+	}
+}
+
+// CommitUnVerifiedSnapDifflayer apply new difflayer after block execution
 func (s *StateDB) CommitUnVerifiedSnapDifflayer(deleteEmptyObjects bool) {
-	start := time.Now()
+	//	start := time.Now()
 	s.Finalise(deleteEmptyObjects)
 
-	s.r_destructs = s.convertAccountSet(s.stateObjectsDestruct)
+	//	s.r_destructs = s.convertAccountSet(s.stateObjectsDestruct)
 	s.r_accounts = make(map[common.Hash][]byte)
 	s.r_storages = make(map[common.Hash]map[common.Hash][]byte)
 
@@ -1578,11 +1632,11 @@ func (s *StateDB) CommitUnVerifiedSnapDifflayer(deleteEmptyObjects bool) {
 		storages map[common.Hash][]byte
 	}
 	tasks := make(chan func())
-	taskResults := make(chan *taskResult, len(s.stateObjectsPending))
+	taskResults := make(chan *taskResult, len(s.mutations))
 	tasksNum := 0
 	finishCh := make(chan struct{})
 	wg := sync.WaitGroup{}
-	for i := 0; i < len(s.stateObjectsPending); i++ {
+	for i := 0; i < len(s.mutations); i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -1597,8 +1651,10 @@ func (s *StateDB) CommitUnVerifiedSnapDifflayer(deleteEmptyObjects bool) {
 		}()
 	}
 
-	for addr := range s.stateObjectsPending {
-		if obj := s.stateObjects[addr]; !obj.deleted {
+	for addr := range s.mutations {
+		//		if obj := s.stateObjects[addr]; !obj.deleted {
+		if !s.mutations[addr].isDelete() {
+			obj := s.stateObjects[addr]
 			tasks <- func() {
 				// s.r_accounts[obj.addrHash] = types.SlimAccountRLP(obj.data)
 				// obj.WriteCode()
@@ -1621,20 +1677,35 @@ func (s *StateDB) CommitUnVerifiedSnapDifflayer(deleteEmptyObjects bool) {
 	}
 	close(finishCh)
 
-	if s.snap != nil {
-		if parent := s.snap.Root(); parent != s.expectedRoot {
-			err := s.snaps.Update(s.expectedRoot, parent, s.r_destructs, s.r_accounts, s.r_storages, false)
+	if s.GetSnap() != nil {
+		if parent := s.GetSnap().Root(); parent != s.expectedRoot {
+			snaps := s.db.Snapshot()
+			err := snaps.Update(s.expectedRoot, parent, s.r_accounts, s.r_storages, false)
 			if err != nil {
 				log.Warn("Failed to update snapshot tree", "from", parent, "to", s.expectedRoot, "err", err)
 			}
 			go func() {
-				if err := s.snaps.Cap(s.expectedRoot, s.snaps.CapLimit()); err != nil {
-					log.Warn("Failed to cap snapshot tree", "root", s.expectedRoot, "layers", s.snaps.CapLimit(), "err", err)
+				if err := snaps.Cap(s.expectedRoot, snaps.CapLimit()); err != nil {
+					log.Warn("Failed to cap snapshot tree", "root", s.expectedRoot, "layers", snaps.CapLimit(), "err", err)
 				}
 			}()
 		}
 	}
-	s.SnapshotCommits += time.Since(start)
+	//	s.PipeSnapshotCommits += time.Since(start)
+}
+
+// convertAccountSet converts a provided account set from address keyed to hash keyed.
+func (s *StateDB) convertAccountSet(set map[common.Address]*types.StateAccount) map[common.Hash]struct{} {
+	ret := make(map[common.Hash]struct{}, len(set))
+	for addr := range set {
+		obj, exist := s.stateObjects[addr]
+		if !exist {
+			ret[crypto.Keccak256Hash(addr[:])] = struct{}{}
+		} else {
+			ret[obj.addrHash] = struct{}{}
+		}
+	}
+	return ret
 }
 
 // Prepare handles the preparatory steps for executing a state transition with.
@@ -1733,6 +1804,14 @@ func (s *StateDB) GetSnap() snapshot.Snapshot {
 	snaps := s.db.Snapshot()
 	if snaps != nil {
 		return snaps.Snapshot(s.originalRoot)
+	}
+	return nil
+}
+
+func (s *StateDB) GetExpectedSnap() snapshot.Snapshot {
+	snaps := s.db.Snapshot()
+	if snaps != nil {
+		return snaps.Snapshot(s.expectedRoot)
 	}
 	return nil
 }

@@ -206,6 +206,16 @@ func (dl *diskLayer) stopGeneration() {
 }
 
 // CorrectAccounts
-func (dl *diskLayer) CorrectAccounts(blockRoot common.Hash, parentRoot common.Hash, accounts map[common.Hash][]byte) error {
+func (dl *diskLayer) CorrectAccounts(accounts map[common.Hash][]byte) error {
 	return nil
+}
+
+// Verified return whether the layer has been verified
+func (dl *diskLayer) Verified() bool {
+	return true
+}
+
+// SetStale
+func (dl *diskLayer) SetStale() {
+	return
 }
