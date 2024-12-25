@@ -27,6 +27,7 @@ import (
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -109,10 +110,11 @@ func loadAndParseJournal(db ethdb.KeyValueStore, base *diskLayer) (snapshot, jou
 	// is not matched with disk layer; or the it's the legacy-format journal,
 	// etc.), we just discard all diffs and try to recover them later.
 	var current snapshot = base
-	err := iterateJournal(db, func(parent common.Hash, root common.Hash, destructSet map[common.Hash]struct{}, accountData map[common.Hash][]byte, storageData map[common.Hash]map[common.Hash][]byte) error {
-		current = newDiffLayer(current, root, destructSet, accountData, storageData)
-		return nil
-	})
+	err := iterateJournal(db,
+		func(parent common.Hash, root common.Hash, destructSet map[common.Hash]struct{}, accountData map[common.Hash][]byte, storageData map[common.Hash]map[common.Hash][]byte) error {
+			current = newDiffLayer(current, root, destructSet, accountData, storageData)
+			return nil
+		})
 	if err != nil {
 		return base, generator, nil
 	}
@@ -272,6 +274,7 @@ func (dl *diffLayer) Journal(buffer *bytes.Buffer) (common.Hash, error) {
 		return common.Hash{}, err
 	}
 	log.Debug("Journalled diff layer", "root", dl.root, "parent", dl.parent.Root())
+	DumpAccount(dl.root, dl.destructSet, dl.accountData, dl.storageData)
 	return base, nil
 }
 
@@ -323,6 +326,7 @@ func iterateJournal(db ethdb.KeyValueReader, callback journalCallback) error {
 			accountData = make(map[common.Hash][]byte)
 			storageData = make(map[common.Hash]map[common.Hash][]byte)
 		)
+
 		// Read the next diff journal entry
 		if err := r.Decode(&root); err != nil {
 			// The first read may fail with EOF, marking the end of the journal
@@ -364,6 +368,33 @@ func iterateJournal(db ethdb.KeyValueReader, callback journalCallback) error {
 		if err := callback(parent, root, destructSet, accountData, storageData); err != nil {
 			return err
 		}
+
+		DumpAccount(root, destructSet, accountData, storageData)
 		parent = root
+	}
+}
+
+func DumpAccount(root common.Hash, r_destructs map[common.Hash]struct{}, r_accounts map[common.Hash][]byte, r_storages map[common.Hash]map[common.Hash][]byte) {
+	// Dump r_destructs
+	for addrHash := range r_destructs {
+		log.Info("Journal:", "root", root.String(), "addrhash=", addrHash.Hex())
+	}
+
+	// Dump r_accounts
+	for addrHash, r_acc_d := range r_accounts {
+		r_acc := new(types.SlimAccount)
+		if err := rlp.DecodeBytes(r_acc_d, r_acc); err != nil {
+			log.Error("error decode", "err", err.Error())
+		}
+		log.Info("Journal:", "root", root.String(), "addr=", addrHash.String(),
+			"balance=", r_acc.Balance, "nonce=", r_acc.Nonce, "codehash=", common.Bytes2Hex(r_acc.CodeHash), "root=", common.BytesToHash(r_acc.Root))
+	}
+
+	// Dump r_storages
+	for addrHash, m := range r_storages {
+		log.Info("Journal:", "root", root.String(), "addrhash=", addrHash.Hex())
+		for k, v := range m {
+			log.Info("Richard:", "key=", k.Hex(), "value=", common.Bytes2Hex(v))
+		}
 	}
 }

@@ -35,6 +35,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/ethereum/go-ethereum/trie/triestate"
@@ -1643,7 +1644,32 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 	return root, diffLayer, nil
 }
 
-func (s *StateDB) CommitUnVerifiedSnapDifflayer(deleteEmptyObjects bool) {
+func (s *StateDB) DumpAccount(root common.Hash, block int64, r_destructs map[common.Hash]struct{}, r_accounts map[common.Hash][]byte, r_storages map[common.Hash]map[common.Hash][]byte) {
+	// Dump r_destructs
+	for addrHash := range r_destructs {
+		log.Info("Richard:", "block", block, "root", root, "addrhash=", addrHash.Hex())
+	}
+
+	// Dump r_accounts
+	for addrHash, r_acc_d := range r_accounts {
+		r_acc := new(types.SlimAccount)
+		if err := rlp.DecodeBytes(r_acc_d, r_acc); err != nil {
+			log.Error("error decode", "err", err.Error())
+		}
+		log.Info("Richard:", "root", root, "block", block, "addr=", addrHash.String(),
+			"balance=", r_acc.Balance, "nonce=", r_acc.Nonce, "codehash=", common.Bytes2Hex(r_acc.CodeHash), "root=", common.BytesToHash(r_acc.Root))
+	}
+
+	// Dump r_storages
+	for addrHash, m := range r_storages {
+		log.Info("Richard:", "root", root, "block", block, "addrhash=", addrHash.Hex())
+		for k, v := range m {
+			log.Info("Richard:", "key=", k.Hex(), "value=", common.Bytes2Hex(v))
+		}
+	}
+}
+
+func (s *StateDB) CommitUnVerifiedSnapDifflayer(deleteEmptyObjects bool, block int64) {
 	start := time.Now()
 	s.Finalise(deleteEmptyObjects)
 
@@ -1713,6 +1739,11 @@ func (s *StateDB) CommitUnVerifiedSnapDifflayer(deleteEmptyObjects bool) {
 			}()
 		}
 	}
+
+	if block > 1 {
+		s.DumpAccount(s.expectedRoot, block, s.r_destructs, s.r_accounts, s.r_storages)
+	}
+
 	s.PipeSnapshotCommits += time.Since(start)
 }
 

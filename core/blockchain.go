@@ -2319,7 +2319,12 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		}
 		blockExecutionTimer.Update(time.Since(pstart))
 
-		statedb.CommitUnVerifiedSnapDifflayer(bc.chainConfig.IsEIP158(block.Number()))
+		height := block.Number().Int64()
+		if height >= 6589650 && height <= 6589700 {
+			statedb.CommitUnVerifiedSnapDifflayer(bc.chainConfig.IsEIP158(block.Number()), height)
+		} else {
+			statedb.CommitUnVerifiedSnapDifflayer(bc.chainConfig.IsEIP158(block.Number()), 0)
+		}
 		pipeSnapshotCommitTimer.Update(statedb.PipeSnapshotCommits)
 		// Add to cache
 		bc.blockCache.Add(block.Hash(), block)
@@ -2421,7 +2426,7 @@ func (bc *BlockChain) VerifyLoop() {
 			vstart := time.Now()
 			var err error
 			if err = bc.validator.ValidateState(task.block, task.state, task.receipts, task.usedGas); err != nil {
-				log.Error("validate state failed", "error", err)
+				log.Error("validate state failed", "block", task.block.NumberU64(), "error", err)
 				task.err = err
 			}
 			blockValidationTimer.UpdateSince(vstart)

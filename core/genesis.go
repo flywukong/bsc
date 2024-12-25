@@ -141,7 +141,7 @@ func hashAlloc(ga *types.GenesisAlloc, isVerkle bool) (common.Hash, error) {
 			statedb.SetState(addr, key, value)
 		}
 	}
-	statedb.CommitUnVerifiedSnapDifflayer(false)
+	statedb.CommitUnVerifiedSnapDifflayer(false, 0)
 	statedb.IntermediateRoot(false)
 	root, _, err := statedb.Commit(0, nil)
 	return root, err
@@ -169,7 +169,7 @@ func flushAlloc(ga *types.GenesisAlloc, db ethdb.Database, triedb *triedb.Databa
 			statedb.SetState(addr, key, value)
 		}
 	}
-	statedb.CommitUnVerifiedSnapDifflayer(false)
+	statedb.CommitUnVerifiedSnapDifflayer(false, 0)
 	statedb.IntermediateRoot(false)
 	root, _, err := statedb.Commit(0, nil)
 	if err != nil {
