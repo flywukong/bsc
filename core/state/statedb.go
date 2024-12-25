@@ -1613,7 +1613,8 @@ func (s *StateDB) DumpAccount(block int64, r_destructs map[common.Hash]struct{},
 		if err := rlp.DecodeBytes(r_acc_d, r_acc); err != nil {
 			log.Error("error decode", "err", err.Error())
 		}
-		log.Info("Richard:", "block", block, "addr=", addrHash.String(), "balance=", r_acc.Balance, "nonce=", r_acc.Nonce, "codehash=", common.Bytes2Hex(r_acc.CodeHash), "root=", r_acc.Root.Hex())
+		log.Info("Richard:", "block", block, "addr=", addrHash.String(), "balance=", r_acc.Balance, "nonce=", r_acc.Nonce,
+			"codehash=", common.Bytes2Hex(r_acc.CodeHash), "root=", common.BytesToHash(r_acc.Root))
 	}
 
 	// Dump r_storages
