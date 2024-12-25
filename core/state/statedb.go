@@ -35,6 +35,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/ethereum/go-ethereum/trie/triestate"
@@ -1549,6 +1550,10 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 						log.Warn("Failed to update snapshot tree", "from", parent, "to", s.expectedRoot, "err", err)
 					}
 
+					if block >= 6589650 && block <= 6589700 {
+						s.DumpAccount(int64(block), s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages)
+					}
+
 					// Keep n diff layers in the memory
 					// - head layer is paired with HEAD state
 					// - head-1 layer is paired with HEAD-1 state
@@ -1594,6 +1599,30 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 	s.stateObjectsDirty = make(map[common.Address]struct{})
 	s.stateObjectsDestruct = make(map[common.Address]*types.StateAccount)
 	return root, diffLayer, nil
+}
+
+func (s *StateDB) DumpAccount(block int64, r_destructs map[common.Hash]struct{}, r_accounts map[common.Hash][]byte, r_storages map[common.Hash]map[common.Hash][]byte) {
+	// Dump r_destructs
+	for addrHash := range r_destructs {
+		log.Info("Richard:", "block", block, "addrhash=", addrHash.Hex())
+	}
+
+	// Dump r_accounts
+	for addrHash, r_acc_d := range r_accounts {
+		r_acc := new(types.SlimAccount)
+		if err := rlp.DecodeBytes(r_acc_d, r_acc); err != nil {
+			log.Error("error decode", "err", err.Error())
+		}
+		log.Info("Richard:", "block", block, "addr=", addrHash.String(), "balance=", r_acc.Balance, "nonce=", r_acc.Nonce, "codehash=", common.Bytes2Hex(r_acc.CodeHash), "root=", r_acc.Root.Hex())
+	}
+
+	// Dump r_storages
+	for addrHash, m := range r_storages {
+		log.Info("Richard:", "block", block, "addrhash=", addrHash.Hex())
+		for k, v := range m {
+			log.Info("Richard:", "key=", k.Hex(), "value=", common.Bytes2Hex(v))
+		}
+	}
 }
 
 func (s *StateDB) SnapToDiffLayer() ([]common.Address, []types.DiffAccount, []types.DiffStorage) {
