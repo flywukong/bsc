@@ -403,7 +403,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		vmConfig:           vmConfig,
 		diffQueue:          prque.New[int64, *types.DiffLayer](nil),
 		diffQueueBuffer:    make(chan *types.DiffLayer),
-		verifyTaskCh:       make(chan *VerifyTask, 32),
+		verifyTaskCh:       make(chan *VerifyTask, 1),
 		verifyHeaderCache:  lru.NewCache[common.Hash, *types.Header](128),
 		verifyTdCache:      lru.NewCache[common.Hash, *big.Int](128),
 		verifyNumberCache:  lru.NewCache[common.Hash, uint64](128),
