@@ -1725,6 +1725,8 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 func (s *StateDB) CommitUnVerifiedSnapDifflayer(deleteEmptyObjects bool) {
 	start := time.Now()
 
+	s.r_accounts = make(map[common.Hash][]byte)
+	s.r_storages = make(map[common.Hash]map[common.Hash][]byte)
 	s.CorrectAccountsRoot()
 	s.Finalise(deleteEmptyObjects)
 	s.PopulateSnapAccountAndStorage()
@@ -1732,8 +1734,7 @@ func (s *StateDB) CommitUnVerifiedSnapDifflayer(deleteEmptyObjects bool) {
 	s.r_destructs = s.convertAccountSet(s.stateObjectsDestruct)
 
 	/*
-		s.r_accounts = make(map[common.Hash][]byte)
-		s.r_storages = make(map[common.Hash]map[common.Hash][]byte)
+
 
 		type taskResult struct {
 			hash     common.Hash
