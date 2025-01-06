@@ -70,6 +70,7 @@ type stateObject struct {
 	origin   *types.StateAccount // Account original data without any change applied, nil means it was not existent
 	data     types.StateAccount  // Account data with all mutations applied in the scope of block
 
+	rootCorrected bool
 	// Write caches.
 	trie Trie // storage trie, which becomes non-nil on first access
 	code Code // contract bytecode, which gets set when code is loaded
@@ -317,7 +318,17 @@ func (s *stateObject) updateTrie() (Trie, error) {
 	// Make sure all dirty slots are finalized into the pending storage area
 	s.finalise(false)
 
-	if s.db.prefetcher != nil && len(s.SlotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
+	// The account root need to be updated before prefetch, otherwise the account root is empty
+	if s.data.Root == dummyRoot && !s.rootCorrected && s.db.snap.Verified() {
+		if acc, err := s.db.snap.Account(crypto.HashData(s.db.hasher, s.address.Bytes())); err == nil {
+			if acc != nil && len(acc.Root) != 0 {
+				s.data.Root = common.BytesToHash(acc.Root)
+				s.rootCorrected = true
+			}
+		}
+	}
+
+	if s.db.prefetcher != nil && len(s.SlotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash && s.data.Root != dummyRoot {
 		s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, s.SlotsToPrefetch)
 	}
 
@@ -633,6 +644,22 @@ func (s *stateObject) GetPendingStorages() map[common.Hash][]byte {
 	)
 	if len(s.pendingStorage) > 0 {
 		dirtyStorage := make(map[common.Hash][]byte)
+
+		for key, value := range s.dirtyStorage {
+			var v []byte
+			if value != (common.Hash{}) {
+				value := value
+				v = common.TrimLeftZeroes(value[:])
+			}
+
+			// rlp-encoded value to be used by the snapshot
+			var encoded []byte
+			if len(v) != 0 {
+				encoded, _ = rlp.EncodeToBytes(v)
+			}
+			dirtyStorage[crypto.HashData(hasher, key[:])] = encoded
+		}
+
 		for key, value := range s.pendingStorage {
 			// Skip noop changes, persist actual changes
 			if value == s.originStorage[key] {
@@ -643,6 +670,7 @@ func (s *stateObject) GetPendingStorages() map[common.Hash][]byte {
 				value := value
 				v = common.TrimLeftZeroes(value[:])
 			}
+
 			// rlp-encoded value to be used by the snapshot
 			var encoded []byte
 			if len(v) != 0 {
