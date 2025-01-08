@@ -1648,6 +1648,7 @@ func (s *StateDB) Commit(block uint64, postCommitFunc func() error) (common.Hash
 	s.storagesOrigin = make(map[common.Address]map[common.Hash][]byte)
 	s.stateObjectsDirty = make(map[common.Address]struct{})
 	s.stateObjectsDestruct = make(map[common.Address]*types.StateAccount)
+	s.addressToPrefetch = make([][]byte, 0)
 	return root, diffLayer, nil
 }
 
