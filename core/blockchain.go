@@ -2272,8 +2272,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		trieUpdate := statedb.AccountUpdates + statedb.StorageUpdates   // The time spent on tries update
 		trieRead := statedb.SnapshotAccountReads + statedb.AccountReads // The time spent on account read
 		trieRead += statedb.SnapshotStorageReads + statedb.StorageReads // The time spent on storage read
-		blockExecutionTimer.Update(ptime - trieRead)                    // The time spent on EVM processing
-		blockValidationTimer.Update(vtime - (triehash + trieUpdate))    // The time spent on block validation
+		blockExecutionTimer.Update(ptime)                               // The time spent on EVM processing
+		blockValidationTimer.Update(vtime)                              // The time spent on block validation
 
 		// Write the block to the chain and get the status.
 		var (
