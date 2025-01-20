@@ -31,14 +31,14 @@ const (
 	resendInterval  = 2 * time.Second
 	// tryAllPeersTime is the time that a block has not been verified and then try all the valid verify peers.
 	tryAllPeersTime = 15 * time.Second
-	// maxWaitVerifyResultTime is the max time of waiting for ancestor's verify result.
+	// maxWaitVerifyResultTime is the max time of waiting for ancestor's verify processResult.
 	maxWaitVerifyResultTime = 30 * time.Second
 )
 
 var (
 	verifyTaskCounter      = metrics.NewRegisteredCounter("verifymanager/task/total", nil)
-	verifyTaskSucceedMeter = metrics.NewRegisteredMeter("verifymanager/task/result/succeed", nil)
-	verifyTaskFailedMeter  = metrics.NewRegisteredMeter("verifymanager/task/result/failed", nil)
+	verifyTaskSucceedMeter = metrics.NewRegisteredMeter("verifymanager/task/processResult/succeed", nil)
+	verifyTaskFailedMeter  = metrics.NewRegisteredMeter("verifymanager/task/processResult/failed", nil)
 
 	verifyTaskExecutionTimer = metrics.NewRegisteredTimer("verifymanager/task/execution", nil)
 )
@@ -365,7 +365,7 @@ func (vt *verifyTask) sendVerifyRequest(n int) {
 
 func (vt *verifyTask) compareRootHashAndMark(msg verifyMessage, verifyCh chan common.Hash) {
 	if msg.verifyResult.Root == vt.blockHeader.Root {
-		// write back to manager so that manager can cache the result and delete this task.
+		// write back to manager so that manager can cache the processResult and delete this task.
 		verifyCh <- msg.verifyResult.BlockHash
 	} else {
 		vt.badPeers[msg.peerId] = struct{}{}

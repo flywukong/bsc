@@ -88,8 +88,9 @@ var (
 	accountReadSingleTimer = metrics.NewRegisteredTimer("chain/account/single/reads", nil)
 	storageReadSingleTimer = metrics.NewRegisteredTimer("chain/storage/single/reads", nil)
 
-	snapshotCommitTimer = metrics.NewRegisteredTimer("chain/snapshot/commits", nil)
-	triedbCommitTimer   = metrics.NewRegisteredTimer("chain/triedb/commits", nil)
+	snapshotCommitTimer     = metrics.NewRegisteredTimer("chain/snapshot/commits", nil)
+	pipeSnapshotCommitTimer = metrics.NewRegisteredTimer("chain/pipesnapshot/commits", nil)
+	triedbCommitTimer       = metrics.NewRegisteredTimer("chain/triedb/commits", nil)
 
 	blockInsertTimer          = metrics.NewRegisteredTimer("chain/inserts", nil)
 	blockValidationTimer      = metrics.NewRegisteredTimer("chain/validation", nil)
@@ -230,17 +231,14 @@ type txLookup struct {
 }
 
 type VerifyTask struct {
-	block *types.Block
-	state *state.StateDB
-	//	receipts types.Receipts
-	//	usedGas  uint64
-	//	logs     []*types.Log
-	result  *ProcessResult
-	setHead bool
-	err     error
-	done    bool
-	doneCh  chan struct{}
-	index   int
+	block         *types.Block
+	state         *state.StateDB
+	processResult *ProcessResult
+	setHead       bool
+	err           error
+	done          bool
+	doneCh        chan struct{}
+	index         int
 }
 
 // BlockChain represents the canonical chain given a database with a genesis
@@ -604,6 +602,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	}
 	if bc.pipeline {
 		log.Info("blockchain start with pipeline mode")
+		bc.statedb.SetPipelineFlag()
 		bc.verifyHeaderCache = lru.NewCache[common.Hash, *types.Header](512)
 		bc.verifyTdCache = lru.NewCache[common.Hash, *big.Int](512)
 		bc.verifyNumberCache = lru.NewCache[common.Hash, uint64](512)
@@ -2085,7 +2084,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 	)
 	// Fire a single chain head event if we've progressed the chain
 	defer func() {
-		lastCanon = nil
+		if bc.pipeline {
+			lastCanon = nil
+		}
 		if lastCanon != nil && bc.CurrentBlock().Hash() == lastCanon.Hash() {
 			bc.chainHeadFeed.Send(ChainHeadEvent{Header: lastCanon.Header()})
 			if posa, ok := bc.Engine().(consensus.PoSA); ok {
@@ -2206,7 +2207,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 	// Track the singleton witness from this chain insertion (if any)
 	var witness *stateless.Witness
 
-	//	taskNum := 0
 	verifyTasks := make([]*VerifyTask, 0)
 	var retErr error
 	for ; block != nil && err == nil || errors.Is(err, ErrKnownBlock); block, err = it.next() {
@@ -2245,8 +2245,12 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 					"hash", block.Hash(), "number", block.NumberU64())
 			}
 			if err := bc.writeKnownBlock(block); err != nil {
-				retErr = err
-				break
+				if bc.pipeline {
+					retErr = err
+					break
+				} else {
+					return nil, it.index, err
+				}
 			}
 			stats.processed++
 			if bc.logger != nil && bc.logger.OnSkippedBlock != nil {
@@ -2272,8 +2276,12 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 		start := time.Now()
 		statedb, err := state.NewWithSharedPool(parent.Root, bc.statedb)
 		if err != nil {
-			retErr = err
-			break
+			if bc.pipeline {
+				retErr = err
+				break
+			} else {
+				return nil, it.index, err
+			}
 		}
 		bc.updateHighestVerifiedHeader(block.Header())
 
@@ -2317,9 +2325,10 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 
 		// The traced section of block import.
 		if bc.pipeline {
-			res, err := bc.processPipeLineBlock(block, statedb, &verifyTasks, start, setHead, interruptCh)
+			res, err := bc.processPipeLineBlock(block, statedb, &verifyTasks, start, it.index, setHead, interruptCh)
 			if err != nil {
-				return nil, it.index, err
+				retErr = err
+				break
 			}
 			// Report the import stats before returning the various results
 			stats.processed++
@@ -2392,12 +2401,14 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 	}
 
 	if bc.pipeline {
+		log.Info("deal with the pipeline batch processResult")
 		stats.report(chain, it.index, 0, 0, 0, 0, 0, true)
 
 		var errTask *VerifyTask
 		var firstErrIndex int
 		var isFirst bool
 
+		log.Info("verify task len", "len", len(verifyTasks))
 		for _, task := range verifyTasks {
 			if !task.done {
 				<-task.doneCh
@@ -2464,7 +2475,7 @@ func (bc *BlockChain) VerifyLoop() {
 			if !bc.skipNextTask {
 				vstart := time.Now()
 				var err error
-				if err = bc.validator.ValidateState(task.block, task.state, task.result, false); err != nil {
+				if err = bc.validator.ValidateState(task.block, task.state, task.processResult, false); err != nil {
 					log.Error("validate state failed", "error", err)
 					task.err = err
 				}
@@ -2502,9 +2513,9 @@ func (bc *BlockChain) VerifyLoop() {
 				wstart := time.Now()
 				if !task.setHead {
 					// Don't set the head, only insert the block
-					err = bc.writeBlockWithState(task.block, task.result.Receipts, task.state)
+					err = bc.writeBlockWithState(task.block, task.processResult.Receipts, task.state)
 				} else {
-					_, err = bc.writeBlockAndSetHead(task.block, task.result.Receipts, task.result.Logs,
+					_, err = bc.writeBlockAndSetHead(task.block, task.processResult.Receipts, task.processResult.Logs,
 						task.state, false)
 				}
 				if err != nil {
@@ -2662,7 +2673,7 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 
 // processPipeLineBlock executes and validates the given block. If there was no error
 // it writes the block and associated state to database.
-func (bc *BlockChain) processPipeLineBlock(block *types.Block, statedb *state.StateDB, tasks *[]*VerifyTask, start time.Time, setHead bool, interruptCh chan struct{}) (_ *blockProcessingResult, blockEndErr error) {
+func (bc *BlockChain) processPipeLineBlock(block *types.Block, statedb *state.StateDB, tasks *[]*VerifyTask, start time.Time, index int, setHead bool, interruptCh chan struct{}) (_ *blockProcessingResult, blockEndErr error) {
 	statedb.SetExpectedStateRoot(block.Root())
 
 	if bc.logger != nil && bc.logger.OnBlockStart != nil {
@@ -2690,17 +2701,20 @@ func (bc *BlockChain) processPipeLineBlock(block *types.Block, statedb *state.St
 		return nil, err
 	}
 	statedb.CommitUnVerifiedSnapDifflayer(bc.chainConfig.IsEIP158(block.Number()))
-
+	pipeSnapshotCommitTimer.Update(statedb.PipeSnapshotCommits)
 	// Add to cache
 	bc.UpdateVerifyCache(block)
 	blockExecutionTimer.Update(time.Since(pstart))
 
 	task := &VerifyTask{
-		block:   block,
-		state:   statedb,
-		result:  res,
-		setHead: setHead,
+		block:         block,
+		state:         statedb,
+		processResult: res,
+		setHead:       setHead,
+		doneCh:        make(chan struct{}),
+		index:         index,
 	}
+
 	*tasks = append(*tasks, task)
 	bc.verifyTaskCh <- task
 	blockInsertTimer.UpdateSince(start)

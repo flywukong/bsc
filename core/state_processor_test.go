@@ -412,7 +412,7 @@ func GenerateBadBlock(parent *types.Block, engine consensus.Engine, txs types.Tr
 		header.WithdrawalsHash = &types.EmptyWithdrawalsHash
 	}
 	var receipts []*types.Receipt
-	// The post-state result doesn't need to be correct (this is a bad block), but we do need something there
+	// The post-state processResult doesn't need to be correct (this is a bad block), but we do need something there
 	// Preferably something unique. So let's use a combo of blocknum + txhash
 	hasher := sha3.NewLegacyKeccak256()
 	hasher.Write(header.Number.Bytes())

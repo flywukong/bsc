@@ -65,6 +65,11 @@ type Database interface {
 
 	// Snapshot returns the underlying state snapshot.
 	Snapshot() *snapshot.Tree
+
+	// IsPipelineMode return whether the db is using pipeline
+	IsPipelineMode() bool
+
+	SetCodeCache(codeHash common.Hash, code []byte)
 }
 
 // Trie is a Ethereum Merkle Patricia trie.
@@ -151,6 +156,7 @@ type CachingDB struct {
 	disk          ethdb.KeyValueStore
 	triedb        *triedb.Database
 	noTries       bool
+	pipeline      bool
 	snap          *snapshot.Tree
 	codeCache     *lru.SizeConstrainedCache[common.Hash, []byte]
 	codeSizeCache *lru.Cache[common.Hash, int]
@@ -284,6 +290,14 @@ func (db *CachingDB) PointCache() *utils.PointCache {
 // Snapshot returns the underlying state snapshot.
 func (db *CachingDB) Snapshot() *snapshot.Tree {
 	return db.snap
+}
+
+func (db *CachingDB) SetPipelineFlag() {
+	db.pipeline = true
+}
+
+func (db *CachingDB) IsPipelineMode() bool {
+	return db.pipeline
 }
 
 // mustCopyTrie returns a deep-copied trie.

@@ -163,16 +163,17 @@ type StateDB struct {
 
 	// Measurements gathered during execution for debugging purposes
 	// MetricsMux should be used in more places, but will affect on performance, so following meteration is not accruate
-	MetricsMux      sync.Mutex
-	AccountReads    time.Duration
-	AccountHashes   time.Duration
-	AccountUpdates  time.Duration
-	AccountCommits  time.Duration
-	StorageReads    time.Duration
-	StorageUpdates  time.Duration
-	StorageCommits  time.Duration
-	SnapshotCommits time.Duration
-	TrieDBCommits   time.Duration
+	MetricsMux          sync.Mutex
+	AccountReads        time.Duration
+	AccountHashes       time.Duration
+	AccountUpdates      time.Duration
+	AccountCommits      time.Duration
+	StorageReads        time.Duration
+	StorageUpdates      time.Duration
+	StorageCommits      time.Duration
+	SnapshotCommits     time.Duration
+	TrieDBCommits       time.Duration
+	PipeSnapshotCommits time.Duration
 
 	AccountLoaded  int          // Number of accounts retrieved from the database during the state transition
 	AccountUpdated int          // Number of accounts updated during the state transition
@@ -195,11 +196,19 @@ func NewWithSharedPool(root common.Hash, db Database) (*StateDB, error) {
 
 // New creates a new state from a given trie.
 func New(root common.Hash, db Database) (*StateDB, error) {
-	tr, err := db.OpenTrie(root)
-	if err != nil {
-		return nil, err
+	var tr Trie
+	var noTrie bool
+	var err error
+	if !db.IsPipelineMode() {
+		tr, err = db.OpenTrie(root)
+		if err != nil {
+			return nil, err
+		}
+		_, noTrie = tr.(*trie.EmptyTrie)
+	} else {
+		tr = nil
+		noTrie = false
 	}
-	_, noTrie := tr.(*trie.EmptyTrie)
 	reader, err := db.Reader(root)
 	if err != nil {
 		return nil, err
@@ -321,9 +330,10 @@ func (s *StateDB) TriePrefetchInAdvance(block *types.Block, signer types.Signer)
 	}
 }
 
-// Enable the pipeline commit function of statedb
+// Enable the pipeline function of statedb
 func (s *StateDB) EnablePipeline() {
-	if s.snap != nil && s.snaps.Layers() > 1 {
+	if s.GetSnap() != nil && s.db.Snapshot().Layers() > 1 {
+		log.Info("enable statedb pipeline")
 		s.pipeline = true
 	}
 }
@@ -981,6 +991,17 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	// Finalise all the dirty storage states and write them into the tries
 	s.Finalise(deleteEmptyObjects)
 
+	// todo open trie
+	if s.IsPipeLineMode() {
+		if s.trie == nil {
+			tr, err := s.db.OpenTrie(s.originalRoot)
+			if err != nil {
+				log.Warn("Failed to open state trie", "state_root", s.originalRoot, "err", err)
+				return types.EmptyRootHash
+			}
+			s.trie = tr
+		}
+	}
 	// If there was a trie prefetcher operating, terminate it async so that the
 	// individual storage tries can be updated as soon as the disk load finishes.
 	if s.prefetcher != nil {
@@ -1015,7 +1036,8 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 			if s.db.TrieDB().IsVerkle() {
 				obj.updateTrie()
 			} else {
-				if _, ok := s.r_destructs[obj.addrHash]; !ok {
+				// Todo check the condition to change root
+				if s.IsPipeLineMode() && !obj.selfDestructed && !obj.newContract {
 					obj.data.Root = s.GetLatestVerifiedStateRoot(obj.addrHash)
 				}
 				obj.updateRoot()
@@ -1399,6 +1421,7 @@ func (s *StateDB) commit(deleteEmptyObjects bool) (*stateUpdate, error) {
 	// the same block, account deletions must be processed first. This ensures
 	// that the storage trie nodes deleted during destruction and recreated
 	// during subsequent resurrection can be combined correctly.
+	// 合约树删
 	deletes, delNodes, err := s.handleDestruction()
 	if err != nil {
 		return nil, err
@@ -1543,13 +1566,12 @@ func (s *StateDB) commitAndFlush(block uint64, deleteEmptyObjects bool) (*stateU
 	if !ret.empty() {
 		// If snapshotting is enabled, update the snapshot tree with this new version
 		if snap := s.db.Snapshot(); snap != nil && snap.Snapshot(ret.originRoot) != nil {
-			// todo add pipeline judge
 			if s.pipeline {
-				//	toCorrectSnap := s.snaps.Snapshot(s.expectedRoot)
 				toCorrectSnap := s.GetExpectedSnap()
 				if toCorrectSnap != nil {
+					log.Info("Correct account")
 					if !toCorrectSnap.Verified() {
-						if err := toCorrectSnap.CorrectAccounts(s.accounts); err != nil {
+						if err := toCorrectSnap.CorrectAccounts(ret.accounts); err != nil {
 							log.Crit("Failed to correct accounts for diff of block", "block=", block, "error", err)
 						}
 					}
@@ -1619,10 +1641,11 @@ func (s *StateDB) SetStaleForUnverifiedDiff() {
 
 // CommitUnVerifiedSnapDifflayer apply new difflayer after block execution
 func (s *StateDB) CommitUnVerifiedSnapDifflayer(deleteEmptyObjects bool) {
-	//	start := time.Now()
+	start := time.Now()
 	s.Finalise(deleteEmptyObjects)
 
 	//	s.r_destructs = s.convertAccountSet(s.stateObjectsDestruct)
+	// s.stateObjectsDestruct
 	s.r_accounts = make(map[common.Hash][]byte)
 	s.r_storages = make(map[common.Hash]map[common.Hash][]byte)
 
@@ -1652,9 +1675,18 @@ func (s *StateDB) CommitUnVerifiedSnapDifflayer(deleteEmptyObjects bool) {
 	}
 
 	for addr := range s.mutations {
-		//		if obj := s.stateObjects[addr]; !obj.deleted {
-		if !s.mutations[addr].isDelete() {
-			obj := s.stateObjects[addr]
+		obj := s.stateObjects[addr]
+		if s.mutations[addr].isDelete() {
+			tasks <- func() {
+				// s.r_accounts[obj.addrHash] = types.SlimAccountRLP(obj.data)
+				// obj.WriteCode()
+				taskResult := &taskResult{
+					hash: obj.addrHash,
+					data: nil,
+				}
+				taskResults <- taskResult
+			}
+		} else {
 			tasks <- func() {
 				// s.r_accounts[obj.addrHash] = types.SlimAccountRLP(obj.data)
 				// obj.WriteCode()
@@ -1665,8 +1697,8 @@ func (s *StateDB) CommitUnVerifiedSnapDifflayer(deleteEmptyObjects bool) {
 				}
 				taskResults <- taskResult
 			}
-			tasksNum++
 		}
+		tasksNum++
 	}
 	for i := 0; i < tasksNum; i++ {
 		res := <-taskResults
@@ -1691,7 +1723,7 @@ func (s *StateDB) CommitUnVerifiedSnapDifflayer(deleteEmptyObjects bool) {
 			}()
 		}
 	}
-	//	s.PipeSnapshotCommits += time.Since(start)
+	s.PipeSnapshotCommits += time.Since(start)
 }
 
 // convertAccountSet converts a provided account set from address keyed to hash keyed.
