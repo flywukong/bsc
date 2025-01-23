@@ -2209,6 +2209,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 
 	verifyTasks := make([]*VerifyTask, 0)
 	var retErr error
+	blockNum := 0
 	for ; block != nil && err == nil || errors.Is(err, ErrKnownBlock); block, err = it.next() {
 		// If the chain is terminating, stop processing blocks
 		if bc.insertStopped() {
@@ -2323,6 +2324,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 			}
 		}
 
+		blockNum++
 		// The traced section of block import.
 		if bc.pipeline {
 			res, err := bc.processPipeLineBlock(block, statedb, &verifyTasks, start, it.index, setHead, interruptCh)
@@ -2400,6 +2402,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 		}
 	}
 
+	log.Info("process block num", "num", blockNum)
 	if bc.pipeline {
 		log.Info("deal with the pipeline batch processResult")
 		stats.report(chain, it.index, 0, 0, 0, 0, 0, true)
