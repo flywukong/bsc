@@ -74,13 +74,13 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		misc.ApplyDAOHardFork(statedb)
 	}
 
-	log.Info("process begin")
+	log.Info("process begin", "height", block.NumberU64())
 	lastBlock := p.chain.GetHeaderByHash(block.ParentHash())
 	if lastBlock == nil {
-		log.Info("fail to get last block")
+		log.Info("fail to get last block","height", block.NumberU64()))
 		return nil, errors.New("could not get parent block")
 	} else {
-		log.Info("sucess to get last block")
+		log.Info("sucess to get last block","height", block.NumberU64()))
 	}
 	// Handle upgrade build-in system contract code
 	systemcontracts.TryUpdateBuildInSystemContract(p.config, blockNumber, lastBlock.Time, block.Time(), statedb, true)
