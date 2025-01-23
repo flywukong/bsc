@@ -28,6 +28,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"golang.org/x/exp/maps"
@@ -513,6 +514,7 @@ func (dl *diffLayer) StorageList(accountHash common.Hash) []common.Hash {
 func newVerifiedDiffLayer(parent snapshot, root common.Hash, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte) *diffLayer {
 	dl := newDiffLayer(parent, root, accounts, storage)
 	dl.verified.Store(true)
+	log.Info("verified flag set true", "root", root)
 	return dl
 }
 
@@ -523,6 +525,7 @@ func (dl *diffLayer) CorrectAccounts(accounts map[common.Hash][]byte) error {
 
 	if !dl.verified.Load() {
 		dl.accountData = accounts
+		log.Info("verified flag set true")
 		dl.verified.Store(true)
 	}
 	return nil

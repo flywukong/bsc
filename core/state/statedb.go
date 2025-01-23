@@ -991,7 +991,6 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	// Finalise all the dirty storage states and write them into the tries
 	s.Finalise(deleteEmptyObjects)
 
-	// todo open trie
 	if s.IsPipeLineMode() {
 		if s.trie == nil {
 			tr, err := s.db.OpenTrie(s.originalRoot)
@@ -1421,7 +1420,6 @@ func (s *StateDB) commit(deleteEmptyObjects bool) (*stateUpdate, error) {
 	// the same block, account deletions must be processed first. This ensures
 	// that the storage trie nodes deleted during destruction and recreated
 	// during subsequent resurrection can be combined correctly.
-	// 合约树删
 	deletes, delNodes, err := s.handleDestruction()
 	if err != nil {
 		return nil, err
