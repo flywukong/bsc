@@ -2703,6 +2703,7 @@ func (bc *BlockChain) processPipeLineBlock(block *types.Block, statedb *state.St
 		statedb.StopPrefetcher()
 		return nil, err
 	}
+	log.Info("commit un verify snap")
 	statedb.CommitUnVerifiedSnapDifflayer(bc.chainConfig.IsEIP158(block.Number()))
 	pipeSnapshotCommitTimer.Update(statedb.PipeSnapshotCommits)
 	// Add to cache
