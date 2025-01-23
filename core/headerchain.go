@@ -68,13 +68,18 @@ type HeaderChain struct {
 	tdCache     *lru.Cache[common.Hash, *big.Int] // most recent total difficulties
 	numberCache *lru.Cache[common.Hash, uint64]   // most recent block numbers
 
+	verifyHeaderCache *lru.Cache[common.Hash, *types.Header]
+	verifyTdCache     *lru.Cache[common.Hash, *big.Int] // most recent total difficulties
+	verifyNumberCache *lru.Cache[common.Hash, uint64]   // most recent block numbers
+
 	procInterrupt func() bool
 	engine        consensus.Engine
+	pipeline      bool
 }
 
 // NewHeaderChain creates a new HeaderChain structure. ProcInterrupt points
 // to the parent's interrupt semaphore.
-func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine consensus.Engine, procInterrupt func() bool) (*HeaderChain, error) {
+func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine consensus.Engine, procInterrupt func() bool, pipeline bool) (*HeaderChain, error) {
 	hc := &HeaderChain{
 		config:        config,
 		chainDb:       chainDb,
@@ -99,6 +104,11 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 	justifiedBlockGauge.Update(int64(hc.GetJustifiedNumber(hc.CurrentHeader())))
 	finalizedBlockGauge.Update(int64(hc.getFinalizedNumber(hc.CurrentHeader())))
 
+	if pipeline {
+		hc.verifyHeaderCache = lru.NewCache[common.Hash, *types.Header](512)
+		hc.verifyTdCache = lru.NewCache[common.Hash, *big.Int](512)
+		hc.verifyNumberCache = lru.NewCache[common.Hash, uint64](512)
+	}
 	return hc, nil
 }
 
@@ -486,6 +496,11 @@ func (hc *HeaderChain) GetTd(hash common.Hash, number uint64) *big.Int {
 // GetHeader retrieves a block header from the database by hash and number,
 // caching it if found.
 func (hc *HeaderChain) GetHeader(hash common.Hash, number uint64) *types.Header {
+	if hc.pipeline && hc.verifyHeaderCache != nil {
+		if header, ok := hc.verifyHeaderCache.Get(hash); ok {
+			return header
+		}
+	}
 	// Short circuit if the header's already in the cache, retrieve otherwise
 	if header, ok := hc.headerCache.Get(hash); ok {
 		return header
@@ -502,6 +517,11 @@ func (hc *HeaderChain) GetHeader(hash common.Hash, number uint64) *types.Header 
 // GetHeaderByHash retrieves a block header from the database by hash, caching it if
 // found.
 func (hc *HeaderChain) GetHeaderByHash(hash common.Hash) *types.Header {
+	if hc.pipeline && hc.verifyNumberCache != nil {
+		if number, ok := hc.verifyNumberCache.Get(hash); ok {
+			return hc.GetHeader(hash, number)
+		}
+	}
 	number := hc.GetBlockNumber(hash)
 	if number == nil {
 		return nil
