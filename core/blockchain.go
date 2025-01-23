@@ -402,7 +402,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		verifyTaskCh:       make(chan *VerifyTask, 32),
 	}
 	var err error
-	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
+	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped, bc.pipeline)
 	if err != nil {
 		return nil, err
 	}
