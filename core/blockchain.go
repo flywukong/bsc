@@ -2475,6 +2475,7 @@ func (bc *BlockChain) VerifyLoop() {
 				return
 			}
 
+			log.Info("verify task begin", "height", task.block.NumberU64())
 			if !bc.skipNextTask {
 				vstart := time.Now()
 				var err error
@@ -2482,6 +2483,7 @@ func (bc *BlockChain) VerifyLoop() {
 					log.Error("validate state failed", "error", err)
 					task.err = err
 				}
+				log.Info("verify task validate success")
 				blockValidationTimer.UpdateSince(vstart)
 
 				statedb := task.state
@@ -2523,6 +2525,8 @@ func (bc *BlockChain) VerifyLoop() {
 				}
 				if err != nil {
 					task.err = err
+				} else {
+					log.Info("verify task commit success", "height", task.block.NumberU64())
 				}
 
 				// Skip the rest of blocks' validation and commit if error hit

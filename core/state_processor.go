@@ -77,10 +77,10 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	log.Info("process begin")
 	lastBlock := p.chain.GetHeaderByHash(block.ParentHash())
 	if lastBlock == nil {
-		log.Info("fail to get las block")
+		log.Info("fail to get last block")
 		return nil, errors.New("could not get parent block")
 	} else {
-		log.Info("sucess to get las block")
+		log.Info("sucess to get last block")
 	}
 	// Handle upgrade build-in system contract code
 	systemcontracts.TryUpdateBuildInSystemContract(p.config, blockNumber, lastBlock.Time, block.Time(), statedb, true)
