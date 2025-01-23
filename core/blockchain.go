@@ -2486,49 +2486,58 @@ func (bc *BlockChain) VerifyLoop() {
 				log.Info("verify task validate success")
 				blockValidationTimer.UpdateSince(vstart)
 
-				statedb := task.state
-				block := task.block
-				// If witnesses was generated and stateless self-validation requested, do
-				// that now. Self validation should *never* run in production, it's more of
-				// a tight integration to enable running *all* consensus tests through the
-				// witness builder/runner, which would otherwise be impossible due to the
-				// various invalid chain states/behaviors being contained in those tests.
-				if witness := statedb.Witness(); witness != nil && bc.vmConfig.StatelessSelfValidation {
-					log.Warn("Running stateless self-validation", "block", block.Number(), "hash", block.Hash())
+				if err == nil {
+					statedb := task.state
+					block := task.block
+					// If witnesses was generated and stateless self-validation requested, do
+					// that now. Self validation should *never* run in production, it's more of
+					// a tight integration to enable running *all* consensus tests through the
+					// witness builder/runner, which would otherwise be impossible due to the
+					// various invalid chain states/behaviors being contained in those tests.
+					if witness := statedb.Witness(); witness != nil && bc.vmConfig.StatelessSelfValidation {
+						log.Warn("Running stateless self-validation", "block", block.Number(), "hash", block.Hash())
 
-					// Remove critical computed fields from the block to force true recalculation
-					context := block.Header()
-					context.Root = common.Hash{}
-					context.ReceiptHash = common.Hash{}
+						// Remove critical computed fields from the block to force true recalculation
+						context := block.Header()
+						context.Root = common.Hash{}
+						context.ReceiptHash = common.Hash{}
 
-					witnessTask := types.NewBlockWithHeader(context).WithBody(*block.Body())
+						witnessTask := types.NewBlockWithHeader(context).WithBody(*block.Body())
 
-					// Run the stateless self-cross-validation
-					crossStateRoot, crossReceiptRoot, err := ExecuteStateless(bc.chainConfig, bc.vmConfig, witnessTask, witness)
-					if err != nil {
-						task.err = fmt.Errorf("stateless self-validation failed: %v", err)
-					}
-					if crossStateRoot != block.Root() {
-						task.err = fmt.Errorf("stateless self-validation root mismatch (cross: %x local: %x)", crossStateRoot, block.Root())
-					}
-					if crossReceiptRoot != block.ReceiptHash() {
-						task.err = fmt.Errorf("stateless self-validation receipt root mismatch (cross: %x local: %x)", crossReceiptRoot, block.ReceiptHash())
+						// Run the stateless self-cross-validation
+						crossStateRoot, crossReceiptRoot, err := ExecuteStateless(bc.chainConfig, bc.vmConfig, witnessTask, witness)
+						if err != nil {
+							log.Error("stateless ExecuteS error", "error", err)
+							task.err = fmt.Errorf("stateless self-validation failed: %v", err)
+						}
+						if crossStateRoot != block.Root() {
+							log.Error("stateless excutue cross state root err ")
+							task.err = fmt.Errorf("stateless self-validation root mismatch (cross: %x local: %x)", crossStateRoot, block.Root())
+						}
+						if crossReceiptRoot != block.ReceiptHash() {
+							log.Error("stateless excutue cross receipt root err ")
+							task.err = fmt.Errorf("stateless self-validation receipt root mismatch (cross: %x local: %x)", crossReceiptRoot, block.ReceiptHash())
+						}
 					}
 				}
+
 				wstart := time.Now()
-				if !task.setHead {
-					// Don't set the head, only insert the block
-					err = bc.writeBlockWithState(task.block, task.processResult.Receipts, task.state)
-				} else {
-					_, err = bc.writeBlockAndSetHead(task.block, task.processResult.Receipts, task.processResult.Logs,
-						task.state, false)
-				}
-				if err != nil {
-					task.err = err
-				} else {
-					log.Info("verify task commit success", "height", task.block.NumberU64())
-				}
+				if err == nil {
+					if !task.setHead {
+						// Don't set the head, only insert the block
+						err = bc.writeBlockWithState(task.block, task.processResult.Receipts, task.state)
+					} else {
+						_, err = bc.writeBlockAndSetHead(task.block, task.processResult.Receipts, task.processResult.Logs,
+							task.state, false)
+					}
+					if err != nil {
+						log.Info("verify task commit fail", "err", err.Error())
+						task.err = err
+					} else {
+						log.Info("verify task commit success", "height", task.block.NumberU64())
+					}
 
+				}
 				// Skip the rest of blocks' validation and commit if error hit
 				if task.err != nil {
 					bc.skipNextTask = true
