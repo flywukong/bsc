@@ -402,7 +402,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		verifyTaskCh:       make(chan *VerifyTask, 32),
 	}
 	var err error
-	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped, bc.pipeline)
+	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
 	if err != nil {
 		return nil, err
 	}
@@ -602,6 +602,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	}
 	if bc.pipeline {
 		log.Info("blockchain start with pipeline mode")
+		bc.hc.SetVerifyCache()
 		bc.statedb.SetPipelineFlag()
 		bc.verifyHeaderCache = lru.NewCache[common.Hash, *types.Header](512)
 		bc.verifyTdCache = lru.NewCache[common.Hash, *big.Int](512)
@@ -2721,6 +2722,7 @@ func (bc *BlockChain) processPipeLineBlock(block *types.Block, statedb *state.St
 	pipeSnapshotCommitTimer.Update(statedb.PipeSnapshotCommits)
 	// Add to cache
 	bc.UpdateVerifyCache(block)
+	bc.hc.UpdateVerifyCache(block)
 	blockExecutionTimer.Update(time.Since(pstart))
 
 	task := &VerifyTask{
@@ -3584,6 +3586,7 @@ func (bc *BlockChain) GetTrieFlushInterval() time.Duration {
 
 // UpdateVerifyCache the block cache for pipeline
 func (bc *BlockChain) UpdateVerifyCache(block *types.Block) {
+	log.Info("update verify cache sucess")
 	// Add to cache
 	bc.blockCache.Add(block.Hash(), block)
 	bc.verifyHeaderCache.Add(block.Hash(), block.Header())
