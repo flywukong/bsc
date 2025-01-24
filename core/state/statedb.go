@@ -1673,18 +1673,18 @@ func (s *StateDB) CommitUnVerifiedSnapDifflayer(deleteEmptyObjects bool) {
 	}
 
 	for addr := range s.mutations {
-		obj := s.stateObjects[addr]
 		if s.mutations[addr].isDelete() {
 			tasks <- func() {
 				// s.r_accounts[obj.addrHash] = types.SlimAccountRLP(obj.data)
 				// obj.WriteCode()
 				taskResult := &taskResult{
-					hash: obj.addrHash,
+					hash: common.BytesToHash(addr.Bytes()),
 					data: nil,
 				}
 				taskResults <- taskResult
 			}
 		} else {
+			obj := s.stateObjects[addr]
 			tasks <- func() {
 				// s.r_accounts[obj.addrHash] = types.SlimAccountRLP(obj.data)
 				// obj.WriteCode()
