@@ -2334,6 +2334,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 			// Report the import stats before returning the various results
 			stats.processed++
 			stats.usedGas += res.usedGas
+			stats.report(chain, it.index, 0, 0, 0, 0, 0, true)
 		} else {
 			res, err := bc.processBlock(block, statedb, start, setHead, interruptCh)
 			if err != nil {
@@ -2402,8 +2403,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 	}
 
 	if bc.pipeline {
-		log.Info("deal with the pipeline batch processResult")
-		stats.report(chain, it.index, 0, 0, 0, 0, 0, true)
 
 		var errTask *VerifyTask
 		var firstErrIndex int
