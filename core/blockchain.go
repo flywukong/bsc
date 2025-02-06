@@ -2406,8 +2406,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 		var errTask *VerifyTask
 		var firstErrIndex int
 		var isFirst bool
-
-		log.Info("verify task len", "len", len(verifyTasks))
 		for _, task := range verifyTasks {
 			if !task.done {
 				<-task.doneCh
