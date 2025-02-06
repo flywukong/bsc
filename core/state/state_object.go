@@ -89,7 +89,7 @@ type stateObject struct {
 	newContract bool
 
 	// Slots to prefetch for pipeline
-	SlotsToPrefetch []common.Hash
+	slotsToPrefetch []common.Hash
 }
 
 // empty returns whether the account is considered empty.
@@ -243,7 +243,7 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	}
 
 	// Schedule the resolved storage slots for prefetching if it's enabled.
-	if s.db.prefetcher != nil && s.data.Root != types.EmptyRootHash {
+	if !s.db.IsPipeLineMode() && s.db.prefetcher != nil && s.data.Root != types.EmptyRootHash {
 		if err = s.db.prefetcher.prefetch(s.addrHash, s.origin.Root, s.address, nil, []common.Hash{key}, true); err != nil {
 			log.Error("Failed to prefetch storage slot", "addr", s.address, "key", key, "err", err)
 		}
@@ -282,8 +282,11 @@ func (s *stateObject) setState(key common.Hash, value common.Hash, origin common
 // committed later. It is invoked at the end of every transaction.
 func (s *stateObject) finalise() {
 	slotsToPrefetch := make([]common.Hash, 0, len(s.dirtyStorage))
-	if s.db.TriePrefetch && s.db.IsPipeLineMode() {
-		s.SlotsToPrefetch = make([]common.Hash, 0, len(s.dirtyStorage))
+	isPipeLinePrefetch := s.db.TriePrefetch && s.db.IsPipeLineMode()
+	if isPipeLinePrefetch {
+		if s.slotsToPrefetch == nil {
+			s.slotsToPrefetch = make([]common.Hash, 0, len(s.dirtyStorage))
+		}
 	}
 	for key, value := range s.dirtyStorage {
 		if origin, exist := s.uncommittedStorage[key]; exist && origin == value {
@@ -297,8 +300,8 @@ func (s *stateObject) finalise() {
 			// The slot is different from its original value and hasn't been
 			// tracked for commit yet.
 			s.uncommittedStorage[key] = s.GetCommittedState(key)
-			if s.db.TriePrefetch && s.db.IsPipeLineMode() {
-				s.SlotsToPrefetch = append(s.SlotsToPrefetch, key)
+			if isPipeLinePrefetch {
+				s.slotsToPrefetch = append(s.slotsToPrefetch, key)
 			} else {
 				slotsToPrefetch = append(slotsToPrefetch, key) // Copy needed for closure
 			}
@@ -312,7 +315,7 @@ func (s *stateObject) finalise() {
 		s.pendingStorage[key] = value
 	}
 
-	if !s.db.TriePrefetch || !s.db.IsPipeLineMode() {
+	if !s.db.TriePrefetch && !s.db.IsPipeLineMode() {
 		if s.db.prefetcher != nil && len(slotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
 			if err := s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, nil, slotsToPrefetch, false); err != nil {
 				log.Error("Failed to prefetch slots", "addr", s.address, "slots", len(slotsToPrefetch), "err", err)
@@ -346,8 +349,8 @@ func (s *stateObject) updateTrie() (Trie, error) {
 		}
 	}
 
-	if s.db.IsPipeLineMode() && s.SlotsToPrefetch != nil && s.db.prefetcher != nil && len(s.SlotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
-		s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, nil, s.SlotsToPrefetch, false)
+	if s.db.IsPipeLineMode() && s.db.TriePrefetch && s.slotsToPrefetch != nil && s.db.prefetcher != nil && len(s.slotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
+		s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, nil, s.slotsToPrefetch, false)
 	}
 	// Retrieve a pretecher populated trie, or fall back to the database. This will
 	// block until all prefetch tasks are done, which are needed for witnesses even

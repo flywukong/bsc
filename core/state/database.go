@@ -206,7 +206,7 @@ func (db *CachingDB) Reader(stateRoot common.Hash) (Reader, error) {
 			readers = append(readers, newFlatReader(reader)) // state reader is optional
 		}
 	}
-	if !db.NoTries() {
+	if !db.NoTries() && !db.IsPipelineMode() {
 		// Set up the trie reader, which is expected to always be available
 		// as the gatekeeper unless the state is corrupted.
 		tr, err := newTrieReader(stateRoot, db.triedb, db.pointCache)

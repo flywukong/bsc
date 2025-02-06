@@ -88,7 +88,7 @@ type StateDB struct {
 	noTrie         bool
 	reader         Reader
 
-	addressToPrefetch [][]byte
+	addressToPrefetch []common.Address
 	// originalRoot is the pre-state root, before any changes were made.
 	// It will be updated when the Commit is called.
 	originalRoot common.Hash
@@ -227,7 +227,7 @@ func New(root common.Hash, db Database) (*StateDB, error) {
 		journal:              newJournal(),
 		accessList:           newAccessList(),
 		transientStorage:     newTransientStorage(),
-		addressToPrefetch:    make([][]byte, 0),
+		addressToPrefetch:    make([]common.Address, 0),
 	}
 	if db.TrieDB().IsVerkle() {
 		sdb.accessEvents = NewAccessEvents(db.PointCache())
@@ -282,8 +282,10 @@ func (s *StateDB) StartPrefetcher(namespace string, witness *stateless.Witness) 
 	// the prefetcher is constructed. For more details, see:
 	// https://github.com/ethereum/go-ethereum/issues/29880
 	s.prefetcher = newTriePrefetcher(s.db, s.originalRoot, namespace, witness == nil)
-	if err := s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, nil, nil, false); err != nil {
-		log.Error("Failed to prefetch account trie", "root", s.originalRoot, "err", err)
+	if !s.IsPipeLineMode() {
+		if err := s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, nil, nil, false); err != nil {
+			log.Error("Failed to prefetch account trie", "root", s.originalRoot, "err", err)
+		}
 	}
 }
 
@@ -332,8 +334,7 @@ func (s *StateDB) TriePrefetchInAdvance(block *types.Block, signer types.Signer)
 
 // Enable the pipeline function of statedb
 func (s *StateDB) EnablePipeline() {
-	if s.GetSnap() != nil && s.db.Snapshot().Layers() > 1 {
-		log.Info("enable statedb pipeline")
+	if s.GetSnap() != nil && s.db.Snapshot().Layers() > 0 {
 		s.pipeline = true
 	}
 }
@@ -748,7 +749,7 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 		return nil
 	}
 	// Schedule the resolved account for prefetching if it's enabled.
-	if s.prefetcher != nil {
+	if s.prefetcher != nil && !s.IsPipeLineMode() {
 		if err = s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, []common.Address{addr}, nil, true); err != nil {
 			log.Error("Failed to prefetch account", "addr", addr, "err", err)
 		}
@@ -909,7 +910,14 @@ func (s *StateDB) GetRefund() uint64 {
 // the journal as well as the refunds. Finalise, however, will not push any updates
 // into the tries just yet. Only IntermediateRoot or Commit will do that.
 func (s *StateDB) Finalise(deleteEmptyObjects bool) {
-	addressesToPrefetch := make([]common.Address, 0, len(s.journal.dirties))
+	var addressesToPrefetch []common.Address
+	if s.IsPipeLineMode() {
+		if s.addressToPrefetch == nil {
+			s.addressToPrefetch = make([]common.Address, 0, len(s.journal.dirties))
+		}
+	} else {
+		addressesToPrefetch = make([]common.Address, 0, len(s.journal.dirties))
+	}
 	for addr := range s.journal.dirties {
 		obj, exist := s.stateObjects[addr]
 		if !exist {
@@ -937,23 +945,22 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 		// At this point, also ship the address off to the precacher. The precacher
 		// will start loading tries, and when the change is eventually committed,
 		// the commit-phase will be a lot faster
-		addressesToPrefetch = append(addressesToPrefetch, addr) // Copy needed for closure
+		if s.IsPipeLineMode() {
+			s.addressToPrefetch = append(s.addressToPrefetch, addr) // Copy needed for closure
+		} else {
+			addressesToPrefetch = append(addressesToPrefetch, addr) // Copy needed for closure
+		}
 	}
-	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
+	if !s.IsPipeLineMode() && s.prefetcher != nil && len(addressesToPrefetch) > 0 {
 		if err := s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, addressesToPrefetch, nil, false); err != nil {
 			log.Error("Failed to prefetch addresses", "addresses", len(addressesToPrefetch), "err", err)
 		}
 	}
-	// todo pipeline judge
-	/*
-		if s.TriePrefetch {
-			prefetcher := s.prefetcher
-			if prefetcher != nil && len(s.addressToPrefetch) > 0 {
-				prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, s.addressToPrefetch)
-			}
-		}
 
-	*/
+	if s.TriePrefetch && s.IsPipeLineMode() && s.prefetcher != nil && len(s.addressToPrefetch) > 0 {
+		s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, s.addressToPrefetch, nil, false)
+	}
+
 	// Invalidate journal because reverting across transactions is not allowed.
 	s.clearJournalAndRefund()
 }
@@ -988,10 +995,12 @@ func (s *StateDB) GetLatestVerifiedStateRoot(addrHash common.Hash) common.Hash {
 // It is called in between transactions to get the root hash that
 // goes into transaction receipts.
 func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
+	if s.IsPipeLineMode() {
+		s.TriePrefetch = true
+	}
 	// Finalise all the dirty storage states and write them into the tries
 	s.Finalise(deleteEmptyObjects)
 
-	// todo open trie
 	if s.IsPipeLineMode() {
 		if s.trie == nil {
 			tr, err := s.db.OpenTrie(s.originalRoot)
@@ -1566,15 +1575,16 @@ func (s *StateDB) commitAndFlush(block uint64, deleteEmptyObjects bool) (*stateU
 	if !ret.empty() {
 		// If snapshotting is enabled, update the snapshot tree with this new version
 		if snap := s.db.Snapshot(); snap != nil && snap.Snapshot(ret.originRoot) != nil {
-			if s.pipeline {
+			if s.IsPipeLineMode() {
 				toCorrectSnap := s.GetExpectedSnap()
 				if toCorrectSnap != nil {
-					log.Info("Correct account")
 					if !toCorrectSnap.Verified() {
 						if err := toCorrectSnap.CorrectAccounts(ret.accounts); err != nil {
 							log.Crit("Failed to correct accounts for diff of block", "block=", block, "error", err)
 						}
 					}
+				} else {
+					panic(fmt.Sprintf("Not found the snap to correct, (block: %d)", block))
 				}
 			} else {
 				start := time.Now()
