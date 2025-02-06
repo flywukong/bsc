@@ -2403,7 +2403,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 	}
 
 	if bc.pipeline {
-
 		var errTask *VerifyTask
 		var firstErrIndex int
 		var isFirst bool
@@ -2472,6 +2471,7 @@ func (bc *BlockChain) VerifyLoop() {
 				return
 			}
 
+			log.Info("verify task begin", "height", task.block.NumberU64())
 			if !bc.skipNextTask {
 				vstart := time.Now()
 				var err error
@@ -2534,6 +2534,9 @@ func (bc *BlockChain) VerifyLoop() {
 				// Skip the rest of blocks' validation and commit if error hit
 				if task.err != nil {
 					bc.skipNextTask = true
+					log.Info("verify task fail", "height", task.block.NumberU64(), "err", task.err.Error())
+				} else {
+					log.Info("verify task success", "height", task.block.NumberU64())
 				}
 				task.done = true
 				close(task.doneCh)
@@ -2716,6 +2719,7 @@ func (bc *BlockChain) processPipeLineBlock(block *types.Block, statedb *state.St
 	bc.hc.UpdateVerifyCache(block)
 	blockExecutionTimer.Update(time.Since(pstart))
 
+	vstart := time.Now()
 	task := &VerifyTask{
 		block:         block,
 		state:         statedb,
@@ -2727,8 +2731,10 @@ func (bc *BlockChain) processPipeLineBlock(block *types.Block, statedb *state.St
 
 	*tasks = append(*tasks, task)
 	bc.verifyTaskCh <- task
+	verifyTaskBlockTimer.UpdateSince(vstart)
 	blockInsertTimer.UpdateSince(start)
 
+	log.Info("process finish begin", "height", task.block.NumberU64())
 	return &blockProcessingResult{usedGas: res.GasUsed}, nil
 }
 
