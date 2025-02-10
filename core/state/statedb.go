@@ -993,7 +993,6 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	// Finalise all the dirty storage states and write them into the tries
 	s.Finalise(deleteEmptyObjects)
 
-	// todo open trie
 	if s.IsPipeLineMode() {
 		if s.trie == nil {
 			tr, err := s.db.OpenTrie(s.originalRoot)

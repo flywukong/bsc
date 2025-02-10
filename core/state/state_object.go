@@ -282,7 +282,8 @@ func (s *stateObject) setState(key common.Hash, value common.Hash, origin common
 // committed later. It is invoked at the end of every transaction.
 func (s *stateObject) finalise() {
 	slotsToPrefetch := make([]common.Hash, 0, len(s.dirtyStorage))
-	if s.db.TriePrefetch && s.db.IsPipeLineMode() {
+	isPipeLinePrefetch := s.db.TriePrefetch && s.db.IsPipeLineMode()
+	if isPipeLinePrefetch {
 		s.SlotsToPrefetch = make([]common.Hash, 0, len(s.dirtyStorage))
 	}
 	for key, value := range s.dirtyStorage {
@@ -297,7 +298,7 @@ func (s *stateObject) finalise() {
 			// The slot is different from its original value and hasn't been
 			// tracked for commit yet.
 			s.uncommittedStorage[key] = s.GetCommittedState(key)
-			if s.db.TriePrefetch && s.db.IsPipeLineMode() {
+			if isPipeLinePrefetch {
 				s.SlotsToPrefetch = append(s.SlotsToPrefetch, key)
 			} else {
 				slotsToPrefetch = append(slotsToPrefetch, key) // Copy needed for closure
@@ -312,7 +313,7 @@ func (s *stateObject) finalise() {
 		s.pendingStorage[key] = value
 	}
 
-	if !s.db.TriePrefetch || !s.db.IsPipeLineMode() {
+	if !s.db.TriePrefetch && !s.db.IsPipeLineMode() {
 		if s.db.prefetcher != nil && len(slotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
 			if err := s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, nil, slotsToPrefetch, false); err != nil {
 				log.Error("Failed to prefetch slots", "addr", s.address, "slots", len(slotsToPrefetch), "err", err)
