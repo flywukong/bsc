@@ -88,7 +88,7 @@ type StateDB struct {
 	noTrie         bool
 	reader         Reader
 
-	addressToPrefetch [][]byte
+	addressToPrefetch []common.Address
 	// originalRoot is the pre-state root, before any changes were made.
 	// It will be updated when the Commit is called.
 	originalRoot common.Hash
@@ -227,7 +227,7 @@ func New(root common.Hash, db Database) (*StateDB, error) {
 		journal:              newJournal(),
 		accessList:           newAccessList(),
 		transientStorage:     newTransientStorage(),
-		addressToPrefetch:    make([][]byte, 0),
+		addressToPrefetch:    make([]common.Address, 0),
 	}
 	if db.TrieDB().IsVerkle() {
 		sdb.accessEvents = NewAccessEvents(db.PointCache())
@@ -937,23 +937,22 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 		// At this point, also ship the address off to the precacher. The precacher
 		// will start loading tries, and when the change is eventually committed,
 		// the commit-phase will be a lot faster
-		addressesToPrefetch = append(addressesToPrefetch, addr) // Copy needed for closure
+		if s.IsPipeLineMode() {
+			s.addressToPrefetch = append(s.addressToPrefetch, addr) // Copy needed for closure
+		} else {
+			addressesToPrefetch = append(addressesToPrefetch, addr) // Copy needed for closure
+		}
 	}
-	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
+	if !s.IsPipeLineMode() && s.prefetcher != nil && len(addressesToPrefetch) > 0 {
 		if err := s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, addressesToPrefetch, nil, false); err != nil {
 			log.Error("Failed to prefetch addresses", "addresses", len(addressesToPrefetch), "err", err)
 		}
 	}
-	// todo pipeline judge
-	/*
-		if s.TriePrefetch {
-			prefetcher := s.prefetcher
-			if prefetcher != nil && len(s.addressToPrefetch) > 0 {
-				prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, s.addressToPrefetch)
-			}
-		}
 
-	*/
+	if s.TriePrefetch && s.IsPipeLineMode() && s.prefetcher != nil && len(s.addressToPrefetch) > 0 {
+		s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, s.addressToPrefetch, nil, false)
+	}
+
 	// Invalidate journal because reverting across transactions is not allowed.
 	s.clearJournalAndRefund()
 }
@@ -988,6 +987,9 @@ func (s *StateDB) GetLatestVerifiedStateRoot(addrHash common.Hash) common.Hash {
 // It is called in between transactions to get the root hash that
 // goes into transaction receipts.
 func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
+	if s.IsPipeLineMode() {
+		s.TriePrefetch = true
+	}
 	// Finalise all the dirty storage states and write them into the tries
 	s.Finalise(deleteEmptyObjects)
 
