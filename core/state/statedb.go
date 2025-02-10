@@ -332,7 +332,7 @@ func (s *StateDB) TriePrefetchInAdvance(block *types.Block, signer types.Signer)
 
 // Enable the pipeline function of statedb
 func (s *StateDB) EnablePipeline() {
-	if s.GetSnap() != nil && s.db.Snapshot().Layers() > 1 {
+	if s.GetSnap() != nil && s.db.Snapshot().Layers() > 0 {
 		log.Info("enable statedb pipeline")
 		s.pipeline = true
 	}
