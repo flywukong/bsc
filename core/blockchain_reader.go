@@ -85,18 +85,33 @@ func (bc *BlockChain) CurrentSafeBlock() *types.Header {
 // HasHeader checks if a block header is present in the database or not, caching
 // it if present.
 func (bc *BlockChain) HasHeader(hash common.Hash, number uint64) bool {
+	if bc.pipeline && bc.verifyNumberCache != nil && bc.verifyHeaderCache != nil {
+		if bc.verifyNumberCache.Contains(hash) || bc.verifyHeaderCache.Contains(hash) {
+			return true
+		}
+	}
 	return bc.hc.HasHeader(hash, number)
 }
 
 // GetHeader retrieves a block header from the database by hash and number,
 // caching it if found.
 func (bc *BlockChain) GetHeader(hash common.Hash, number uint64) *types.Header {
+	if bc.pipeline && bc.verifyHeaderCache != nil {
+		if header, ok := bc.verifyHeaderCache.Get(hash); ok {
+			return header
+		}
+	}
 	return bc.hc.GetHeader(hash, number)
 }
 
 // GetHeaderByHash retrieves a block header from the database by hash, caching it if
 // found.
 func (bc *BlockChain) GetHeaderByHash(hash common.Hash) *types.Header {
+	if bc.pipeline && bc.verifyNumberCache != nil {
+		if number, ok := bc.verifyNumberCache.Get(hash); ok {
+			return bc.GetHeader(hash, number)
+		}
+	}
 	return bc.hc.GetHeaderByHash(hash)
 }
 
@@ -201,6 +216,11 @@ func (bc *BlockChain) GetBlock(hash common.Hash, number uint64) *types.Block {
 
 // GetBlockByHash retrieves a block from the database by hash, caching it if found.
 func (bc *BlockChain) GetBlockByHash(hash common.Hash) *types.Block {
+	if bc.pipeline && bc.verifyNumberCache != nil {
+		if number, ok := bc.verifyNumberCache.Get(hash); ok {
+			return bc.GetBlock(hash, number)
+		}
+	}
 	number := bc.hc.GetBlockNumber(hash)
 	if number == nil {
 		return nil
@@ -355,6 +375,11 @@ func (bc *BlockChain) GetTransactionLookup(hash common.Hash) (*rawdb.LegacyTxLoo
 // GetTd retrieves a block's total difficulty in the canonical chain from the
 // database by hash and number, caching it if found.
 func (bc *BlockChain) GetTd(hash common.Hash, number uint64) *big.Int {
+	if bc.pipeline && bc.verifyTdCache != nil {
+		if cached, ok := bc.verifyTdCache.Get(hash); ok {
+			return cached
+		}
+	}
 	return bc.hc.GetTd(hash, number)
 }
 
@@ -372,6 +397,16 @@ func (bc *BlockChain) HasState(hash common.Hash) bool {
 		}
 		return found
 	}
+
+	if bc.pipeline && bc.snaps != nil {
+		// If parent snap is pending on verification, treat it as state exist
+		if s := bc.snaps.Snapshot(hash); s != nil {
+			if !s.Verified() {
+				return true
+			}
+		}
+	}
+
 	_, err := bc.statedb.OpenTrie(hash)
 	return err == nil
 }

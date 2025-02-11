@@ -204,3 +204,18 @@ func (dl *diskLayer) stopGeneration() {
 		<-abort
 	}
 }
+
+// CorrectAccounts
+func (dl *diskLayer) CorrectAccounts(accounts map[common.Hash][]byte) error {
+	return nil
+}
+
+// Verified return whether the layer has been verified
+func (dl *diskLayer) Verified() bool {
+	return true
+}
+
+// SetStale
+func (dl *diskLayer) SetStale() {
+	return
+}

@@ -106,6 +106,8 @@ type diffLayer struct {
 	diffed *bloomfilter.Filter // Bloom filter tracking all the diffed items up to the disk layer
 
 	lock sync.RWMutex
+
+	verified atomic.Bool
 }
 
 // accountBloomHash is used to convert an account hash into a 64 bit mini hash.
@@ -258,6 +260,10 @@ func (dl *diffLayer) Accounts() (map[common.Hash]*types.SlimAccount, error) {
 func (dl *diffLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	// Check staleness before reaching further.
 	dl.lock.RLock()
+	start := time.Now()
+	defer func() {
+		snapshotAccountReadMeter.UpdateSince(start)
+	}()
 	if dl.Stale() {
 		dl.lock.RUnlock()
 		return nil, ErrSnapshotStale
@@ -323,6 +329,10 @@ func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	// Check the bloom filter first whether there's even a point in reaching into
 	// all the maps in all the layers below
 	dl.lock.RLock()
+	start := time.Now()
+	defer func() {
+		snapshotStorageReadMeter.UpdateSince(start)
+	}()
 	// Check staleness before reaching further.
 	if dl.Stale() {
 		dl.lock.RUnlock()
@@ -386,6 +396,11 @@ func (dl *diffLayer) Update(blockRoot common.Hash, accounts map[common.Hash][]by
 	return newDiffLayer(dl, blockRoot, accounts, storage)
 }
 
+// Verified return whether the layer has been verified
+func (dl *diffLayer) Verified() bool {
+	return dl.verified.Load()
+}
+
 // flatten pushes all data from this point downwards, flattening everything into
 // a single diff at the bottom. Since usually the lowermost diff is the largest,
 // the flattening builds up from there in reverse.
@@ -422,7 +437,7 @@ func (dl *diffLayer) flatten() snapshot {
 		maps.Copy(parent.storageData[accountHash], storage)
 	}
 	// Return the combo parent
-	return &diffLayer{
+	diff := &diffLayer{
 		parent:      parent.parent,
 		origin:      parent.origin,
 		root:        dl.root,
@@ -432,6 +447,8 @@ func (dl *diffLayer) flatten() snapshot {
 		diffed:      dl.diffed,
 		memory:      parent.memory + dl.memory,
 	}
+	diff.verified.Store(true)
+	return diff
 }
 
 // AccountList returns a sorted list of all accounts in this diffLayer, including
@@ -489,4 +506,33 @@ func (dl *diffLayer) StorageList(accountHash common.Hash) []common.Hash {
 	dl.storageList[accountHash] = storageList
 	dl.memory += uint64(len(dl.storageList)*common.HashLength + common.HashLength)
 	return storageList
+}
+
+// newVerifiedDiffLayer creates a new diff based on journal on top of an existing snapshot, whether that's a low
+// level persistent database or a hierarchical diff already.
+func newVerifiedDiffLayer(parent snapshot, root common.Hash, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte) *diffLayer {
+	dl := newDiffLayer(parent, root, accounts, storage)
+	dl.verified.Store(true)
+	return dl
+}
+
+// CorrectAccounts
+func (dl *diffLayer) CorrectAccounts(accounts map[common.Hash][]byte) error {
+	dl.lock.Lock()
+	defer dl.lock.Unlock()
+
+	if !dl.verified.Load() {
+		dl.accountData = accounts
+		dl.verified.Store(true)
+	}
+	return nil
+}
+
+// SetStale set unverified diff to stale
+func (dl *diffLayer) SetStale() {
+	dl.lock.Lock()
+	defer dl.lock.Unlock()
+	if !dl.verified.Load() && !dl.Stale() {
+		dl.stale.Store(true)
+	}
 }

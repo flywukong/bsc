@@ -64,7 +64,7 @@ func testHeaderVerification(t *testing.T, scheme string) {
 				engine := ethash.NewFakeFailer(headers[i].Number.Uint64())
 				_, results = engine.VerifyHeaders(chain, []*types.Header{headers[i]})
 			}
-			// Wait for the verification result
+			// Wait for the verification processResult
 			select {
 			case result := <-results:
 				if (result == nil) != valid {
@@ -76,7 +76,7 @@ func testHeaderVerification(t *testing.T, scheme string) {
 			// Make sure no more data is returned
 			select {
 			case result := <-results:
-				t.Fatalf("test %d.%d: unexpected result returned: %v", i, j, result)
+				t.Fatalf("test %d.%d: unexpected processResult returned: %v", i, j, result)
 			case <-time.After(25 * time.Millisecond):
 			}
 		}
@@ -169,7 +169,7 @@ func testHeaderVerificationForMerging(t *testing.T, isClique bool) {
 	// Verify the blocks before the merging
 	for i := 0; i < len(preBlocks); i++ {
 		_, results := engine.VerifyHeaders(chain, []*types.Header{preHeaders[i]})
-		// Wait for the verification result
+		// Wait for the verification processResult
 		select {
 		case result := <-results:
 			if result != nil {
@@ -181,7 +181,7 @@ func testHeaderVerificationForMerging(t *testing.T, isClique bool) {
 		// Make sure no more data is returned
 		select {
 		case result := <-results:
-			t.Fatalf("pre-block %d: unexpected result returned: %v", i, result)
+			t.Fatalf("pre-block %d: unexpected processResult returned: %v", i, result)
 		case <-time.After(25 * time.Millisecond):
 		}
 		chain.InsertChain(preBlocks[i : i+1])
@@ -189,7 +189,7 @@ func testHeaderVerificationForMerging(t *testing.T, isClique bool) {
 	// Verify the blocks after the merging
 	for i := 0; i < len(postBlocks); i++ {
 		_, results := engine.VerifyHeaders(chain, []*types.Header{postHeaders[i]})
-		// Wait for the verification result
+		// Wait for the verification processResult
 		select {
 		case result := <-results:
 			if result != nil {
@@ -201,7 +201,7 @@ func testHeaderVerificationForMerging(t *testing.T, isClique bool) {
 		// Make sure no more data is returned
 		select {
 		case result := <-results:
-			t.Fatalf("post-block %d: unexpected result returned: %v", i, result)
+			t.Fatalf("post-block %d: unexpected processResult returned: %v", i, result)
 		case <-time.After(25 * time.Millisecond):
 		}
 		chain.InsertBlockWithoutSetHead(postBlocks[i], false)
@@ -229,7 +229,7 @@ func testHeaderVerificationForMerging(t *testing.T, isClique bool) {
 	// Make sure no more data is returned
 	select {
 	case result := <-results:
-		t.Fatalf("unexpected result returned: %v", result)
+		t.Fatalf("unexpected processResult returned: %v", result)
 	case <-time.After(25 * time.Millisecond):
 	}
 }

@@ -29,7 +29,7 @@ type Validator interface {
 	// ValidateBody validates the given block's content.
 	ValidateBody(block *types.Block) error
 
-	// ValidateState validates the given statedb and optionally the process result.
+	// ValidateState validates the given statedb and optionally the process processResult.
 	ValidateState(block *types.Block, state *state.StateDB, res *ProcessResult, stateless bool) error
 
 	// RemoteVerifyManager return remoteVerifyManager of validator.

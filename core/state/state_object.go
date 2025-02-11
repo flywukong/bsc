@@ -87,6 +87,9 @@ type stateObject struct {
 	// object was previously existent and is being deployed as a contract within
 	// the current transaction.
 	newContract bool
+
+	// Slots to prefetch for pipeline
+	slotsToPrefetch []common.Hash
 }
 
 // empty returns whether the account is considered empty.
@@ -240,7 +243,7 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	}
 
 	// Schedule the resolved storage slots for prefetching if it's enabled.
-	if s.db.prefetcher != nil && s.data.Root != types.EmptyRootHash {
+	if !s.db.IsPipeLineMode() && s.db.prefetcher != nil && s.data.Root != types.EmptyRootHash {
 		if err = s.db.prefetcher.prefetch(s.addrHash, s.origin.Root, s.address, nil, []common.Hash{key}, true); err != nil {
 			log.Error("Failed to prefetch storage slot", "addr", s.address, "key", key, "err", err)
 		}
@@ -279,6 +282,12 @@ func (s *stateObject) setState(key common.Hash, value common.Hash, origin common
 // committed later. It is invoked at the end of every transaction.
 func (s *stateObject) finalise() {
 	slotsToPrefetch := make([]common.Hash, 0, len(s.dirtyStorage))
+	isPipeLinePrefetch := s.db.TriePrefetch && s.db.IsPipeLineMode()
+	if isPipeLinePrefetch {
+		if s.slotsToPrefetch == nil {
+			s.slotsToPrefetch = make([]common.Hash, 0, len(s.dirtyStorage))
+		}
+	}
 	for key, value := range s.dirtyStorage {
 		if origin, exist := s.uncommittedStorage[key]; exist && origin == value {
 			// The slot is reverted to its original value, delete the entry
@@ -291,7 +300,11 @@ func (s *stateObject) finalise() {
 			// The slot is different from its original value and hasn't been
 			// tracked for commit yet.
 			s.uncommittedStorage[key] = s.GetCommittedState(key)
-			slotsToPrefetch = append(slotsToPrefetch, key) // Copy needed for closure
+			if isPipeLinePrefetch {
+				s.slotsToPrefetch = append(s.slotsToPrefetch, key)
+			} else {
+				slotsToPrefetch = append(slotsToPrefetch, key) // Copy needed for closure
+			}
 		}
 		// Aggregate the dirty storage slots into the pending area. It might
 		// be possible that the value of tracked slot here is same with the
@@ -301,9 +314,12 @@ func (s *stateObject) finalise() {
 		// byzantium fork) and entry is necessary to modify the value back.
 		s.pendingStorage[key] = value
 	}
-	if s.db.prefetcher != nil && len(slotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
-		if err := s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, nil, slotsToPrefetch, false); err != nil {
-			log.Error("Failed to prefetch slots", "addr", s.address, "slots", len(slotsToPrefetch), "err", err)
+
+	if !s.db.TriePrefetch && !s.db.IsPipeLineMode() {
+		if s.db.prefetcher != nil && len(slotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
+			if err := s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, nil, slotsToPrefetch, false); err != nil {
+				log.Error("Failed to prefetch slots", "addr", s.address, "slots", len(slotsToPrefetch), "err", err)
+			}
 		}
 	}
 	if len(s.dirtyStorage) > 0 {
@@ -331,6 +347,10 @@ func (s *stateObject) updateTrie() (Trie, error) {
 		if s.db.witness == nil || len(s.originStorage) == 0 {
 			return s.trie, nil
 		}
+	}
+
+	if s.db.IsPipeLineMode() && s.db.TriePrefetch && s.slotsToPrefetch != nil && s.db.prefetcher != nil && len(s.slotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
+		s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, nil, s.slotsToPrefetch, false)
 	}
 	// Retrieve a pretecher populated trie, or fall back to the database. This will
 	// block until all prefetch tasks are done, which are needed for witnesses even
@@ -628,3 +648,39 @@ func (s *stateObject) Nonce() uint64 {
 func (s *stateObject) Root() common.Hash {
 	return s.data.Root
 }
+
+func (s *stateObject) GetPendingStorages() map[common.Hash][]byte {
+	var (
+		hasher = crypto.NewKeccakState()
+	)
+	if len(s.pendingStorage) > 0 {
+		dirtyStorage := make(map[common.Hash][]byte)
+		for key, value := range s.pendingStorage {
+			// Skip noop changes, persist actual changes
+			if value == s.originStorage[key] {
+				continue
+			}
+			var v []byte
+			if value != (common.Hash{}) {
+				value := value
+				v = common.TrimLeftZeroes(value[:])
+			}
+			// rlp-encoded value to be used by the snapshot
+			var encoded []byte
+			if len(v) != 0 {
+				encoded, _ = rlp.EncodeToBytes(v)
+			}
+			dirtyStorage[crypto.HashData(hasher, key[:])] = encoded
+		}
+		return dirtyStorage
+	}
+	return nil
+}
+
+/*
+func (s *stateObject) WriteCode() {
+	if s.code != nil && s.dirtyCode {
+		rawdb.WriteCode(s.db.db.DiskDB(), common.BytesToHash(s.CodeHash()), s.code)
+	}
+}
+*/

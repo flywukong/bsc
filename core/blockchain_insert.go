@@ -100,7 +100,7 @@ func (st *insertStats) report(chain []*types.Block, index int, snapDiffItems, sn
 type insertIterator struct {
 	chain types.Blocks // Chain of blocks being iterated over
 
-	results <-chan error // Verification result sink from the consensus engine
+	results <-chan error // Verification processResult sink from the consensus engine
 	errors  []error      // Header verification errors for the blocks
 
 	index     int       // Current offset of the iterator
@@ -127,7 +127,7 @@ func (it *insertIterator) next() (*types.Block, error) {
 		it.index = len(it.chain)
 		return nil, nil
 	}
-	// Advance the iterator and wait for verification result if not yet done
+	// Advance the iterator and wait for verification processResult if not yet done
 	it.index++
 	if len(it.errors) <= it.index {
 		it.errors = append(it.errors, <-it.results)
@@ -151,7 +151,7 @@ func (it *insertIterator) peek() (*types.Block, error) {
 	if it.index+1 >= len(it.chain) {
 		return nil, nil
 	}
-	// Wait for verification result if not yet done
+	// Wait for verification processResult if not yet done
 	if len(it.errors) <= it.index+1 {
 		it.errors = append(it.errors, <-it.results)
 	}

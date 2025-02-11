@@ -212,7 +212,7 @@ func ApplyTransactionWithEVM(msg *Message, gp *GasPool, statedb *state.StateDB, 
 	return MakeReceipt(evm, result, statedb, blockNumber, blockHash, tx, *usedGas, root, receiptProcessors...), nil
 }
 
-// MakeReceipt generates the receipt object for a transaction given its execution result.
+// MakeReceipt generates the receipt object for a transaction given its execution processResult.
 func MakeReceipt(evm *vm.EVM, result *ExecutionResult, statedb *state.StateDB, blockNumber *big.Int, blockHash common.Hash, tx *types.Transaction, usedGas uint64, root []byte, receiptProcessors ...ReceiptProcessor) *types.Receipt {
 	// Create a new receipt for the transaction, storing the intermediate root and gas used
 	// by the tx.
@@ -237,7 +237,7 @@ func MakeReceipt(evm *vm.EVM, result *ExecutionResult, statedb *state.StateDB, b
 
 	// Merge the tx-local access event into the "block-local" one, in order to collect
 	// all values, so that the witness can be built.
-	if statedb.GetTrie().IsVerkle() {
+	if !statedb.IsPipeLineMode() && statedb.GetTrie().IsVerkle() {
 		statedb.AccessEvents().Merge(evm.AccessEvents)
 	}
 

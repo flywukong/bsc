@@ -88,18 +88,20 @@ var (
 	accountReadSingleTimer = metrics.NewRegisteredTimer("chain/account/single/reads", nil)
 	storageReadSingleTimer = metrics.NewRegisteredTimer("chain/storage/single/reads", nil)
 
-	snapshotCommitTimer = metrics.NewRegisteredTimer("chain/snapshot/commits", nil)
-	triedbCommitTimer   = metrics.NewRegisteredTimer("chain/triedb/commits", nil)
+	snapshotCommitTimer     = metrics.NewRegisteredTimer("chain/snapshot/commits", nil)
+	pipeSnapshotCommitTimer = metrics.NewRegisteredTimer("chain/pipesnapshot/commits", nil)
+	triedbCommitTimer       = metrics.NewRegisteredTimer("chain/triedb/commits", nil)
 
 	blockInsertTimer          = metrics.NewRegisteredTimer("chain/inserts", nil)
 	blockValidationTimer      = metrics.NewRegisteredTimer("chain/validation", nil)
 	blockCrossValidationTimer = metrics.NewRegisteredTimer("chain/crossvalidation", nil)
 	blockExecutionTimer       = metrics.NewRegisteredTimer("chain/execution", nil)
 	blockWriteTimer           = metrics.NewRegisteredTimer("chain/write", nil)
-
-	blockReorgMeter     = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
-	blockReorgAddMeter  = metrics.NewRegisteredMeter("chain/reorg/add", nil)
-	blockReorgDropMeter = metrics.NewRegisteredMeter("chain/reorg/drop", nil)
+	verifyTaskBlockTimer      = metrics.NewRegisteredTimer("chain/verify", nil)
+	blockReorgMeter           = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
+	blockReorgAddMeter        = metrics.NewRegisteredMeter("chain/reorg/add", nil)
+	blockReorgDropMeter       = metrics.NewRegisteredMeter("chain/reorg/drop", nil)
+	blockWriteTotalTimer      = metrics.NewRegisteredTimer("chain/writetotal", nil)
 
 	blockRecvTimeDiffGauge = metrics.NewRegisteredGauge("chain/block/recvtimediff", nil)
 
@@ -228,6 +230,17 @@ type txLookup struct {
 	transaction *types.Transaction
 }
 
+type VerifyTask struct {
+	block         *types.Block
+	state         *state.StateDB
+	processResult *ProcessResult
+	setHead       bool
+	err           error
+	done          bool
+	doneCh        chan struct{}
+	index         int
+}
+
 // BlockChain represents the canonical chain given a database with a genesis
 // block. The Blockchain manages chain imports, reverts, chain reorganisations.
 //
@@ -256,6 +269,7 @@ type BlockChain struct {
 	statedb       *state.CachingDB                 // State database to reuse between imports (contains state cache)
 	triesInMemory uint64
 	txIndexer     *txIndexer // Transaction indexer, might be nil if not enabled
+	pipeline      bool
 
 	hc                       *HeaderChain
 	rmLogsFeed               event.Feed
@@ -315,6 +329,12 @@ type BlockChain struct {
 	// monitor
 	doubleSignMonitor *monitor.DoubleSignMonitor
 	logger            *tracing.Hooks
+
+	verifyTaskCh      chan *VerifyTask
+	skipNextTask      bool
+	verifyHeaderCache *lru.Cache[common.Hash, *types.Header]
+	verifyTdCache     *lru.Cache[common.Hash, *big.Int] // most recent total difficulties
+	verifyNumberCache *lru.Cache[common.Hash, uint64]   // most recent block numbers
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -379,6 +399,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		diffQueue:          prque.New[int64, *types.DiffLayer](nil),
 		diffQueueBuffer:    make(chan *types.DiffLayer),
 		logger:             vmConfig.Tracer,
+		verifyTaskCh:       make(chan *VerifyTask, 32),
 	}
 	var err error
 	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
@@ -578,6 +599,15 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	// Start tx indexer if it's enabled.
 	if txLookupLimit != nil {
 		bc.txIndexer = newTxIndexer(*txLookupLimit, bc)
+	}
+	if bc.pipeline {
+		log.Info("blockchain start with pipeline mode")
+		bc.hc.SetVerifyCache()
+		bc.statedb.SetPipelineFlag()
+		bc.verifyHeaderCache = lru.NewCache[common.Hash, *types.Header](512)
+		bc.verifyTdCache = lru.NewCache[common.Hash, *big.Int](512)
+		bc.verifyNumberCache = lru.NewCache[common.Hash, uint64](512)
+		go bc.VerifyLoop()
 	}
 	return bc, nil
 }
@@ -1345,6 +1375,21 @@ func (bc *BlockChain) stopWithoutSaving() {
 func (bc *BlockChain) Stop() {
 	bc.stopWithoutSaving()
 
+	// Waiting the background state verification and commit work done
+	if bc.pipeline {
+		sentNilTask := false
+		for {
+			if !sentNilTask {
+				bc.verifyTaskCh <- nil
+				sentNilTask = true
+			}
+			if bc.verifyTaskCh == nil {
+				break
+			} else {
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+	}
 	// Ensure that the entirety of the state snapshot is journaled to disk.
 	var snapBase common.Hash
 	if bc.snaps != nil {
@@ -1797,7 +1842,6 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	if err != nil {
 		return err
 	}
-
 	// Ensure no empty block body
 	if diffLayer != nil && block.Header().TxHash != types.EmptyRootHash {
 		// Filling necessary field
@@ -2041,6 +2085,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 	)
 	// Fire a single chain head event if we've progressed the chain
 	defer func() {
+		if bc.pipeline {
+			lastCanon = nil
+		}
 		if lastCanon != nil && bc.CurrentBlock().Hash() == lastCanon.Hash() {
 			bc.chainHeadFeed.Send(ChainHeadEvent{Header: lastCanon.Header()})
 			if posa, ok := bc.Engine().(consensus.PoSA); ok {
@@ -2161,6 +2208,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 	// Track the singleton witness from this chain insertion (if any)
 	var witness *stateless.Witness
 
+	verifyTasks := make([]*VerifyTask, 0)
+	var retErr error
 	for ; block != nil && err == nil || errors.Is(err, ErrKnownBlock); block, err = it.next() {
 		// If the chain is terminating, stop processing blocks
 		if bc.insertStopped() {
@@ -2197,7 +2246,12 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 					"hash", block.Hash(), "number", block.NumberU64())
 			}
 			if err := bc.writeKnownBlock(block); err != nil {
-				return nil, it.index, err
+				if bc.pipeline {
+					retErr = err
+					break
+				} else {
+					return nil, it.index, err
+				}
 			}
 			stats.processed++
 			if bc.logger != nil && bc.logger.OnSkippedBlock != nil {
@@ -2214,18 +2268,27 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 			continue
 		}
 		// Retrieve the parent block and it's state to execute on top
-		start := time.Now()
+		// start := time.Now()
 		parent := it.previous()
 		if parent == nil {
 			parent = bc.GetHeader(block.ParentHash(), block.NumberU64()-1)
 		}
 
+		start := time.Now()
 		statedb, err := state.NewWithSharedPool(parent.Root, bc.statedb)
 		if err != nil {
-			return nil, it.index, err
+			if bc.pipeline {
+				retErr = err
+				break
+			} else {
+				return nil, it.index, err
+			}
 		}
 		bc.updateHighestVerifiedHeader(block.Header())
 
+		if bc.pipeline {
+			statedb.EnablePipeline()
+		}
 		// If we are past Byzantium, enable prefetching to pull in trie node paths
 		// while processing transactions. Before Byzantium the prefetcher is mostly
 		// useless due to the intermediate root hashing after each transaction.
@@ -2256,60 +2319,74 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 			// 2.do trie prefetch for MPT trie node cache
 			// it is for the big state trie tree, prefetch based on transaction's From/To address.
 			// trie prefetcher is thread safe now, ok to prefetch in a separate routine
-			go throwaway.TriePrefetchInAdvance(block, signer)
+			if !statedb.IsPipeLineMode() {
+				go throwaway.TriePrefetchInAdvance(block, signer)
+			}
 		}
 
 		// The traced section of block import.
-		res, err := bc.processBlock(block, statedb, start, setHead, interruptCh)
-		if err != nil {
-			return nil, it.index, err
+		if bc.pipeline {
+			res, err := bc.processPipeLineBlock(block, statedb, &verifyTasks, start, it.index, setHead, interruptCh)
+			if err != nil {
+				retErr = err
+				break
+			}
+			// Report the import stats before returning the various results
+			stats.processed++
+			stats.usedGas += res.usedGas
+			stats.report(chain, it.index, 0, 0, 0, 0, 0, true)
+		} else {
+			res, err := bc.processBlock(block, statedb, start, setHead, interruptCh)
+			if err != nil {
+				return nil, it.index, err
+			}
+
+			// Report the import stats before returning the various results
+			stats.processed++
+			stats.usedGas += res.usedGas
+
+			var snapDiffItems, snapBufItems common.StorageSize
+			if bc.snaps != nil {
+				snapDiffItems, snapBufItems, _ = bc.snaps.Size()
+			}
+			trieDiffNodes, trieBufNodes, trieImmutableBufNodes, _ := bc.triedb.Size()
+			stats.report(chain, it.index, snapDiffItems, snapBufItems, trieDiffNodes, trieBufNodes, trieImmutableBufNodes, res.status == CanonStatTy)
+
+			if !setHead {
+				// After merge we expect few side chains. Simply count
+				// all blocks the CL gives us for GC processing time
+				bc.gcproc += res.procTime
+				return witness, it.index, nil // Direct block insertion of a single block
+			}
+			switch res.status {
+			case CanonStatTy:
+				log.Debug("Inserted new block", "number", block.Number(), "hash", block.Hash(),
+					"uncles", len(block.Uncles()), "txs", len(block.Transactions()), "gas", block.GasUsed(),
+					"elapsed", common.PrettyDuration(time.Since(start)),
+					"root", block.Root())
+
+				lastCanon = block
+
+				// Only count canonical blocks for GC processing time
+				bc.gcproc += res.procTime
+
+			case SideStatTy:
+				log.Debug("Inserted forked block", "number", block.Number(), "hash", block.Hash(),
+					"diff", block.Difficulty(), "elapsed", common.PrettyDuration(time.Since(start)),
+					"txs", len(block.Transactions()), "gas", block.GasUsed(), "uncles", len(block.Uncles()),
+					"root", block.Root())
+
+			default:
+				// This in theory is impossible, but lets be nice to our future selves and leave
+				// a log, instead of trying to track down blocks imports that don't emit logs.
+				log.Warn("Inserted block with unknown status", "number", block.Number(), "hash", block.Hash(),
+					"diff", block.Difficulty(), "elapsed", common.PrettyDuration(time.Since(start)),
+					"txs", len(block.Transactions()), "gas", block.GasUsed(), "uncles", len(block.Uncles()),
+					"root", block.Root())
+			}
+			bc.chainBlockFeed.Send(ChainHeadEvent{block.Header()})
 		}
-		// Report the import stats before returning the various results
-		stats.processed++
-		stats.usedGas += res.usedGas
-
-		var snapDiffItems, snapBufItems common.StorageSize
-		if bc.snaps != nil {
-			snapDiffItems, snapBufItems, _ = bc.snaps.Size()
-		}
-		trieDiffNodes, trieBufNodes, trieImmutableBufNodes, _ := bc.triedb.Size()
-		stats.report(chain, it.index, snapDiffItems, snapBufItems, trieDiffNodes, trieBufNodes, trieImmutableBufNodes, res.status == CanonStatTy)
-
-		if !setHead {
-			// After merge we expect few side chains. Simply count
-			// all blocks the CL gives us for GC processing time
-			bc.gcproc += res.procTime
-			return witness, it.index, nil // Direct block insertion of a single block
-		}
-		switch res.status {
-		case CanonStatTy:
-			log.Debug("Inserted new block", "number", block.Number(), "hash", block.Hash(),
-				"uncles", len(block.Uncles()), "txs", len(block.Transactions()), "gas", block.GasUsed(),
-				"elapsed", common.PrettyDuration(time.Since(start)),
-				"root", block.Root())
-
-			lastCanon = block
-
-			// Only count canonical blocks for GC processing time
-			bc.gcproc += res.procTime
-
-		case SideStatTy:
-			log.Debug("Inserted forked block", "number", block.Number(), "hash", block.Hash(),
-				"diff", block.Difficulty(), "elapsed", common.PrettyDuration(time.Since(start)),
-				"txs", len(block.Transactions()), "gas", block.GasUsed(), "uncles", len(block.Uncles()),
-				"root", block.Root())
-
-		default:
-			// This in theory is impossible, but lets be nice to our future selves and leave
-			// a log, instead of trying to track down blocks imports that don't emit logs.
-			log.Warn("Inserted block with unknown status", "number", block.Number(), "hash", block.Hash(),
-				"diff", block.Difficulty(), "elapsed", common.PrettyDuration(time.Since(start)),
-				"txs", len(block.Transactions()), "gas", block.GasUsed(), "uncles", len(block.Uncles()),
-				"root", block.Root())
-		}
-		bc.chainBlockFeed.Send(ChainHeadEvent{block.Header()})
 	}
-
 	// Any blocks remaining here? The only ones we care about are the future ones
 	if block != nil && errors.Is(err, consensus.ErrFutureBlock) {
 		if err := bc.addFutureBlock(block); err != nil {
@@ -2322,6 +2399,46 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 				return nil, it.index, err
 			}
 			stats.queued++
+		}
+	}
+
+	if bc.pipeline {
+		var errTask *VerifyTask
+		var firstErrIndex int
+		var isFirst bool
+		for _, task := range verifyTasks {
+			if !task.done {
+				<-task.doneCh
+			}
+			if task.err != nil {
+				if !isFirst {
+					isFirst = true
+					firstErrIndex = task.index
+					errTask = task
+					log.Error("Task failed during verification", "block", task.block.Number(), "hash", task.block.Hash())
+					bc.reportBlock(task.block, nil, task.err)
+				}
+				// Remove from cache
+				bc.RemoveFailedVerifyCache(task.block.Hash())
+				// Set snap diff to stale
+				task.state.SetStaleForUnverifiedDiff()
+			}
+		}
+
+		// Reset for next batch
+		bc.skipNextTask = false
+
+		if retErr != nil && errTask == nil {
+			return witness, it.index, retErr
+		}
+		if retErr == nil && errTask != nil {
+			return witness, firstErrIndex, errTask.err
+		} else if retErr != nil && errTask != nil {
+			if firstErrIndex > it.index {
+				return witness, it.index, retErr
+			} else {
+				return witness, firstErrIndex, errTask.err
+			}
 		}
 	}
 	stats.ignored += it.remaining()
@@ -2337,6 +2454,97 @@ func (bc *BlockChain) updateHighestVerifiedHeader(header *types.Header) {
 	if err == nil && reorg {
 		bc.highestVerifiedHeader.Store(types.CopyHeader(header))
 		log.Trace("updateHighestVerifiedHeader", "number", header.Number.Uint64(), "hash", header.Hash())
+	}
+}
+
+func (bc *BlockChain) VerifyLoop() {
+	for {
+		select {
+		// case <-bc.quit:
+		//	return
+		case task := <-bc.verifyTaskCh:
+			if task == nil {
+				bc.verifyTaskCh = nil
+				log.Info("Verify task done")
+				return
+			}
+
+			//	log.Info("verify task begin", "height", task.block.NumberU64())
+			if !bc.skipNextTask {
+				vstart := time.Now()
+				var err error
+				if err = bc.validator.ValidateState(task.block, task.state, task.processResult, false); err != nil {
+					log.Error("validate state failed", "error", err)
+					task.err = err
+				}
+				blockValidationTimer.UpdateSince(vstart)
+
+				if err == nil {
+					statedb := task.state
+					block := task.block
+					// If witnesses was generated and stateless self-validation requested, do
+					// that now. Self validation should *never* run in production, it's more of
+					// a tight integration to enable running *all* consensus tests through the
+					// witness builder/runner, which would otherwise be impossible due to the
+					// various invalid chain states/behaviors being contained in those tests.
+					if witness := statedb.Witness(); witness != nil && bc.vmConfig.StatelessSelfValidation {
+						log.Warn("Running stateless self-validation", "block", block.Number(), "hash", block.Hash())
+
+						// Remove critical computed fields from the block to force true recalculation
+						context := block.Header()
+						context.Root = common.Hash{}
+						context.ReceiptHash = common.Hash{}
+
+						witnessTask := types.NewBlockWithHeader(context).WithBody(*block.Body())
+
+						// Run the stateless self-cross-validation
+						crossStateRoot, crossReceiptRoot, err := ExecuteStateless(bc.chainConfig, bc.vmConfig, witnessTask, witness)
+						if err != nil {
+							log.Error("stateless ExecuteS error", "error", err)
+							task.err = fmt.Errorf("stateless self-validation failed: %v", err)
+						}
+						if crossStateRoot != block.Root() {
+							log.Error("stateless excutue cross state root err ")
+							task.err = fmt.Errorf("stateless self-validation root mismatch (cross: %x local: %x)", crossStateRoot, block.Root())
+						}
+						if crossReceiptRoot != block.ReceiptHash() {
+							log.Error("stateless excutue cross receipt root err ")
+							task.err = fmt.Errorf("stateless self-validation receipt root mismatch (cross: %x local: %x)", crossReceiptRoot, block.ReceiptHash())
+						}
+					}
+				}
+
+				wstart := time.Now()
+				if err == nil {
+					if !task.setHead {
+						// Don't set the head, only insert the block
+						err = bc.writeBlockWithState(task.block, task.processResult.Receipts, task.state)
+					} else {
+						_, err = bc.writeBlockAndSetHead(task.block, task.processResult.Receipts, task.processResult.Logs,
+							task.state, false)
+					}
+					if err != nil {
+						log.Info("verify task commit fail", "err", err.Error())
+						task.err = err
+					}
+				}
+				// Skip the rest of blocks' validation and commit if error hit
+				if task.err != nil {
+					bc.skipNextTask = true
+					log.Info("verify task fail", "height", task.block.NumberU64(), "err", task.err.Error())
+				}
+				task.done = true
+				close(task.doneCh)
+
+				blockWriteTotalTimer.UpdateSince(wstart)
+				triedbCommitTimer.Update(task.state.TrieDBCommits)
+				snapshotCommitTimer.Update(task.state.SnapshotCommits)
+			} else {
+				task.done = true
+				task.err = errors.New("Task is not executed")
+				close(task.doneCh)
+			}
+		}
 	}
 }
 
@@ -2468,6 +2676,60 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 	blockInsertTimer.UpdateSince(start)
 
 	return &blockProcessingResult{usedGas: res.GasUsed, procTime: proctime, status: status}, nil
+}
+
+// processPipeLineBlock executes and validates the given block. If there was no error
+// it writes the block and associated state to database.
+func (bc *BlockChain) processPipeLineBlock(block *types.Block, statedb *state.StateDB, tasks *[]*VerifyTask, start time.Time, index int, setHead bool, interruptCh chan struct{}) (_ *blockProcessingResult, blockEndErr error) {
+	statedb.SetExpectedStateRoot(block.Root())
+
+	if bc.logger != nil && bc.logger.OnBlockStart != nil {
+		td := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
+		bc.logger.OnBlockStart(tracing.BlockEvent{
+			Block:     block,
+			TD:        td,
+			Finalized: bc.CurrentFinalBlock(),
+			Safe:      bc.CurrentSafeBlock(),
+		})
+	}
+	if bc.logger != nil && bc.logger.OnBlockEnd != nil {
+		defer func() {
+			bc.logger.OnBlockEnd(blockEndErr)
+		}()
+	}
+
+	// Process block using the parent state as reference point
+	pstart := time.Now()
+	res, err := bc.processor.Process(block, statedb, bc.vmConfig)
+	close(interruptCh) // state prefetch can be stopped
+	if err != nil {
+		bc.reportBlock(block, res, err)
+		statedb.StopPrefetcher()
+		return nil, err
+	}
+	statedb.CommitUnVerifiedSnapDifflayer(bc.chainConfig.IsEIP158(block.Number()))
+	pipeSnapshotCommitTimer.Update(statedb.PipeSnapshotCommits)
+	// Add to cache
+	bc.UpdateVerifyCache(block)
+	bc.hc.UpdateVerifyCache(block)
+	blockExecutionTimer.Update(time.Since(pstart))
+
+	vstart := time.Now()
+	task := &VerifyTask{
+		block:         block,
+		state:         statedb,
+		processResult: res,
+		setHead:       setHead,
+		doneCh:        make(chan struct{}),
+		index:         index,
+	}
+
+	*tasks = append(*tasks, task)
+	bc.verifyTaskCh <- task
+	verifyTaskBlockTimer.UpdateSince(vstart)
+	blockInsertTimer.UpdateSince(start)
+
+	return &blockProcessingResult{usedGas: res.GasUsed}, nil
 }
 
 // insertSideChain is called when an import batch hits upon a pruned ancestor
@@ -3311,4 +3573,32 @@ func (bc *BlockChain) SetTrieFlushInterval(interval time.Duration) {
 // GetTrieFlushInterval gets the in-memory tries flushAlloc interval
 func (bc *BlockChain) GetTrieFlushInterval() time.Duration {
 	return time.Duration(bc.flushInterval.Load())
+}
+
+// UpdateVerifyCache the block cache for pipeline
+func (bc *BlockChain) UpdateVerifyCache(block *types.Block) {
+	// Add to cache
+	bc.blockCache.Add(block.Hash(), block)
+	bc.verifyHeaderCache.Add(block.Hash(), block.Header())
+	bc.verifyNumberCache.Add(block.Hash(), block.NumberU64())
+
+	ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
+	// Make sure no inconsistent state is leaked during insertion
+	externTd := new(big.Int).Add(block.Difficulty(), ptd)
+
+	bc.verifyTdCache.Add(block.Hash(), externTd)
+}
+
+func (bc *BlockChain) RemoveFailedVerifyCache(hash common.Hash) {
+	// Remove from cache
+	bc.blockCache.Remove(hash)
+	bc.verifyHeaderCache.Remove(hash)
+	bc.verifyNumberCache.Remove(hash)
+	bc.verifyTdCache.Remove(hash)
+}
+
+// EnablePipelineMode EnablePipeline enable the pipeline feature
+func EnablePipelineMode(bc *BlockChain) (*BlockChain, error) {
+	bc.pipeline = true
+	return bc, nil
 }

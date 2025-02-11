@@ -38,7 +38,7 @@ type ExecutionResult struct {
 	UsedGas     uint64 // Total used gas, not including the refunded gas
 	RefundedGas uint64 // Total gas refunded after execution
 	Err         error  // Any error encountered during the execution(listed in core/vm/errors.go)
-	ReturnData  []byte // Returned data from evm(function result or data supplied with revert opcode)
+	ReturnData  []byte // Returned data from evm(function processResult or data supplied with revert opcode)
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -214,7 +214,7 @@ func ApplyMessage(evm *vm.EVM, msg *Message, gp *GasPool) (*ExecutionResult, err
 // == If contract creation ==
 //
 //	4a. Attempt to run transaction data
-//	4b. If valid, use result as code for the new state object
+//	4b. If valid, use processResult as code for the new state object
 //
 // == end ==
 //
@@ -386,7 +386,7 @@ func (st *stateTransition) preCheck() error {
 }
 
 // execute will transition the state by applying the current message and
-// returning the evm execution result with following fields.
+// returning the evm execution processResult with following fields.
 //
 //   - used gas: total gas used (including gas being refunded)
 //   - returndata: the returned data from evm
@@ -394,7 +394,7 @@ func (st *stateTransition) preCheck() error {
 //     ErrOutOfGas, ErrExecutionReverted
 //
 // However if any consensus issue encountered, return the error directly with
-// nil evm execution result.
+// nil evm execution processResult.
 func (st *stateTransition) execute() (*ExecutionResult, error) {
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses

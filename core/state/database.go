@@ -65,6 +65,11 @@ type Database interface {
 
 	// Snapshot returns the underlying state snapshot.
 	Snapshot() *snapshot.Tree
+
+	// IsPipelineMode return whether the db is using pipeline
+	IsPipelineMode() bool
+
+	SetCodeCache(codeHash common.Hash, code []byte)
 }
 
 // Trie is a Ethereum Merkle Patricia trie.
@@ -151,6 +156,7 @@ type CachingDB struct {
 	disk          ethdb.KeyValueStore
 	triedb        *triedb.Database
 	noTries       bool
+	pipeline      bool
 	snap          *snapshot.Tree
 	codeCache     *lru.SizeConstrainedCache[common.Hash, []byte]
 	codeSizeCache *lru.Cache[common.Hash, int]
@@ -200,7 +206,7 @@ func (db *CachingDB) Reader(stateRoot common.Hash) (Reader, error) {
 			readers = append(readers, newFlatReader(reader)) // state reader is optional
 		}
 	}
-	if !db.NoTries() {
+	if !db.NoTries() && !db.IsPipelineMode() {
 		// Set up the trie reader, which is expected to always be available
 		// as the gatekeeper unless the state is corrupted.
 		tr, err := newTrieReader(stateRoot, db.triedb, db.pointCache)
@@ -286,6 +292,14 @@ func (db *CachingDB) Snapshot() *snapshot.Tree {
 	return db.snap
 }
 
+func (db *CachingDB) SetPipelineFlag() {
+	db.pipeline = true
+}
+
+func (db *CachingDB) IsPipelineMode() bool {
+	return db.pipeline
+}
+
 // mustCopyTrie returns a deep-copied trie.
 func mustCopyTrie(t Trie) Trie {
 	if t == nil {
@@ -300,5 +314,13 @@ func mustCopyTrie(t Trie) Trie {
 		return t.Copy()
 	default:
 		panic(fmt.Errorf("unknown trie type %T", t))
+	}
+}
+
+// SetCodeCache
+func (db *CachingDB) SetCodeCache(codeHash common.Hash, code []byte) {
+	if len(code) > 0 {
+		db.codeCache.Add(codeHash, code)
+		db.codeSizeCache.Add(codeHash, len(code))
 	}
 }

@@ -88,10 +88,12 @@ type StateDB struct {
 	noTrie         bool
 	reader         Reader
 
+	addressToPrefetch []common.Address
 	// originalRoot is the pre-state root, before any changes were made.
 	// It will be updated when the Commit is called.
 	originalRoot common.Hash
 	expectedRoot common.Hash // The state root in the block header
+	pipeline     bool
 
 	fullProcessed bool
 
@@ -110,7 +112,17 @@ type StateDB struct {
 	// transition. Uncommitted mutations belonging to the same account
 	// can be merged into a single one which is equivalent from database's
 	// perspective. This map is populated at the transaction boundaries.
-	mutations map[common.Address]*mutation
+	mutations   map[common.Address]*mutation
+	r_destructs map[common.Hash]struct{}
+	r_accounts  map[common.Hash][]byte
+	r_storages  map[common.Hash]map[common.Hash][]byte
+
+	// This map holds 'live' objects, which will get modified while processing
+	// a state transition.
+	//	stateObjects         map[common.Address]*stateObject
+	//	stateObjectsPending  map[common.Address]struct{}            // State objects finalized but not yet written to the trie
+	//	stateObjectsDirty    map[common.Address]struct{}            // State objects modified in the current execution
+	//	stateObjectsDestruct map[common.Address]*types.StateAccount // State objects destructed in the block along with its previous value
 
 	storagePool          *StoragePool // sharedPool to store L1 originStorage of stateObjects
 	writeOnSharedStorage bool         // Write to the shared origin storage of a stateObject while reading from the underlying storage layer.
@@ -151,16 +163,17 @@ type StateDB struct {
 
 	// Measurements gathered during execution for debugging purposes
 	// MetricsMux should be used in more places, but will affect on performance, so following meteration is not accruate
-	MetricsMux      sync.Mutex
-	AccountReads    time.Duration
-	AccountHashes   time.Duration
-	AccountUpdates  time.Duration
-	AccountCommits  time.Duration
-	StorageReads    time.Duration
-	StorageUpdates  time.Duration
-	StorageCommits  time.Duration
-	SnapshotCommits time.Duration
-	TrieDBCommits   time.Duration
+	MetricsMux          sync.Mutex
+	AccountReads        time.Duration
+	AccountHashes       time.Duration
+	AccountUpdates      time.Duration
+	AccountCommits      time.Duration
+	StorageReads        time.Duration
+	StorageUpdates      time.Duration
+	StorageCommits      time.Duration
+	SnapshotCommits     time.Duration
+	TrieDBCommits       time.Duration
+	PipeSnapshotCommits time.Duration
 
 	AccountLoaded  int          // Number of accounts retrieved from the database during the state transition
 	AccountUpdated int          // Number of accounts updated during the state transition
@@ -168,6 +181,7 @@ type StateDB struct {
 	StorageLoaded  int          // Number of storage slots retrieved from the database during the state transition
 	StorageUpdated atomic.Int64 // Number of storage slots updated during the state transition
 	StorageDeleted atomic.Int64 // Number of storage slots deleted during the state transition
+	TriePrefetch   bool
 }
 
 // NewWithSharedPool creates a new state with sharedStorge on layer 1.5
@@ -182,11 +196,19 @@ func NewWithSharedPool(root common.Hash, db Database) (*StateDB, error) {
 
 // New creates a new state from a given trie.
 func New(root common.Hash, db Database) (*StateDB, error) {
-	tr, err := db.OpenTrie(root)
-	if err != nil {
-		return nil, err
+	var tr Trie
+	var noTrie bool
+	var err error
+	if !db.IsPipelineMode() {
+		tr, err = db.OpenTrie(root)
+		if err != nil {
+			return nil, err
+		}
+		_, noTrie = tr.(*trie.EmptyTrie)
+	} else {
+		tr = nil
+		noTrie = false
 	}
-	_, noTrie := tr.(*trie.EmptyTrie)
 	reader, err := db.Reader(root)
 	if err != nil {
 		return nil, err
@@ -205,6 +227,7 @@ func New(root common.Hash, db Database) (*StateDB, error) {
 		journal:              newJournal(),
 		accessList:           newAccessList(),
 		transientStorage:     newTransientStorage(),
+		addressToPrefetch:    make([]common.Address, 0),
 	}
 	if db.TrieDB().IsVerkle() {
 		sdb.accessEvents = NewAccessEvents(db.PointCache())
@@ -259,8 +282,10 @@ func (s *StateDB) StartPrefetcher(namespace string, witness *stateless.Witness) 
 	// the prefetcher is constructed. For more details, see:
 	// https://github.com/ethereum/go-ethereum/issues/29880
 	s.prefetcher = newTriePrefetcher(s.db, s.originalRoot, namespace, witness == nil)
-	if err := s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, nil, nil, false); err != nil {
-		log.Error("Failed to prefetch account trie", "root", s.originalRoot, "err", err)
+	if !s.IsPipeLineMode() {
+		if err := s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, nil, nil, false); err != nil {
+			log.Error("Failed to prefetch account trie", "root", s.originalRoot, "err", err)
+		}
 	}
 }
 
@@ -305,6 +330,18 @@ func (s *StateDB) TriePrefetchInAdvance(block *types.Block, signer types.Signer)
 	if len(addressesToPrefetch) > 0 {
 		prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, addressesToPrefetch, nil, false)
 	}
+}
+
+// Enable the pipeline function of statedb
+func (s *StateDB) EnablePipeline() {
+	if s.GetSnap() != nil && s.db.Snapshot().Layers() > 0 {
+		s.pipeline = true
+	}
+}
+
+// IsPipeCommit checks whether pipecommit is enabled on the statedb or not
+func (s *StateDB) IsPipeLineMode() bool {
+	return s.pipeline
 }
 
 // Mark that the block is processed by diff layer
@@ -549,7 +586,9 @@ func (s *StateDB) SetNonce(addr common.Address, nonce uint64) {
 func (s *StateDB) SetCode(addr common.Address, code []byte) (prev []byte) {
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
-		return stateObject.SetCode(crypto.Keccak256Hash(code), code)
+		codeHash := crypto.Keccak256Hash(code)
+		s.db.SetCodeCache(codeHash, code)
+		return stateObject.SetCode(codeHash, code)
 	}
 	return nil
 }
@@ -710,7 +749,7 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 		return nil
 	}
 	// Schedule the resolved account for prefetching if it's enabled.
-	if s.prefetcher != nil {
+	if s.prefetcher != nil && !s.IsPipeLineMode() {
 		if err = s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, []common.Address{addr}, nil, true); err != nil {
 			log.Error("Failed to prefetch account", "addr", addr, "err", err)
 		}
@@ -871,7 +910,14 @@ func (s *StateDB) GetRefund() uint64 {
 // the journal as well as the refunds. Finalise, however, will not push any updates
 // into the tries just yet. Only IntermediateRoot or Commit will do that.
 func (s *StateDB) Finalise(deleteEmptyObjects bool) {
-	addressesToPrefetch := make([]common.Address, 0, len(s.journal.dirties))
+	var addressesToPrefetch []common.Address
+	if s.IsPipeLineMode() {
+		if s.addressToPrefetch == nil {
+			s.addressToPrefetch = make([]common.Address, 0, len(s.journal.dirties))
+		}
+	} else {
+		addressesToPrefetch = make([]common.Address, 0, len(s.journal.dirties))
+	}
 	for addr := range s.journal.dirties {
 		obj, exist := s.stateObjects[addr]
 		if !exist {
@@ -899,24 +945,72 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 		// At this point, also ship the address off to the precacher. The precacher
 		// will start loading tries, and when the change is eventually committed,
 		// the commit-phase will be a lot faster
-		addressesToPrefetch = append(addressesToPrefetch, addr) // Copy needed for closure
+		if s.IsPipeLineMode() {
+			s.addressToPrefetch = append(s.addressToPrefetch, addr) // Copy needed for closure
+		} else {
+			addressesToPrefetch = append(addressesToPrefetch, addr) // Copy needed for closure
+		}
 	}
-	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
+	if !s.IsPipeLineMode() && s.prefetcher != nil && len(addressesToPrefetch) > 0 {
 		if err := s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, addressesToPrefetch, nil, false); err != nil {
 			log.Error("Failed to prefetch addresses", "addresses", len(addressesToPrefetch), "err", err)
 		}
 	}
+
+	if s.TriePrefetch && s.IsPipeLineMode() && s.prefetcher != nil && len(s.addressToPrefetch) > 0 {
+		s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, s.addressToPrefetch, nil, false)
+	}
+
 	// Invalidate journal because reverting across transactions is not allowed.
 	s.clearJournalAndRefund()
+}
+
+func (s *StateDB) GetLatestVerifiedStateRoot(addrHash common.Hash) common.Hash {
+	if s.db.Snapshot() != nil {
+		//	s.snap = s.snaps.Snapshot(s.originalRoot)
+		if !s.GetSnap().Verified() {
+			panic("Layer of the snap is not verified")
+		}
+		acc, err := s.GetSnap().Account(addrHash)
+		if err == nil {
+			if acc == nil {
+				return types.EmptyRootHash
+			}
+			data := &types.StateAccount{
+				Nonce:    acc.Nonce,
+				Balance:  acc.Balance,
+				CodeHash: acc.CodeHash,
+				Root:     common.BytesToHash(acc.Root),
+			}
+			if data.Root == (common.Hash{}) {
+				data.Root = types.EmptyRootHash
+			}
+			return data.Root
+		}
+	}
+	return types.EmptyRootHash
 }
 
 // IntermediateRoot computes the current root hash of the state trie.
 // It is called in between transactions to get the root hash that
 // goes into transaction receipts.
 func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
+	if s.IsPipeLineMode() {
+		s.TriePrefetch = true
+	}
 	// Finalise all the dirty storage states and write them into the tries
 	s.Finalise(deleteEmptyObjects)
 
+	if s.IsPipeLineMode() {
+		if s.trie == nil {
+			tr, err := s.db.OpenTrie(s.originalRoot)
+			if err != nil {
+				log.Warn("Failed to open state trie", "state_root", s.originalRoot, "err", err)
+				return types.EmptyRootHash
+			}
+			s.trie = tr
+		}
+	}
 	// If there was a trie prefetcher operating, terminate it async so that the
 	// individual storage tries can be updated as soon as the disk load finishes.
 	if s.prefetcher != nil {
@@ -951,6 +1045,10 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 			if s.db.TrieDB().IsVerkle() {
 				obj.updateTrie()
 			} else {
+				// Todo check the condition to change root
+				if s.IsPipeLineMode() && !obj.selfDestructed && !obj.newContract {
+					obj.data.Root = s.GetLatestVerifiedStateRoot(obj.addrHash)
+				}
 				obj.updateRoot()
 
 				// If witness building is enabled and the state object has a trie,
@@ -1332,6 +1430,7 @@ func (s *StateDB) commit(deleteEmptyObjects bool) (*stateUpdate, error) {
 	// the same block, account deletions must be processed first. This ensures
 	// that the storage trie nodes deleted during destruction and recreated
 	// during subsequent resurrection can be combined correctly.
+	// 合约树删
 	deletes, delNodes, err := s.handleDestruction()
 	if err != nil {
 		return nil, err
@@ -1476,21 +1575,35 @@ func (s *StateDB) commitAndFlush(block uint64, deleteEmptyObjects bool) (*stateU
 	if !ret.empty() {
 		// If snapshotting is enabled, update the snapshot tree with this new version
 		if snap := s.db.Snapshot(); snap != nil && snap.Snapshot(ret.originRoot) != nil {
-			start := time.Now()
-			if err := snap.Update(ret.root, ret.originRoot, ret.accounts, ret.storages); err != nil {
-				log.Warn("Failed to update snapshot tree", "from", ret.originRoot, "to", ret.root, "err", err)
-			}
-			// Keep 128 diff layers in the memory, persistent layer is 129th.
-			// - head layer is paired with HEAD state
-			// - head-1 layer is paired with HEAD-1 state
-			// - head-127 layer(bottom-most diff layer) is paired with HEAD-127 state
-			go func() {
-				if err := snap.Cap(ret.root, snap.CapLimit()); err != nil {
-					log.Warn("Failed to cap snapshot tree", "root", ret.root, "layers", TriesInMemory, "err", err)
+			if s.IsPipeLineMode() {
+				toCorrectSnap := s.GetExpectedSnap()
+				if toCorrectSnap != nil {
+					if !toCorrectSnap.Verified() {
+						if err := toCorrectSnap.CorrectAccounts(ret.accounts); err != nil {
+							log.Crit("Failed to correct accounts for diff of block", "block=", block, "error", err)
+						}
+					}
+				} else {
+					panic(fmt.Sprintf("Not found the snap to correct, (block: %d)", block))
 				}
-			}()
-			if metrics.EnabledExpensive() {
-				s.SnapshotCommits += time.Since(start)
+			} else {
+				start := time.Now()
+				if err := snap.Update(ret.root, ret.originRoot, ret.accounts, ret.storages, false); err != nil {
+					log.Warn("Failed to update snapshot tree", "from", ret.originRoot, "to", ret.root, "err", err)
+				}
+
+				// Keep 128 diff layers in the memory, persistent layer is 129th.
+				// - head layer is paired with HEAD state
+				// - head-1 layer is paired with HEAD-1 state
+				// - head-127 layer(bottom-most diff layer) is paired with HEAD-127 state
+				go func() {
+					if err := snap.Cap(ret.root, snap.CapLimit()); err != nil {
+						log.Warn("Failed to cap snapshot tree", "root", ret.root, "layers", TriesInMemory, "err", err)
+					}
+				}()
+				if metrics.EnabledExpensive() {
+					s.SnapshotCommits += time.Since(start)
+				}
 			}
 		}
 		// If trie database is enabled, commit the state update as a new layer
@@ -1499,6 +1612,7 @@ func (s *StateDB) commitAndFlush(block uint64, deleteEmptyObjects bool) (*stateU
 			if err := db.Update(ret.root, ret.originRoot, block, ret.nodes, ret.stateSet()); err != nil {
 				return nil, err
 			}
+			// to do(pipeline correct account)
 			if metrics.EnabledExpensive() {
 				s.TrieDBCommits += time.Since(start)
 			}
@@ -1523,6 +1637,117 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, *t
 		return common.Hash{}, nil, err
 	}
 	return ret.root, ret.diffLayer, nil
+}
+
+// SetStaleForUnverifiedDiff set the unverified difflayer to stale
+func (s *StateDB) SetStaleForUnverifiedDiff() {
+	toStaleSnap := s.GetExpectedSnap()
+	if toStaleSnap != nil {
+		if !toStaleSnap.Verified() {
+			toStaleSnap.SetStale()
+		}
+	}
+}
+
+// CommitUnVerifiedSnapDifflayer apply new difflayer after block execution
+func (s *StateDB) CommitUnVerifiedSnapDifflayer(deleteEmptyObjects bool) {
+	start := time.Now()
+	s.Finalise(deleteEmptyObjects)
+
+	//	s.r_destructs = s.convertAccountSet(s.stateObjectsDestruct)
+	// s.stateObjectsDestruct
+	s.r_accounts = make(map[common.Hash][]byte)
+	s.r_storages = make(map[common.Hash]map[common.Hash][]byte)
+
+	type taskResult struct {
+		hash     common.Hash
+		data     []byte
+		storages map[common.Hash][]byte
+	}
+	tasks := make(chan func())
+	taskResults := make(chan *taskResult, len(s.mutations))
+	tasksNum := 0
+	finishCh := make(chan struct{})
+	wg := sync.WaitGroup{}
+	for i := 0; i < len(s.mutations); i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case task := <-tasks:
+					task()
+				case <-finishCh:
+					return
+				}
+			}
+		}()
+	}
+
+	for addr := range s.mutations {
+		if s.mutations[addr].isDelete() {
+			tasks <- func() {
+				// s.r_accounts[obj.addrHash] = types.SlimAccountRLP(obj.data)
+				// obj.WriteCode()
+				taskResult := &taskResult{
+					hash: common.BytesToHash(addr.Bytes()),
+					data: nil,
+				}
+				taskResults <- taskResult
+			}
+		} else {
+			obj := s.stateObjects[addr]
+			tasks <- func() {
+				// s.r_accounts[obj.addrHash] = types.SlimAccountRLP(obj.data)
+				// obj.WriteCode()
+				taskResult := &taskResult{
+					hash:     obj.addrHash,
+					data:     types.SlimAccountRLP(obj.data),
+					storages: obj.GetPendingStorages(),
+				}
+				taskResults <- taskResult
+			}
+		}
+		tasksNum++
+	}
+	for i := 0; i < tasksNum; i++ {
+		res := <-taskResults
+		s.r_accounts[res.hash] = res.data[:]
+		if res.storages != nil {
+			s.r_storages[res.hash] = res.storages
+		}
+	}
+	close(finishCh)
+
+	if s.GetSnap() != nil {
+		if parent := s.GetSnap().Root(); parent != s.expectedRoot {
+			snaps := s.db.Snapshot()
+			err := snaps.Update(s.expectedRoot, parent, s.r_accounts, s.r_storages, false)
+			if err != nil {
+				log.Warn("Failed to update snapshot tree", "from", parent, "to", s.expectedRoot, "err", err)
+			}
+			go func() {
+				if err := snaps.Cap(s.expectedRoot, snaps.CapLimit()); err != nil {
+					log.Warn("Failed to cap snapshot tree", "root", s.expectedRoot, "layers", snaps.CapLimit(), "err", err)
+				}
+			}()
+		}
+	}
+	s.PipeSnapshotCommits += time.Since(start)
+}
+
+// convertAccountSet converts a provided account set from address keyed to hash keyed.
+func (s *StateDB) convertAccountSet(set map[common.Address]*types.StateAccount) map[common.Hash]struct{} {
+	ret := make(map[common.Hash]struct{}, len(set))
+	for addr := range set {
+		obj, exist := s.stateObjects[addr]
+		if !exist {
+			ret[crypto.Keccak256Hash(addr[:])] = struct{}{}
+		} else {
+			ret[obj.addrHash] = struct{}{}
+		}
+	}
+	return ret
 }
 
 // Prepare handles the preparatory steps for executing a state transition with.
@@ -1621,6 +1846,14 @@ func (s *StateDB) GetSnap() snapshot.Snapshot {
 	snaps := s.db.Snapshot()
 	if snaps != nil {
 		return snaps.Snapshot(s.originalRoot)
+	}
+	return nil
+}
+
+func (s *StateDB) GetExpectedSnap() snapshot.Snapshot {
+	snaps := s.db.Snapshot()
+	if snaps != nil {
+		return snaps.Snapshot(s.expectedRoot)
 	}
 	return nil
 }
