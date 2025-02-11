@@ -75,7 +75,7 @@ func (b *buffer) node(owner common.Hash, path []byte) (*trienode.Node, bool) {
 func (b *buffer) commit(nodes *nodeSet, states *stateSet) trienodebuffer {
 	b.layers++
 	b.nodes.merge(nodes)
-	b.states.merge(states)
+	//b.states.merge(states)
 	return b
 }
 
