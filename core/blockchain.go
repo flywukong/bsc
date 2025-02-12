@@ -92,16 +92,18 @@ var (
 	pipeSnapshotCommitTimer = metrics.NewRegisteredTimer("chain/pipesnapshot/commits", nil)
 	triedbCommitTimer       = metrics.NewRegisteredTimer("chain/triedb/commits", nil)
 
-	blockInsertTimer          = metrics.NewRegisteredTimer("chain/inserts", nil)
-	blockValidationTimer      = metrics.NewRegisteredTimer("chain/validation", nil)
-	blockCrossValidationTimer = metrics.NewRegisteredTimer("chain/crossvalidation", nil)
-	blockExecutionTimer       = metrics.NewRegisteredTimer("chain/execution", nil)
-	blockWriteTimer           = metrics.NewRegisteredTimer("chain/write", nil)
-	verifyTaskBlockTimer      = metrics.NewRegisteredTimer("chain/verify", nil)
-	blockReorgMeter           = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
-	blockReorgAddMeter        = metrics.NewRegisteredMeter("chain/reorg/add", nil)
-	blockReorgDropMeter       = metrics.NewRegisteredMeter("chain/reorg/drop", nil)
-	blockWriteTotalTimer      = metrics.NewRegisteredTimer("chain/writetotal", nil)
+	blockInsertTimer             = metrics.NewRegisteredTimer("chain/inserts", nil)
+	blockValidationTimer         = metrics.NewRegisteredTimer("chain/validation", nil)
+	blockCrossValidationTimer    = metrics.NewRegisteredTimer("chain/crossvalidation", nil)
+	blockExecutionTimer          = metrics.NewRegisteredTimer("chain/execution", nil)
+	blockExecutionAndCommitTimer = metrics.NewRegisteredTimer("chain/pipeexecution", nil)
+	blockWaitResultTimer         = metrics.NewRegisteredTimer("chain/wait", nil)
+	blockWriteTimer              = metrics.NewRegisteredTimer("chain/write", nil)
+	verifyTaskBlockTimer         = metrics.NewRegisteredTimer("chain/verify", nil)
+	blockReorgMeter              = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
+	blockReorgAddMeter           = metrics.NewRegisteredMeter("chain/reorg/add", nil)
+	blockReorgDropMeter          = metrics.NewRegisteredMeter("chain/reorg/drop", nil)
+	blockWriteTotalTimer         = metrics.NewRegisteredTimer("chain/writetotal", nil)
 
 	blockRecvTimeDiffGauge = metrics.NewRegisteredGauge("chain/block/recvtimediff", nil)
 
@@ -2406,6 +2408,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 		var errTask *VerifyTask
 		var firstErrIndex int
 		var isFirst bool
+		vstart := time.Now()
 		for _, task := range verifyTasks {
 			if !task.done {
 				<-task.doneCh
@@ -2424,7 +2427,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 				task.state.SetStaleForUnverifiedDiff()
 			}
 		}
-
+		blockWaitResultTimer.UpdateSince(vstart)
 		// Reset for next batch
 		bc.skipNextTask = false
 
@@ -2707,12 +2710,13 @@ func (bc *BlockChain) processPipeLineBlock(block *types.Block, statedb *state.St
 		statedb.StopPrefetcher()
 		return nil, err
 	}
+	blockExecutionTimer.Update(time.Since(pstart))
 	statedb.CommitUnVerifiedSnapDifflayer(bc.chainConfig.IsEIP158(block.Number()))
 	pipeSnapshotCommitTimer.Update(statedb.PipeSnapshotCommits)
 	// Add to cache
 	bc.UpdateVerifyCache(block)
 	bc.hc.UpdateVerifyCache(block)
-	blockExecutionTimer.Update(time.Since(pstart))
+	blockExecutionAndCommitTimer.Update(time.Since(pstart))
 
 	vstart := time.Now()
 	task := &VerifyTask{
