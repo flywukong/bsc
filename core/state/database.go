@@ -26,6 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/ethereum/go-ethereum/trie/utils"
@@ -188,16 +189,22 @@ func (db *CachingDB) Reader(stateRoot common.Hash) (Reader, error) {
 	if db.snap != nil {
 		// If standalone state snapshot is available (hash scheme),
 		// then construct the legacy snap reader.
+		log.Info("construct snap reader", "root", stateRoot)
 		snap := db.snap.Snapshot(stateRoot)
 		if snap != nil {
 			readers = append(readers, newFlatReader(snap))
+		} else {
+			log.Info("construct snap reader with nil snap")
 		}
 	} else {
 		// If standalone state snapshot is not available, try to construct
 		// the state reader with database.
 		reader, err := db.triedb.StateReader(stateRoot)
 		if err == nil {
+			log.Info("construct triedb reader", "root", stateRoot)
 			readers = append(readers, newFlatReader(reader)) // state reader is optional
+		} else {
+			log.Info("construct triedb reader", "err", err.Error())
 		}
 	}
 	if !db.NoTries() {
@@ -205,7 +212,10 @@ func (db *CachingDB) Reader(stateRoot common.Hash) (Reader, error) {
 		// as the gatekeeper unless the state is corrupted.
 		tr, err := newTrieReader(stateRoot, db.triedb, db.pointCache)
 		if err != nil {
+			log.Info("construct trie reader", "err", err.Error())
 			return nil, err
+		} else {
+			log.Info("construct trie reader", "root", stateRoot)
 		}
 		readers = append(readers, tr)
 	}
