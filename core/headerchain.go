@@ -108,9 +108,9 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 }
 
 func (hc *HeaderChain) SetVerifyCache() {
-	hc.verifyHeaderCache = lru.NewCache[common.Hash, *types.Header](512)
-	hc.verifyTdCache = lru.NewCache[common.Hash, *big.Int](512)
-	hc.verifyNumberCache = lru.NewCache[common.Hash, uint64](512)
+	hc.verifyHeaderCache = lru.NewCache[common.Hash, *types.Header](1024)
+	hc.verifyTdCache = lru.NewCache[common.Hash, *big.Int](1024)
+	hc.verifyNumberCache = lru.NewCache[common.Hash, uint64](1024)
 }
 
 // GetJustifiedNumber returns the highest justified blockNumber on the branch including and before `header`.

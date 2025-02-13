@@ -606,9 +606,9 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		log.Info("blockchain start with pipeline mode")
 		bc.hc.SetVerifyCache()
 		bc.statedb.SetPipelineFlag()
-		bc.verifyHeaderCache = lru.NewCache[common.Hash, *types.Header](512)
-		bc.verifyTdCache = lru.NewCache[common.Hash, *big.Int](512)
-		bc.verifyNumberCache = lru.NewCache[common.Hash, uint64](512)
+		bc.verifyHeaderCache = lru.NewCache[common.Hash, *types.Header](1024)
+		bc.verifyTdCache = lru.NewCache[common.Hash, *big.Int](1024)
+		bc.verifyNumberCache = lru.NewCache[common.Hash, uint64](1024)
 		go bc.VerifyLoop()
 	}
 	return bc, nil
