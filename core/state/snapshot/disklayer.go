@@ -19,6 +19,7 @@ package snapshot
 import (
 	"bytes"
 	"sync"
+	"time"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
@@ -130,9 +131,12 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 		snapshotCleanAccountReadMeter.Mark(int64(len(blob)))
 		return blob, nil
 	}
+
+	start := time.Now()
 	// Cache doesn't contain account, pull from disk and cache for later
 	blob := rawdb.ReadAccountSnapshot(dl.diskdb, hash)
 	dl.cache.Set(hash[:], blob)
+	snapshotDiskAccountReadMeter.UpdateSince(start)
 
 	snapshotCleanAccountMissMeter.Mark(1)
 	if n := len(blob); n > 0 {
@@ -170,8 +174,10 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 		snapshotCleanStorageReadMeter.Mark(int64(len(blob)))
 		return blob, nil
 	}
+	start := time.Now()
 	// Cache doesn't contain storage slot, pull from disk and cache for later
 	blob := rawdb.ReadStorageSnapshot(dl.diskdb, accountHash, storageHash)
+	snapshotDiskStorageReadMeter.UpdateSince(start)
 	dl.cache.Set(key, blob)
 
 	snapshotCleanStorageMissMeter.Mark(1)
