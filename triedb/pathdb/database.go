@@ -45,14 +45,28 @@ const (
 	// Too large buffer will cause the system to pause for a long
 	// time when write happens. Also, the largest batch that pebble can
 	// support is 4GB, node will panic if batch size exceeds this limit.
-	MaxDirtyBufferSize = 256 * 1024 * 1024
+	//
+	// For high-performance hardware (16GB+ RAM), consider:
+	// - 512MB for validators with high TPS
+	// - 1024MB for archive nodes with abundant memory
+	// - 2048MB for super high-end setups (64GB+ RAM) with NVMe SSD
+	//
+	// OPTIMIZED FOR 18GB+ MEMORY ENVIRONMENTS
+	MaxDirtyBufferSize = 512 * 1024 * 1024 // 2GB for high-performance setups
 
 	// defaultDirtyBufferSize is the default memory allowance of node buffer
 	// that aggregates the writes from above until it's flushed into the
 	// disk. It's meant to be used once the initial sync is finished.
 	// Do not increase the buffer size arbitrarily, otherwise the system
 	// pause time will increase when the database writes happen.
-	defaultDirtyBufferSize = 64 * 1024 * 1024
+	//
+	// For high-performance hardware, consider:
+	// - 128MB for improved write batching
+	// - 256MB for archive nodes with SSD storage
+	// - 512MB for super high-end setups with NVMe storage
+	//
+	// OPTIMIZED FOR 18GB+ MEMORY ENVIRONMENTS
+	defaultDirtyBufferSize = 512 * 1024 * 1024 // 512MB for high-performance setups
 
 	// DefaultBackgroundFlushInterval defines the default the wait interval
 	// that background node cache flush disk.
