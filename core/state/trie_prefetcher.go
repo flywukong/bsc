@@ -26,10 +26,10 @@ import (
 )
 
 const (
-	abortChanSize                 = 64
-	concurrentChanSize            = 10
+	abortChanSize                 = 128
+	concurrentChanSize            = 20
 	parallelTriePrefetchThreshold = 10
-	parallelTriePrefetchCapacity  = 20
+	parallelTriePrefetchCapacity  = 40
 )
 
 var (
