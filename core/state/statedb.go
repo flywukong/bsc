@@ -174,16 +174,15 @@ type StateDB struct {
 
 	// Measurements gathered during execution for debugging purposes
 	// MetricsMux should be used in more places, but will affect on performance, so following meteration is not accruate
-	MetricsMux      sync.Mutex
-	AccountReads    time.Duration
-	AccountHashes   time.Duration
-	AccountUpdates  time.Duration
-	AccountCommits  time.Duration
-	StorageReads    time.Duration
-	StorageUpdates  time.Duration
-	StorageCommits  time.Duration
-	SnapshotCommits time.Duration
-	TrieDBCommits   time.Duration
+	MetricsMux     sync.Mutex
+	AccountReads   time.Duration
+	AccountHashes  time.Duration
+	AccountUpdates time.Duration
+	AccountCommits time.Duration
+	StorageReads   time.Duration
+	StorageUpdates time.Duration
+	StorageCommits time.Duration
+	TrieDBCommits  time.Duration
 
 	L1CacheAccountReads  time.Duration
 	L1CacheStorageReads  time.Duration
@@ -514,26 +513,21 @@ func (s *StateDB) GetCodeHash(addr common.Address) common.Hash {
 }
 
 func (s *StateDB) markMetrics(start time.Time, reachStorage bool) {
-	goid := cachemetrics.Goid()
-	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
-	isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(goid)
-	// record metrics of syncing main process
-	if isSyncMainProcess {
-		totalSyncIOCounter.Inc(time.Since(start).Nanoseconds())
-		l1AccountMeter.Mark(1)
-		if reachStorage {
-			l1StorageMeter.Mark(1)
-		}
-	}
-	// record metrics of mining main process
-	if isMinerMainProcess {
-		totalMinerIOCounter.Inc(time.Since(start).Nanoseconds())
-		minerL1AccountMeter.Mark(1)
-		if reachStorage {
-			minerL1StorageMeter.Mark(1)
-		}
-	}
+	return
+	/*
+			goid := cachemetrics.Goid()
+		//	start2 := time.Now()
+			isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
+			//log.Info("get goid cost time", "cost", time.Since(start2).Nanoseconds())
+			// record metrics of syncing main process
+			if isSyncMainProcess {
+				l1AccountMeter.Mark(1)
+				if reachStorage {
+					l1StorageMeter.Mark(1)
+				}
+			}
 
+	*/
 }
 
 // GetState retrieves a value from the given account's storage trie.
@@ -541,23 +535,12 @@ func (s *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
 	start := time.Now()
 	goid := cachemetrics.Goid()
 	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
-	isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(goid)
 	defer func() {
 		// record metrics of syncing main process
 		if isSyncMainProcess {
 			syncGetDelay := time.Since(start)
-			totalSyncIOCounter.Inc(time.Since(start).Nanoseconds())
 			getStatetSyncIOCost.Update(syncGetDelay)
-			getStatetSyncIOCounter.Inc(syncGetDelay.Nanoseconds())
 			l1AccountMeter.Mark(1)
-		}
-		// record metrics of mining main process
-		if isMinerMainProcess {
-			minerIOCost := time.Since(start)
-			totalMinerIOCounter.Inc(time.Since(start).Nanoseconds())
-			getStatetMinerIOCost.Update(minerIOCost)
-			getStatetMinerIOCounter.Inc(minerIOCost.Nanoseconds())
-			minerL1AccountMeter.Mark(1)
 		}
 	}()
 
@@ -566,18 +549,6 @@ func (s *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
 		if isSyncMainProcess {
 			l1StorageMeter.Mark(1)
 		}
-		if isMinerMainProcess {
-			minerL1StorageMeter.Mark(1)
-		}
-		return stateObject.GetState(s.db, hash)
-	}
-	return common.Hash{}
-}
-
-// GetState retrieves the value associated with the specific key.
-func (s *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
-	stateObject := s.getStateObject(addr)
-	if stateObject != nil {
 		return stateObject.GetState(hash)
 	}
 	return common.Hash{}
@@ -810,17 +781,9 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	defer func() {
 		routeid := cachemetrics.Goid()
 		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-		isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(routeid)
 		if isSyncMainProcess && hit {
-			cachemetrics.RecordCacheDepth("CACHE_L1_ACCOUNT")
+			syncL1HitAccountMeter.Mark(1)
 			cachemetrics.RecordCacheMetrics("CACHE_L1_ACCOUNT", start)
-			cachemetrics.RecordTotalCosts("CACHE_L1_ACCOUNT", start)
-		}
-
-		if isMinerMainProcess && hit {
-			cachemetrics.RecordMinerCacheDepth("MINER_L1_ACCOUNT")
-			cachemetrics.RecordMinerCacheMetrics("MINER_L1_ACCOUNT", start)
-			cachemetrics.RecordMinerTotalCosts("MINER_L1_ACCOUNT", start)
 		}
 	}()
 
@@ -834,14 +797,14 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	}
 	s.AccountLoaded++
 
-	start := time.Now()
+	start2 := time.Now()
 	acct, err := s.reader.Account(addr)
 	if err != nil {
 		s.setError(fmt.Errorf("getStateObject (%x) error: %w", addr.Bytes(), err))
 		return nil
 	}
 	if metrics.EnabledExpensive() {
-		s.AccountReads += time.Since(start)
+		s.AccountReads += time.Since(start2)
 	}
 
 	// Short circuit if the account is not found
@@ -1042,13 +1005,12 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 		// the commit-phase will be a lot faster
 		addressesToPrefetch = append(addressesToPrefetch, addr) // Copy needed for closure
 	}
-	start := time.Now()
+
 	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
 		if err := s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, addressesToPrefetch, nil, false); err != nil {
 			log.Error("Failed to prefetch addresses", "addresses", len(addressesToPrefetch), "err", err)
 		}
 	}
-	overheadCost = time.Since(start)
 	// Invalidate journal because reverting across transactions is not allowed.
 	s.clearJournalAndRefund()
 }
