@@ -174,16 +174,15 @@ type StateDB struct {
 
 	// Measurements gathered during execution for debugging purposes
 	// MetricsMux should be used in more places, but will affect on performance, so following meteration is not accruate
-	MetricsMux      sync.Mutex
-	AccountReads    time.Duration
-	AccountHashes   time.Duration
-	AccountUpdates  time.Duration
-	AccountCommits  time.Duration
-	StorageReads    time.Duration
-	StorageUpdates  time.Duration
-	StorageCommits  time.Duration
-	SnapshotCommits time.Duration
-	TrieDBCommits   time.Duration
+	MetricsMux     sync.Mutex
+	AccountReads   time.Duration
+	AccountHashes  time.Duration
+	AccountUpdates time.Duration
+	AccountCommits time.Duration
+	StorageReads   time.Duration
+	StorageUpdates time.Duration
+	StorageCommits time.Duration
+	TrieDBCommits  time.Duration
 
 	L1CacheAccountReads  time.Duration
 	L1CacheStorageReads  time.Duration
@@ -569,15 +568,6 @@ func (s *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
 		if isMinerMainProcess {
 			minerL1StorageMeter.Mark(1)
 		}
-		return stateObject.GetState(s.db, hash)
-	}
-	return common.Hash{}
-}
-
-// GetState retrieves the value associated with the specific key.
-func (s *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
-	stateObject := s.getStateObject(addr)
-	if stateObject != nil {
 		return stateObject.GetState(hash)
 	}
 	return common.Hash{}
@@ -834,14 +824,14 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	}
 	s.AccountLoaded++
 
-	start := time.Now()
+	start2 := time.Now()
 	acct, err := s.reader.Account(addr)
 	if err != nil {
 		s.setError(fmt.Errorf("getStateObject (%x) error: %w", addr.Bytes(), err))
 		return nil
 	}
 	if metrics.EnabledExpensive() {
-		s.AccountReads += time.Since(start)
+		s.AccountReads += time.Since(start2)
 	}
 
 	// Short circuit if the account is not found
@@ -1042,13 +1032,12 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 		// the commit-phase will be a lot faster
 		addressesToPrefetch = append(addressesToPrefetch, addr) // Copy needed for closure
 	}
-	start := time.Now()
+
 	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
 		if err := s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, addressesToPrefetch, nil, false); err != nil {
 			log.Error("Failed to prefetch addresses", "addresses", len(addressesToPrefetch), "err", err)
 		}
 	}
-	overheadCost = time.Since(start)
 	// Invalidate journal because reverting across transactions is not allowed.
 	s.clearJournalAndRefund()
 }

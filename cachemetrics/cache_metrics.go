@@ -1,8 +1,9 @@
 package cachemetrics
 
 import (
-	"github.com/ethereum/go-ethereum/metrics"
 	"time"
+
+	"github.com/ethereum/go-ethereum/metrics"
 )
 
 type cacheLayerName string
@@ -115,10 +116,10 @@ func RecordTotalCosts(metricsName cacheLayerName, start time.Time) {
 	}
 }
 
-func recordCost(timer metrics.Timer, start time.Time) {
+func recordCost(timer *metrics.Timer, start time.Time) {
 	timer.Update(time.Since(start))
 }
 
-func accumulateCost(totalcost metrics.Counter, start time.Time) {
+func accumulateCost(totalcost *metrics.Counter, start time.Time) {
 	totalcost.Inc(time.Since(start).Nanoseconds())
 }

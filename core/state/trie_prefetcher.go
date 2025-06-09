@@ -19,7 +19,6 @@ package state
 import (
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
@@ -404,9 +403,7 @@ func newSubfetcher(db Database, state common.Hash, owner common.Hash, root commo
 		copy:  make(chan chan Trie),
 		seen:  make(map[string]struct{}),
 	}
-	defer func() {
-		sf.preDataRead += time.Since(start)
-	}()
+
 	go sf.loop()
 	return sf
 }

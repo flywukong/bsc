@@ -25,8 +25,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/cachemetrics"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/metrics"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -191,16 +189,36 @@ func (s *stateObject) setOriginStorage(key common.Hash, value common.Hash) {
 // GetState retrieves a value from the committed account storage trie.
 // GetState retrieves a value associated with the given storage key.
 func (s *stateObject) GetState(key common.Hash) common.Hash {
-	value, _ := s.getState(key)
+	hitInCache := false
+	start := time.Now()
+
+	defer func() {
+		routeid := cachemetrics.Goid()
+		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+		isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(routeid)
+		if isSyncMainProcess && hitInCache {
+			cachemetrics.RecordCacheDepth("CACHE_L1_STORAGE")
+			cachemetrics.RecordCacheMetrics("CACHE_L1_STORAGE", start)
+			cachemetrics.RecordTotalCosts("CACHE_L1_STORAGE", start)
+		}
+
+		if isMinerMainProcess && hitInCache {
+			cachemetrics.RecordMinerCacheDepth("MINER_L1_STORAGE")
+			cachemetrics.RecordMinerCacheMetrics("MINER_L1_STORAGE", start)
+			cachemetrics.RecordMinerTotalCosts("MINER_L1_STORAGE", start)
+		}
+	}()
+	value, _ := s.getState(key, &hitInCache, true)
 	return value
 }
 
 // getState retrieves a value associated with the given storage key, along with
 // its original value.
-func (s *stateObject) getState(key common.Hash) (common.Hash, common.Hash) {
-	origin := s.GetCommittedState(key)
+func (s *stateObject) getState(key common.Hash, hit *bool, calledByGetState bool) (common.Hash, common.Hash) {
+	origin := s.GetCommittedState(key, hit, calledByGetState)
 	value, dirty := s.dirtyStorage[key]
 	if dirty {
+		*hit = true
 		return value, origin
 	}
 	return origin, origin
@@ -251,9 +269,9 @@ func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetS
 	}
 	s.db.StorageLoaded++
 
-	var start time.Time
+	var start2 time.Time
 	if metrics.EnabledExpensive() {
-		start = time.Now()
+		start2 = time.Now()
 	}
 	value, err := s.db.reader.Storage(s.address, key)
 	if err != nil {
@@ -261,7 +279,7 @@ func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetS
 		return common.Hash{}
 	}
 	if metrics.EnabledExpensive() {
-		s.db.StorageReads += time.Since(start)
+		s.db.StorageReads += time.Since(start2)
 	}
 
 	// Schedule the resolved storage slots for prefetching if it's enabled.
@@ -279,7 +297,8 @@ func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetS
 func (s *stateObject) SetState(key, value common.Hash) common.Hash {
 	// If the new value is the same as old, don't set. Otherwise, track only the
 	// dirty changes, supporting reverting all of it back to no change.
-	prev, origin := s.getState(key)
+	hit := false
+	prev, origin := s.getState(key, &hit, false)
 	if prev == value {
 		return prev
 	}
@@ -315,7 +334,8 @@ func (s *stateObject) finalise() {
 		} else {
 			// The slot is different from its original value and hasn't been
 			// tracked for commit yet.
-			s.uncommittedStorage[key] = s.GetCommittedState(key)
+			hit := false
+			s.uncommittedStorage[key] = s.GetCommittedState(key, &hit, false)
 			slotsToPrefetch = append(slotsToPrefetch, key) // Copy needed for closure
 		}
 		// Aggregate the dirty storage slots into the pending area. It might
@@ -331,7 +351,7 @@ func (s *stateObject) finalise() {
 			log.Error("Failed to prefetch slots", "addr", s.address, "slots", len(slotsToPrefetch), "err", err)
 		}
 	}
-	overheadCost = time.Since(start)
+
 	if len(s.dirtyStorage) > 0 {
 		s.dirtyStorage = make(Storage)
 	}
