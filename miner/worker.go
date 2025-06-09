@@ -1513,9 +1513,6 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 			log.Info("Commit new sealing work", "number", block.Number(), "sealhash", w.engine.SealHash(block.Header()),
 				"txs", env.tcount, "blobs", env.blobs, "gas", block.GasUsed(), "fees", feesInEther, "elapsed", common.PrettyDuration(time.Since(start)))
 
-			// mark mingTime as a metrics
-			totalMiningTimer.Update(time.Since(start))
-
 		case <-w.exitCh:
 			log.Info("Worker has exited")
 		}
