@@ -52,7 +52,7 @@ const (
 	// - 2048MB for super high-end setups (64GB+ RAM) with NVMe SSD
 	//
 	// OPTIMIZED FOR 18GB+ MEMORY ENVIRONMENTS
-	MaxDirtyBufferSize = 2 * 1024 * 1024 * 1024 // 2GB for high-performance setups
+	MaxDirtyBufferSize = 512 * 1024 * 1024 // 2GB for high-performance setups
 
 	// defaultDirtyBufferSize is the default memory allowance of node buffer
 	// that aggregates the writes from above until it's flushed into the
