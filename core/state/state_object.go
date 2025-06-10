@@ -36,6 +36,11 @@ import (
 	"github.com/holiman/uint256"
 )
 
+var (
+	syncL1HitAccountMeter = metrics.NewRegisteredMeter("syncinfo/account/layer1/ht", nil)
+	syncL1HitStorageMeter = metrics.NewRegisteredMeter("syncinfo/storage/layer1/miss", nil)
+)
+
 type Storage map[common.Hash]common.Hash
 
 func (s Storage) Copy() Storage {
@@ -195,17 +200,9 @@ func (s *stateObject) GetState(key common.Hash) common.Hash {
 	defer func() {
 		routeid := cachemetrics.Goid()
 		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-		isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(routeid)
 		if isSyncMainProcess && hitInCache {
-			cachemetrics.RecordCacheDepth("CACHE_L1_STORAGE")
+			syncL1HitStorageMeter.Mark(1)
 			cachemetrics.RecordCacheMetrics("CACHE_L1_STORAGE", start)
-			cachemetrics.RecordTotalCosts("CACHE_L1_STORAGE", start)
-		}
-
-		if isMinerMainProcess && hitInCache {
-			cachemetrics.RecordMinerCacheDepth("MINER_L1_STORAGE")
-			cachemetrics.RecordMinerCacheMetrics("MINER_L1_STORAGE", start)
-			cachemetrics.RecordMinerTotalCosts("MINER_L1_STORAGE", start)
 		}
 	}()
 	value, _ := s.getState(key, &hitInCache, true)
@@ -232,17 +229,9 @@ func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetS
 		if !calledByGetState {
 			routeid := cachemetrics.Goid()
 			isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-			isMinerMainProcess := cachemetrics.IsMinerMainRoutineID(routeid)
 			if isSyncMainProcess && *hit {
-				cachemetrics.RecordCacheDepth("CACHE_L1_STORAGE")
+				syncL1HitStorageMeter.Mark(1)
 				cachemetrics.RecordCacheMetrics("CACHE_L1_STORAGE", start)
-				cachemetrics.RecordTotalCosts("CACHE_L1_STORAGE", start)
-			}
-
-			if isMinerMainProcess && *hit {
-				cachemetrics.RecordMinerCacheDepth("MINER_L1_STORAGE")
-				cachemetrics.RecordMinerCacheMetrics("MINER_L1_STORAGE", start)
-				cachemetrics.RecordMinerTotalCosts("MINER_L1_STORAGE", start)
 			}
 		}
 	}()
