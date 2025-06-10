@@ -28,6 +28,7 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
 
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
@@ -992,6 +993,8 @@ func (w *worker) prepareWork(genParams *generateParams, witness bool) (*environm
 	w.confMu.RLock()
 	defer w.confMu.RUnlock()
 
+	routeid := cachemetrics.Goid()
+	cachemetrics.UpdateMiningRoutineID(routeid)
 	// Find the parent block for sealing task
 	parent := w.chain.CurrentBlock()
 	if genParams.parentHash != (common.Hash{}) {

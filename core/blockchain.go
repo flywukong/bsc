@@ -30,6 +30,8 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/ethereum/go-ethereum/cachemetrics"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/common/mclock"
@@ -2064,6 +2066,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
 	signer := types.MakeSigner(bc.chainConfig, chain[0].Number(), chain[0].Time())
 	go SenderCacher().RecoverFromBlocks(signer, chain)
+
+	goid := cachemetrics.Goid()
+	cachemetrics.UpdateSyncingRoutineID(goid)
 
 	var (
 		stats     = insertStats{startTime: mclock.Now()}
