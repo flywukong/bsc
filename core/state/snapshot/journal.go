@@ -154,6 +154,8 @@ func loadSnapshot(diskdb ethdb.KeyValueStore, triedb *triedb.Database, root comm
 	if baseRoot == (common.Hash{}) {
 		return nil, false, errors.New("missing or corrupted snapshot")
 	}
+
+	log.Info("allocate fastcache", "size", cache)
 	base := &diskLayer{
 		diskdb: diskdb,
 		triedb: triedb,
