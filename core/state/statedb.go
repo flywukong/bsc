@@ -513,17 +513,21 @@ func (s *StateDB) GetCodeHash(addr common.Address) common.Hash {
 }
 
 func (s *StateDB) markMetrics(start time.Time, reachStorage bool) {
-	goid := cachemetrics.Goid()
-	start2 := time.Now()
-	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
-	log.Info("get goid cost time", "cost", time.Since(start2).Nanoseconds())
-	// record metrics of syncing main process
-	if isSyncMainProcess {
-		l1AccountMeter.Mark(1)
-		if reachStorage {
-			l1StorageMeter.Mark(1)
-		}
-	}
+	return
+	/*
+			goid := cachemetrics.Goid()
+		//	start2 := time.Now()
+			isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
+			//log.Info("get goid cost time", "cost", time.Since(start2).Nanoseconds())
+			// record metrics of syncing main process
+			if isSyncMainProcess {
+				l1AccountMeter.Mark(1)
+				if reachStorage {
+					l1StorageMeter.Mark(1)
+				}
+			}
+
+	*/
 }
 
 // GetState retrieves a value from the given account's storage trie.
