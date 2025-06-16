@@ -46,6 +46,9 @@ var (
 	snapshotCleanStorageReadMeter  = metrics.NewRegisteredMeter("state/snapshot/clean/storage/read", nil)
 	snapshotCleanStorageWriteMeter = metrics.NewRegisteredMeter("state/snapshot/clean/storage/write", nil)
 
+	snapshotPebbleAccountTimer = metrics.NewRegisteredResettingTimer("state/snapshot/pebble/account", nil)
+	snapshotPebbleStorageTimer = metrics.NewRegisteredResettingTimer("state/snapshot/pebble/storage", nil)
+
 	snapshotDirtyAccountHitMeter   = metrics.NewRegisteredMeter("state/snapshot/dirty/account/hit", nil)
 	snapshotDirtyAccountMissMeter  = metrics.NewRegisteredMeter("state/snapshot/dirty/account/miss", nil)
 	snapshotDirtyAccountInexMeter  = metrics.NewRegisteredMeter("state/snapshot/dirty/account/inex", nil)
