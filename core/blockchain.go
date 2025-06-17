@@ -81,11 +81,19 @@ var (
 	chainInfoGauge = metrics.NewRegisteredGaugeInfo("chain/info", nil)
 
 	accountReadTimer   = metrics.NewRegisteredTimer("chain/account/reads", nil)
+	accountL1ReadTimer = metrics.NewRegisteredTimer("chain/l1account/reads", nil)
+	accountReadGauge   = metrics.NewRegisteredGauge("chain/account/readsecond", nil)
+	accountL1ReadGauge = metrics.NewRegisteredGauge("chain/l1account/readsecond", nil)
+
 	accountHashTimer   = metrics.NewRegisteredTimer("chain/account/hashes", nil)
 	accountUpdateTimer = metrics.NewRegisteredTimer("chain/account/updates", nil)
 	accountCommitTimer = metrics.NewRegisteredTimer("chain/account/commits", nil)
 
 	storageReadTimer   = metrics.NewRegisteredTimer("chain/storage/reads", nil)
+	storageL1ReadTimer = metrics.NewRegisteredTimer("chain/l1storage/reads", nil)
+	storageReadGauge   = metrics.NewRegisteredGauge("chain/storage/readsecond", nil)
+	storageL1ReadGauge = metrics.NewRegisteredGauge("chain/l1storage/readsecond", nil)
+
 	storageUpdateTimer = metrics.NewRegisteredTimer("chain/storage/updates", nil)
 	storageCommitTimer = metrics.NewRegisteredTimer("chain/storage/commits", nil)
 
@@ -99,6 +107,9 @@ var (
 	blockValidationTimer      = metrics.NewRegisteredTimer("chain/validation", nil)
 	blockCrossValidationTimer = metrics.NewRegisteredTimer("chain/crossvalidation", nil)
 	blockExecutionTimer       = metrics.NewRegisteredTimer("chain/execution", nil)
+	blockExecutionTimer2      = metrics.NewRegisteredGauge("chain/execution2", nil)
+	blockEVMExecutionTimer    = metrics.NewRegisteredTimer("chain/evmexecution", nil)
+	blockEVMExecutionTimer2   = metrics.NewRegisteredTimer("chain/evmexecution2", nil)
 	blockWriteTimer           = metrics.NewRegisteredTimer("chain/write", nil)
 
 	blockReorgMeter     = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
@@ -2438,6 +2449,97 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 	}
 	vtime := time.Since(vstart)
 
+	cachemetrics.BlockDiffLayerAccountReadCost.Update(cachemetrics.DiffLayerAccountReadCost)
+	cachemetrics.BlockDiffLayerStorageReadCost.Update(cachemetrics.DiffLayerStorageReadCost)
+	cachemetrics.BlockDiskLayerAccountReadCost.Update(cachemetrics.DiskLayerAccountReadCost)
+	cachemetrics.BlockDiskLayerStorageReadCost.Update(cachemetrics.DiskLayerStorageReadCost)
+	cachemetrics.BlockDiskLayerAccountPebbleCost.Update(cachemetrics.DiskLayerAccountPebbleReadCost)
+	cachemetrics.BlockDiskLayerStoragePebbleCost.Update(cachemetrics.DiskLayerStoragePebbleReadCost)
+
+	// Update count metrics
+	cachemetrics.BlockDiffLayerAccountReadCount.Update(cachemetrics.DiffLayerAccountReadCount)
+	cachemetrics.BlockDiffLayerStorageReadCount.Update(cachemetrics.DiffLayerStorageReadCount)
+	cachemetrics.BlockDiskLayerAccountReadCount.Update(cachemetrics.DiskLayerAccountReadCount)
+	cachemetrics.BlockDiskLayerStorageReadCount.Update(cachemetrics.DiskLayerStorageReadCount)
+	cachemetrics.BlockDiskLayerAccountPebbleCount.Update(cachemetrics.DiskLayerAccountPebbleReadCount)
+	cachemetrics.BlockDiskLayerStoragePebbleCount.Update(cachemetrics.DiskLayerStoragePebbleReadCount)
+	accountReadGauge.Update(statedb.AccountReadSeconds)
+	storageReadGauge.Update(statedb.StorageReadSeconds)
+	accountL1ReadGauge.Update(statedb.AccountL1ReadSeconds) // Account reads are complete(in processing)
+	storageL1ReadGauge.Update(statedb.StorageL1ReadSeconds)
+
+	/*
+		if statedb.AccountReadSeconds < cachemetrics.DiskLayerAccountPebbleReadCost {
+			log.Warn("StateDB account read cost is less than disk layer pebble read cost",
+				"block", block.Number(),
+				"statedb_account_read_us", statedb.AccountReadSeconds/1000,
+				"disk_layer_account_pebble_read_us", cachemetrics.DiskLayerAccountPebbleReadCost/1000,
+				"diff_layer_account_count", cachemetrics.DiffLayerAccountReadCount,
+				"disk_layer_account_count", cachemetrics.DiskLayerAccountReadCount,
+				"pebble_account_count", cachemetrics.DiskLayerAccountPebbleReadCount,
+				"total_account_access", statedb.ReaderAccountAccessNum)
+		} else {
+			// Calculate layer access percentages for accounts using read cost
+			// totalAccountReadCost := cachemetrics.DiffLayerAccountReadCost + cachemetrics.DiskLayerAccountReadCost
+			if statedb.AccountReadSeconds > 0 {
+				diffLayerAccountPct := float64(cachemetrics.DiffLayerAccountReadCost) / float64(statedb.AccountReadSeconds) * 100
+				diskLayerAccountPct := float64(cachemetrics.DiskLayerAccountReadCost) / float64(statedb.AccountReadSeconds) * 100
+				pebbleAccountPct := float64(cachemetrics.DiskLayerAccountPebbleReadCost) / float64(statedb.AccountReadSeconds) * 100
+				log.Info("Account layer access distribution",
+					"block", block.Number(),
+					"statedb_account_read_us", statedb.AccountReadSeconds/1000,
+					"disk_layer_account_pebble_read_us", cachemetrics.DiskLayerAccountPebbleReadCost/1000,
+					"diff_layer_account_read_us", cachemetrics.DiffLayerAccountReadCost/1000,
+					"disk_layer_account_read_us", cachemetrics.DiskLayerAccountReadCost/1000,
+					"diff_layer_account_pct", fmt.Sprintf("%.2f%%", diffLayerAccountPct),
+					"disk_layer_account_pct", fmt.Sprintf("%.2f%%", diskLayerAccountPct),
+					"pebble_account_pct", fmt.Sprintf("%.2f%%", pebbleAccountPct),
+					"disk_layer_account_pebble_read_us", cachemetrics.DiskLayerAccountPebbleReadCost/1000,
+					"diff_layer_account_count", cachemetrics.DiffLayerAccountReadCount,
+					"disk_layer_account_count", cachemetrics.DiskLayerAccountReadCount,
+					"pebble_account_count", cachemetrics.DiskLayerAccountPebbleReadCount,
+					"total_account_access", statedb.ReaderAccountAccessNum)
+			}
+		}
+
+		if statedb.StorageReadSeconds < cachemetrics.DiskLayerStoragePebbleReadCost {
+			log.Warn("StateDB storage read cost is less than disk layer pebble read cost",
+				"block", block.Number(),
+				"statedb_storage_read_us", statedb.StorageReadSeconds/1000,
+				"disk_layer_storage_pebble_read_us", cachemetrics.DiskLayerStoragePebbleReadCost/1000,
+				"diff_layer_storage_count", cachemetrics.DiffLayerStorageReadCount,
+				"disk_layer_storage_count", cachemetrics.DiskLayerStorageReadCount,
+				"pebble_storage_count", cachemetrics.DiskLayerStoragePebbleReadCount,
+				"total_storage_access", statedb.ReaderStorageAccessNum)
+		} else {
+			// Calculate layer access percentages for storage using read cost
+			if statedb.StorageReadSeconds > 0 {
+				//		log.Info("StateDB storage read cost vs disk layer pebble read cost",
+				//			"block", block.Number(),
+				//			"statedb_storage_read_us", statedb.StorageReadSeconds/1000,
+				//			"disk_layer_storage_pebble_read_us", cachemetrics.DiskLayerStoragePebbleReadCost/1000)
+				diffLayerStoragePct := float64(cachemetrics.DiffLayerStorageReadCost) / float64(statedb.StorageReadSeconds) * 100
+				diskLayerStoragePct := float64(cachemetrics.DiskLayerStorageReadCost) / float64(statedb.StorageReadSeconds) * 100
+				pebbleStoragePct := float64(cachemetrics.DiskLayerStoragePebbleReadCost) / float64(statedb.StorageReadSeconds) * 100
+				log.Info("Storage layer access distribution",
+					"block", block.Number(),
+					"statedb_storage_read_us", statedb.StorageReadSeconds/1000,
+					"disk_layer_storage_pebble_read_us", cachemetrics.DiskLayerStoragePebbleReadCost/1000,
+					"diff_layer_storage_read_us", cachemetrics.DiffLayerStorageReadCost/1000,
+					"disk_layer_storage_read_us", cachemetrics.DiskLayerStorageReadCost/1000,
+					// ebble_storage_count", cachemetrics.DiskLayerStoragePebbleReadCount,
+					"diff_layer_storage_pct", fmt.Sprintf("%.2f%%", diffLayerStoragePct),
+					"disk_layer_storage_pct", fmt.Sprintf("%.2f%%", diskLayerStoragePct),
+					"pebble_storage_pct", fmt.Sprintf("%.2f%%", pebbleStoragePct),
+					"diff_layer_storage_count", cachemetrics.DiffLayerStorageReadCount,
+					"disk_layer_storage_count", cachemetrics.DiskLayerStorageReadCount,
+					"pebble_storage_count", cachemetrics.DiskLayerStoragePebbleReadCount,
+					"total_storage_access", statedb.ReaderStorageAccessNum)
+			}
+		}
+
+	*/
+	cachemetrics.ResetLayerMetrics()
 	// If witnesses was generated and stateless self-validation requested, do
 	// that now. Self validation should *never* run in production, it's more of
 	// a tight integration to enable running *all* consensus tests through the
@@ -2471,8 +2573,8 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 
 	// Update the metrics touched during block processing and validation
 	if metrics.EnabledExpensive() {
-		accountReadTimer.Update(statedb.AccountReads) // Account reads are complete(in processing)
-		storageReadTimer.Update(statedb.StorageReads) // Storage reads are complete(in processing)
+		//	accountReadTimer.Update(statedb.AccountReads) // Account reads are complete(in processing)
+		//	storageReadTimer.Update(statedb.StorageReads) // Storage reads are complete(in processing)
 		if statedb.AccountLoaded != 0 {
 			accountReadSingleTimer.Update(statedb.AccountReads / time.Duration(statedb.AccountLoaded))
 		}
@@ -2483,11 +2585,23 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 		storageUpdateTimer.Update(statedb.StorageUpdates) // Storage updates are complete(in validation)
 		accountHashTimer.Update(statedb.AccountHashes)    // Account hashes are complete(in validation)
 	}
-	triehash := statedb.AccountHashes                                                 // The time spent on tries hashing
-	trieUpdate := statedb.AccountUpdates + statedb.StorageUpdates                     // The time spent on tries update
-	blockExecutionTimer.Update(ptime - (statedb.AccountReads + statedb.StorageReads)) // The time spent on EVM processing
-	blockValidationTimer.Update(vtime - (triehash + trieUpdate))                      // The time spent on block validation
-	blockCrossValidationTimer.Update(xvtime)                                          // The time spent on stateless cross validation
+	accountReadTimer.Update(statedb.AccountReads)     // Account reads are complete(in processing)
+	storageReadTimer.Update(statedb.StorageReads)     // Storage reads are complete(in processing)
+	accountL1ReadTimer.Update(statedb.AccountL1Reads) // Account reads are complete(in processing)
+	storageL1ReadTimer.Update(statedb.StorageL1Reads) // Storage reads are complete(in processing)
+
+	state.AccountAccessNumGauge.Update(statedb.AccountAccessNum) // Account access number
+	state.StorageAccessNumGauge.Update(statedb.StorageAccessNum) // Storage access number
+
+	triehash := statedb.AccountHashes                             // The time spent on tries hashing
+	trieUpdate := statedb.AccountUpdates + statedb.StorageUpdates // The time spent on tries update
+	blockExecutionTimer.Update(ptime)                             // The time spent on EVM processing
+	blockExecutionTimer2.Update(ptime.Nanoseconds())              // The time spent on EVM processing (absolute value in nanoseconds)
+	blockEVMExecutionTimer.Update(ptime - (statedb.AccountReads + statedb.StorageReads))
+	blockEVMExecutionTimer2.Update(ptime - (statedb.AccountReads + statedb.StorageReads + statedb.AccountL1Reads +
+		statedb.StorageL1Reads))
+	blockValidationTimer.Update(vtime - (triehash + trieUpdate)) // The time spent on block validation
+	blockCrossValidationTimer.Update(xvtime)                     // The time spent on stateless cross validation
 
 	// Write the block to the chain and get the status.
 	var (

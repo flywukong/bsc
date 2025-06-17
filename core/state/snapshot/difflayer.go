@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/cachemetrics"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -220,8 +219,8 @@ func (dl *diffLayer) Stale() bool {
 
 // Account directly retrieves the account associated with a particular hash in
 // the snapshot slim data format.
-func (dl *diffLayer) Account(hash common.Hash) (*types.SlimAccount, error) {
-	data, err := dl.AccountRLP(hash)
+func (dl *diffLayer) Account(hash common.Hash, enablePerf bool) (*types.SlimAccount, error) {
+	data, err := dl.AccountRLP(hash, enablePerf)
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +256,7 @@ func (dl *diffLayer) Accounts() (map[common.Hash]*types.SlimAccount, error) {
 // hash in the snapshot slim data format.
 //
 // Note the returned account is not a copy, please don't modify it.
-func (dl *diffLayer) AccountRLP(hash common.Hash) ([]byte, error) {
+func (dl *diffLayer) AccountRLP(hash common.Hash, enablePerf bool) ([]byte, error) {
 	// Check staleness before reaching further.
 	dl.lock.RLock()
 	if dl.Stale() {
@@ -276,14 +275,16 @@ func (dl *diffLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	start := time.Now()
 	hitInDifflayer := false
 	defer func() {
-		routeid := cachemetrics.Goid()
-		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-		if isSyncMainProcess {
+		//routeid := cachemetrics.Goid()
+		//isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+		if enablePerf {
 			// l1 miss
 			syncL1MissAccountMeter.Mark(1)
 			if hitInDifflayer {
 				syncL2AccountHitMeter.Mark(1)
 				cachemetrics.RecordCacheMetrics("CACHE_L2_ACCOUNT", start)
+				cachemetrics.AddDiffLayerAccountRead(time.Since(start))
+				//		cachemetrics.RecordTotalCosts("CACHE_L2_ACCOUNT", start)
 			}
 		}
 	}()
@@ -293,16 +294,16 @@ func (dl *diffLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	// diff layers, reach straight into the bottom persistent disk layer
 	if origin != nil {
 		snapshotBloomAccountMissMeter.Mark(1)
-		return origin.AccountRLP(hash)
+		return origin.AccountRLP(hash, enablePerf)
 	}
 	// The bloom filter hit, start poking in the internal maps
-	return dl.accountRLP(hash, 0, &hitInDifflayer)
+	return dl.accountRLP(hash, 0, &hitInDifflayer, enablePerf)
 }
 
 // accountRLP is an internal version of AccountRLP that skips the bloom filter
 // checks and uses the internal maps to try and retrieve the data. It's meant
 // to be used if a higher layer's bloom filter hit already.
-func (dl *diffLayer) accountRLP(hash common.Hash, depth int, hit *bool) ([]byte, error) {
+func (dl *diffLayer) accountRLP(hash common.Hash, depth int, hit *bool, enablePerf bool) ([]byte, error) {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
 
@@ -326,11 +327,11 @@ func (dl *diffLayer) accountRLP(hash common.Hash, depth int, hit *bool) ([]byte,
 	}
 	// Account unknown to this diff, resolve from parent
 	if diff, ok := dl.parent.(*diffLayer); ok {
-		return diff.accountRLP(hash, depth+1, hit)
+		return diff.accountRLP(hash, depth+1, hit, enablePerf)
 	}
 	// Failed to resolve through diff layers, mark a bloom error and use the disk
 	snapshotBloomAccountFalseHitMeter.Mark(1)
-	return dl.parent.AccountRLP(hash)
+	return dl.parent.AccountRLP(hash, enablePerf)
 }
 
 // Storage directly retrieves the storage data associated with a particular hash,
@@ -338,19 +339,22 @@ func (dl *diffLayer) accountRLP(hash common.Hash, depth int, hit *bool) ([]byte,
 // is consulted.
 //
 // Note the returned slot is not a copy, please don't modify it.
-func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, error) {
+func (dl *diffLayer) Storage(accountHash, storageHash common.Hash, enablePerf bool) ([]byte, error) {
 	// Check the bloom filter first whether there's even a point in reaching into
 	// all the maps in all the layers below
 	start := time.Now()
-	routeid := cachemetrics.Goid()
+	//routeid := cachemetrics.Goid()
 	hitInDifflayer := false
+	//	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
 	defer func() {
-		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-		if isSyncMainProcess {
+		//	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+		if enablePerf {
 			syncL1MissStorageMeter.Mark(1)
 			if hitInDifflayer {
 				syncL2StorageHitMeter.Mark(1)
 				cachemetrics.RecordCacheMetrics("CACHE_L2_STORAGE", start)
+				cachemetrics.AddDiffLayerStorageRead(time.Since(start))
+				//		cachemetrics.RecordTotalCosts("CACHE_L2_STORAGE", start)
 			}
 		}
 	}()
@@ -371,16 +375,16 @@ func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	// diff layers, reach straight into the bottom persistent disk layer
 	if origin != nil {
 		snapshotBloomStorageMissMeter.Mark(1)
-		return origin.Storage(accountHash, storageHash)
+		return origin.Storage(accountHash, storageHash, enablePerf)
 	}
 	// The bloom filter hit, start poking in the internal maps
-	return dl.storage(accountHash, storageHash, 0, &hitInDifflayer)
+	return dl.storage(accountHash, storageHash, 0, &hitInDifflayer, enablePerf)
 }
 
 // storage is an internal version of Storage that skips the bloom filter checks
 // and uses the internal maps to try and retrieve the data. It's meant  to be
 // used if a higher layer's bloom filter hit already.
-func (dl *diffLayer) storage(accountHash, storageHash common.Hash, depth int, hit *bool) ([]byte, error) {
+func (dl *diffLayer) storage(accountHash, storageHash common.Hash, depth int, hit *bool, enablePerf bool) ([]byte, error) {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
 
@@ -406,11 +410,11 @@ func (dl *diffLayer) storage(accountHash, storageHash common.Hash, depth int, hi
 	}
 	// Storage slot unknown to this diff, resolve from parent
 	if diff, ok := dl.parent.(*diffLayer); ok {
-		return diff.storage(accountHash, storageHash, depth+1, hit)
+		return diff.storage(accountHash, storageHash, depth+1, hit, enablePerf)
 	}
 	// Failed to resolve through diff layers, mark a bloom error and use the disk
 	snapshotBloomStorageFalseHitMeter.Mark(1)
-	return dl.parent.Storage(accountHash, storageHash)
+	return dl.parent.Storage(accountHash, storageHash, enablePerf)
 }
 
 // Update creates a new layer on top of the existing snapshot diff tree with

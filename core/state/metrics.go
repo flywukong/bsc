@@ -19,8 +19,16 @@ package state
 import "github.com/ethereum/go-ethereum/metrics"
 
 var (
-	accountReadMeters        = metrics.NewRegisteredMeter("state/read/accounts", nil)
-	storageReadMeters        = metrics.NewRegisteredMeter("state/read/storage", nil)
+	accountReadMeters          = metrics.NewRegisteredMeter("state/read/accounts", nil)
+	storageReadMeters          = metrics.NewRegisteredMeter("state/read/storage", nil)
+	readerStorageAccessMeter   = metrics.NewRegisteredMeter("state/reader/storage/access", nil)
+	readerAccountAccessMeter   = metrics.NewRegisteredMeter("state/reader/account/access", nil)
+	readerStorageAccessGauge   = metrics.NewRegisteredGauge("state/reader/storage/access/gauge", nil)
+	readerStorageAccessGauge2  = metrics.NewRegisteredGauge("state/reader/storage/access/gauge", nil)
+	readerStorageAccessGauge3  = metrics.NewRegisteredGauge("state/reader/storage/access/gauge", nil)
+	readerIOStorageAccessGauge = metrics.NewRegisteredGauge("state/reader/storage/io/gauge", nil)
+	readerAccountAccessGauge   = metrics.NewRegisteredGauge("state/reader/account/access/gauge", nil)
+
 	accountUpdatedMeter      = metrics.NewRegisteredMeter("state/update/account", nil)
 	storageUpdatedMeter      = metrics.NewRegisteredMeter("state/update/storage", nil)
 	accountDeletedMeter      = metrics.NewRegisteredMeter("state/delete/account", nil)
@@ -29,4 +37,11 @@ var (
 	storageTriesUpdatedMeter = metrics.NewRegisteredMeter("state/update/storagenodes", nil)
 	accountTrieDeletedMeter  = metrics.NewRegisteredMeter("state/delete/accountnodes", nil)
 	storageTriesDeletedMeter = metrics.NewRegisteredMeter("state/delete/storagenodes", nil)
+	TotalGetBalanceCost      = metrics.NewRegisteredTimer("state/getbalance/total", nil)
+	TotalGetNonceCost        = metrics.NewRegisteredTimer("state/getnonce/total", nil)
+	TotalGetStorageRootCost  = metrics.NewRegisteredTimer("state/getstorageroot/total", nil)
+	TotalGetCodeCost         = metrics.NewRegisteredTimer("state/getcode/total", nil)
+	TotalGetCodeSizeCost     = metrics.NewRegisteredTimer("state/getcodesize/total", nil)
+	TotalGetCodeHashCost     = metrics.NewRegisteredTimer("state/getcodehash/total", nil)
+	TotalGetStateCost        = metrics.NewRegisteredTimer("state/getstate/total", nil)
 )

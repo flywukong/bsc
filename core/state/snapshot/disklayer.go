@@ -21,9 +21,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/cachemetrics"
-
 	"github.com/VictoriaMetrics/fastcache"
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -93,8 +92,8 @@ func (dl *diskLayer) markStale() {
 
 // Account directly retrieves the account associated with a particular hash in
 // the snapshot slim data format.
-func (dl *diskLayer) Account(hash common.Hash) (*types.SlimAccount, error) {
-	data, err := dl.AccountRLP(hash)
+func (dl *diskLayer) Account(hash common.Hash, enablePerf bool) (*types.SlimAccount, error) {
+	data, err := dl.AccountRLP(hash, enablePerf)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +109,7 @@ func (dl *diskLayer) Account(hash common.Hash) (*types.SlimAccount, error) {
 
 // AccountRLP directly retrieves the account RLP associated with a particular
 // hash in the snapshot slim data format.
-func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
+func (dl *diskLayer) AccountRLP(hash common.Hash, enablePerf bool) ([]byte, error) {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
 	start := time.Now()
@@ -125,24 +124,20 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 		return nil, ErrNotCoveredYet
 	}
 	// If we're in the disk layer, all diff layers missed
-	routeid := cachemetrics.Goid()
-	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+	//isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
 	snapshotDirtyAccountMissMeter.Mark(1)
 
 	hitInL3 := false
-	hitInDisk := false
 	var startGetInDisk time.Time
 	defer func() {
 		// if mainProcess
-		if isSyncMainProcess {
+		if enablePerf {
 			syncL2AccountMissMeter.Mark(1)
 			if hitInL3 {
 				syncL3AccountHitMeter.Mark(1)
 				cachemetrics.RecordCacheMetrics("CACHE_L3_ACCOUNT", start)
-			}
-			if hitInDisk {
-				syncL3AccountMissMeter.Mark(1)
-				cachemetrics.RecordCacheMetrics("DISK_L4_ACCOUNT", startGetInDisk)
+				cachemetrics.AddDiskLayerAccountRead(time.Since(start))
+				//		cachemetrics.RecordTotalCosts("CACHE_L3_ACCOUNT", start)
 			}
 		}
 	}()
@@ -158,9 +153,13 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	startGetInDisk = time.Now()
 	// Cache doesn't contain account, pull from disk and cache for later
 	blob := rawdb.ReadAccountSnapshot(dl.diskdb, hash)
+	if enablePerf {
+		syncL3AccountMissMeter.Mark(1)
+		cachemetrics.RecordCacheMetrics("DISK_L4_ACCOUNT", startGetInDisk)
+		//	cachemetrics.RecordTotalCosts("DISK_L4_ACCOUNT", startGetInDisk)
+		cachemetrics.AddDiskLayerAccountPebbleRead(time.Since(startGetInDisk))
+	}
 	dl.cache.Set(hash[:], blob)
-	hitInDisk = true
-
 	snapshotCleanAccountMissMeter.Mark(1)
 	if n := len(blob); n > 0 {
 		snapshotCleanAccountWriteMeter.Mark(int64(n))
@@ -172,28 +171,24 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 
 // Storage directly retrieves the storage data associated with a particular hash,
 // within a particular account.
-func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, error) {
+func (dl *diskLayer) Storage(accountHash, storageHash common.Hash, enablePerf bool) ([]byte, error) {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
 	start := time.Now()
 
-	routeid := cachemetrics.Goid()
 	hitInL3 := false
-	hitInDisk := false
 	var startGetInDisk time.Time
+	//isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
+
 	defer func() {
-		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-		if isSyncMainProcess {
+		if enablePerf {
 			// layer 2 miss
 			syncL2StorageMissMeter.Mark(1)
 			if hitInL3 {
 				syncL3StorageHitMeter.Mark(1)
 				cachemetrics.RecordCacheMetrics("CACHE_L3_STORAGE", start)
-			}
-			if hitInDisk {
-				// layer 3 miss
-				syncL3StorageMissMeter.Mark(1)
-				cachemetrics.RecordCacheMetrics("DISK_L4_STORAGE", startGetInDisk)
+				cachemetrics.AddDiskLayerStorageRead(time.Since(start))
+				//	cachemetrics.RecordTotalCosts("CACHE_L3_STORAGE", start)
 			}
 		}
 	}()
@@ -222,8 +217,14 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	startGetInDisk = time.Now()
 	// Cache doesn't contain storage slot, pull from disk and cache for later
 	blob := rawdb.ReadStorageSnapshot(dl.diskdb, accountHash, storageHash)
+	if enablePerf {
+		// layer 3 miss
+		syncL3StorageMissMeter.Mark(1)
+		cachemetrics.RecordCacheMetrics("DISK_L4_STORAGE", startGetInDisk)
+		//	cachemetrics.RecordTotalCosts("DISK_L4_STORAGE", startGetInDisk)
+		cachemetrics.AddDiskLayerStoragePebbleRead(time.Since(startGetInDisk))
+	}
 	dl.cache.Set(key, blob)
-	hitInDisk = true
 	snapshotCleanStorageMissMeter.Mark(1)
 	if n := len(blob); n > 0 {
 		snapshotCleanStorageWriteMeter.Mark(int64(n))
