@@ -515,18 +515,17 @@ func (s *StateDB) GetCodeHash(addr common.Address) common.Hash {
 func (s *StateDB) markMetrics(start time.Time, reachStorage bool) {
 	return
 	/*
-			goid := cachemetrics.Goid()
+		goid := cachemetrics.Goid()
 		//	start2 := time.Now()
-			isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
-			//log.Info("get goid cost time", "cost", time.Since(start2).Nanoseconds())
-			// record metrics of syncing main process
-			if isSyncMainProcess {
-				l1AccountMeter.Mark(1)
-				if reachStorage {
-					l1StorageMeter.Mark(1)
-				}
+		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
+		//log.Info("get goid cost time", "cost", time.Since(start2).Nanoseconds())
+		// record metrics of syncing main process
+		if isSyncMainProcess {
+			l1AccountMeter.Mark(1)
+			if reachStorage {
+				l1StorageMeter.Mark(1)
 			}
-
+		}
 	*/
 }
 
@@ -600,8 +599,8 @@ func (s *StateDB) AddBalance(addr common.Address, amount *uint256.Int, reason tr
 
 // SubBalance subtracts amount from the account associated with addr.
 func (s *StateDB) SubBalance(addr common.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) uint256.Int {
-	start := time.Now()
-	defer s.markMetrics(start, false)
+	//	start := time.Now()
+	//	defer s.markMetrics(start, false)
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject == nil {
 		return uint256.Int{}
@@ -776,19 +775,22 @@ func (s *StateDB) deleteStateObject(addr common.Address) {
 // the object is not found or was deleted in this execution context.
 func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	// Prefer live objects if any is available
-	start := time.Now()
-	hit := false
-	defer func() {
-		routeid := cachemetrics.Goid()
-		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-		if isSyncMainProcess && hit {
-			syncL1HitAccountMeter.Mark(1)
-			cachemetrics.RecordCacheMetrics("CACHE_L1_ACCOUNT", start)
-		}
-	}()
+	/*
+		start := time.Now()
+		hit := false
+		defer func() {
+			routeid := cachemetrics.Goid()
+			isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+			if isSyncMainProcess && hit {
+				syncL1HitAccountMeter.Mark(1)
+				cachemetrics.RecordCacheMetrics("CACHE_L1_ACCOUNT", start)
+			}
+		}()
+
+	*/
 
 	if obj := s.stateObjects[addr]; obj != nil {
-		hit = true
+		//	hit = true
 		return obj
 	}
 	// Short circuit if the account is already destructed in this block.
