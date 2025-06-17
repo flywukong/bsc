@@ -81,11 +81,13 @@ var (
 	chainInfoGauge = metrics.NewRegisteredGaugeInfo("chain/info", nil)
 
 	accountReadTimer   = metrics.NewRegisteredTimer("chain/account/reads", nil)
+	accountL1ReadTimer = metrics.NewRegisteredTimer("chain/l1account/reads", nil)
 	accountHashTimer   = metrics.NewRegisteredTimer("chain/account/hashes", nil)
 	accountUpdateTimer = metrics.NewRegisteredTimer("chain/account/updates", nil)
 	accountCommitTimer = metrics.NewRegisteredTimer("chain/account/commits", nil)
 
 	storageReadTimer   = metrics.NewRegisteredTimer("chain/storage/reads", nil)
+	storageL1ReadTimer = metrics.NewRegisteredTimer("chain/l1storage/reads", nil)
 	storageUpdateTimer = metrics.NewRegisteredTimer("chain/storage/updates", nil)
 	storageCommitTimer = metrics.NewRegisteredTimer("chain/storage/commits", nil)
 
@@ -99,6 +101,8 @@ var (
 	blockValidationTimer      = metrics.NewRegisteredTimer("chain/validation", nil)
 	blockCrossValidationTimer = metrics.NewRegisteredTimer("chain/crossvalidation", nil)
 	blockExecutionTimer       = metrics.NewRegisteredTimer("chain/execution", nil)
+	blockEVMExecutionTimer    = metrics.NewRegisteredTimer("chain/evmexecution", nil)
+	blockEVMExecutionTimer2   = metrics.NewRegisteredTimer("chain/evmexecution2", nil)
 	blockWriteTimer           = metrics.NewRegisteredTimer("chain/write", nil)
 
 	blockReorgMeter     = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
@@ -2438,6 +2442,23 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 	}
 	vtime := time.Since(vstart)
 
+	cachemetrics.BlockDiffLayerAccountReadCost.Update(cachemetrics.DiffLayerAccountReadCost)
+	cachemetrics.BlockDiffLayerStorageReadCost.Update(cachemetrics.DiffLayerStorageReadCost)
+	cachemetrics.BlockDiskLayerAccountReadCost.Update(cachemetrics.DiskLayerAccountReadCost)
+	cachemetrics.BlockDiskLayerStorageReadCost.Update(cachemetrics.DiskLayerStorageReadCost)
+	cachemetrics.BlockDiskLayerAccountPebbleCost.Update(cachemetrics.DiskLayerAccountPebbleReadCost)
+	cachemetrics.BlockDiskLayerStoragePebbleCost.Update(cachemetrics.DiskLayerStoragePebbleReadCost)
+
+	// Update count metrics
+	cachemetrics.BlockDiffLayerAccountReadCount.Update(cachemetrics.DiffLayerAccountReadCount)
+	cachemetrics.BlockDiffLayerStorageReadCount.Update(cachemetrics.DiffLayerStorageReadCount)
+	cachemetrics.BlockDiskLayerAccountReadCount.Update(cachemetrics.DiskLayerAccountReadCount)
+	cachemetrics.BlockDiskLayerStorageReadCount.Update(cachemetrics.DiskLayerStorageReadCount)
+	cachemetrics.BlockDiskLayerAccountPebbleCount.Update(cachemetrics.DiskLayerAccountPebbleReadCount)
+	cachemetrics.BlockDiskLayerStoragePebbleCount.Update(cachemetrics.DiskLayerStoragePebbleReadCount)
+
+	cachemetrics.ResetLayerMetrics()
+
 	// If witnesses was generated and stateless self-validation requested, do
 	// that now. Self validation should *never* run in production, it's more of
 	// a tight integration to enable running *all* consensus tests through the
@@ -2471,8 +2492,8 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 
 	// Update the metrics touched during block processing and validation
 	if metrics.EnabledExpensive() {
-		accountReadTimer.Update(statedb.AccountReads) // Account reads are complete(in processing)
-		storageReadTimer.Update(statedb.StorageReads) // Storage reads are complete(in processing)
+		//	accountReadTimer.Update(statedb.AccountReads) // Account reads are complete(in processing)
+		//	storageReadTimer.Update(statedb.StorageReads) // Storage reads are complete(in processing)
 		if statedb.AccountLoaded != 0 {
 			accountReadSingleTimer.Update(statedb.AccountReads / time.Duration(statedb.AccountLoaded))
 		}
@@ -2483,11 +2504,21 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 		storageUpdateTimer.Update(statedb.StorageUpdates) // Storage updates are complete(in validation)
 		accountHashTimer.Update(statedb.AccountHashes)    // Account hashes are complete(in validation)
 	}
-	triehash := statedb.AccountHashes                                                 // The time spent on tries hashing
-	trieUpdate := statedb.AccountUpdates + statedb.StorageUpdates                     // The time spent on tries update
-	blockExecutionTimer.Update(ptime - (statedb.AccountReads + statedb.StorageReads)) // The time spent on EVM processing
-	blockValidationTimer.Update(vtime - (triehash + trieUpdate))                      // The time spent on block validation
-	blockCrossValidationTimer.Update(xvtime)                                          // The time spent on stateless cross validation
+	accountReadTimer.Update(statedb.AccountReads)                // Account reads are complete(in processing)
+	storageReadTimer.Update(statedb.StorageReads)                // Storage reads are complete(in processing)
+	accountL1ReadTimer.Update(statedb.AccountL1Reads)            // Account reads are complete(in processing)
+	storageL1ReadTimer.Update(statedb.StorageL1Reads)            // Storage reads are complete(in processing)
+	state.AccountAccessNumGauge.Update(statedb.AccountAccessNum) // Account access number
+	state.StorageAccessNumGauge.Update(statedb.StorageAccessNum) // Storage access number
+
+	triehash := statedb.AccountHashes                             // The time spent on tries hashing
+	trieUpdate := statedb.AccountUpdates + statedb.StorageUpdates // The time spent on tries update
+	blockExecutionTimer.Update(ptime)                             // The time spent on EVM processing
+	blockEVMExecutionTimer.Update(ptime - (statedb.AccountReads + statedb.StorageReads))
+	blockEVMExecutionTimer2.Update(ptime - (statedb.AccountReads + statedb.StorageReads + statedb.AccountL1Reads +
+		statedb.StorageL1Reads))
+	blockValidationTimer.Update(vtime - (triehash + trieUpdate)) // The time spent on block validation
+	blockCrossValidationTimer.Update(xvtime)                     // The time spent on stateless cross validation
 
 	// Write the block to the chain and get the status.
 	var (

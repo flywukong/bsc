@@ -1,6 +1,7 @@
 package cachemetrics
 
 import (
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/metrics"
@@ -9,6 +10,7 @@ import (
 type cacheLayerName string
 
 const (
+	//TotalRead cacheLayerName = "CACHE_L1_ACCOUNT"
 	CacheL1ACCOUNT cacheLayerName = "CACHE_L1_ACCOUNT"
 	CacheL2ACCOUNT cacheLayerName = "CACHE_L2_ACCOUNT"
 	CacheL3ACCOUNT cacheLayerName = "CACHE_L3_ACCOUNT"
@@ -46,6 +48,40 @@ var (
 	cacheL2StorageCostCounter = metrics.NewRegisteredCounter("cache/totalcost/storage/layer2", nil)
 	cacheL3StorageCostCounter = metrics.NewRegisteredCounter("cache/totalcost/storage/layer3", nil)
 	diskL4StorageCostCounter  = metrics.NewRegisteredCounter("cache/totalcost/storage/layer4", nil)
+
+	// difflayer
+	DiffLayerAccountReadCount int64
+	DiffLayerAccountReadCost  time.Duration
+	DiffLayerStorageReadCount int64
+	DiffLayerStorageReadCost  time.Duration
+
+	// disklayer
+	DiskLayerAccountReadCount int64
+	DiskLayerAccountReadCost  time.Duration
+	DiskLayerStorageReadCount int64
+	DiskLayerStorageReadCost  time.Duration
+
+	// disklayer
+	DiskLayerAccountPebbleReadCount int64
+	DiskLayerAccountPebbleReadCost  time.Duration
+	DiskLayerStoragePebbleReadCount int64
+	DiskLayerStoragePebbleReadCost  time.Duration
+
+	// block级别的diffLayer和diskLayer访问统计（Timer类型）
+	BlockDiffLayerAccountReadCost   = metrics.NewRegisteredTimer("block/difflayer/account/readcost", nil)
+	BlockDiffLayerStorageReadCost   = metrics.NewRegisteredTimer("block/difflayer/storage/readcost", nil)
+	BlockDiskLayerAccountReadCost   = metrics.NewRegisteredTimer("block/disklayer/account/readcost", nil)
+	BlockDiskLayerStorageReadCost   = metrics.NewRegisteredTimer("block/disklayer/storage/readcost", nil)
+	BlockDiskLayerAccountPebbleCost = metrics.NewRegisteredTimer("block/disklayer/account/pebblecost", nil)
+	BlockDiskLayerStoragePebbleCost = metrics.NewRegisteredTimer("block/disklayer/storage/pebblecost", nil)
+
+	// block级别的diffLayer和diskLayer访问统计（Gauge类型）
+	BlockDiffLayerAccountReadCount   = metrics.NewRegisteredGauge("block/difflayer/account/readcount", nil)
+	BlockDiffLayerStorageReadCount   = metrics.NewRegisteredGauge("block/difflayer/storage/readcount", nil)
+	BlockDiskLayerAccountReadCount   = metrics.NewRegisteredGauge("block/disklayer/account/readcount", nil)
+	BlockDiskLayerStorageReadCount   = metrics.NewRegisteredGauge("block/disklayer/storage/readcount", nil)
+	BlockDiskLayerAccountPebbleCount = metrics.NewRegisteredGauge("block/disklayer/account/pebblecount", nil)
+	BlockDiskLayerStoragePebbleCount = metrics.NewRegisteredGauge("block/disklayer/storage/pebblecount", nil)
 )
 
 // mark the info of total hit counts of each layers
@@ -122,4 +158,52 @@ func recordCost(timer *metrics.Timer, start time.Time) {
 
 func accumulateCost(totalcost *metrics.Counter, start time.Time) {
 	totalcost.Inc(time.Since(start).Nanoseconds())
+}
+
+// Reset all layer metrics (block开始前/结束后调用)
+func ResetLayerMetrics() {
+	atomic.StoreInt64(&DiffLayerAccountReadCount, 0)
+	DiffLayerAccountReadCost = 0
+	atomic.StoreInt64(&DiffLayerStorageReadCount, 0)
+	DiffLayerStorageReadCost = 0
+	atomic.StoreInt64(&DiskLayerAccountReadCount, 0)
+	DiskLayerAccountReadCost = 0
+	atomic.StoreInt64(&DiskLayerStorageReadCount, 0)
+	DiskLayerStorageReadCost = 0
+	// Pebble
+	atomic.StoreInt64(&DiskLayerAccountPebbleReadCount, 0)
+	DiskLayerAccountPebbleReadCost = 0
+	atomic.StoreInt64(&DiskLayerStoragePebbleReadCount, 0)
+	DiskLayerStoragePebbleReadCost = 0
+}
+
+func AddDiffLayerAccountRead(cost time.Duration) {
+	atomic.AddInt64(&DiffLayerAccountReadCount, 1)
+	DiffLayerAccountReadCost += cost
+	BlockDiffLayerAccountReadCount.Update(atomic.LoadInt64(&DiffLayerAccountReadCount))
+}
+func AddDiffLayerStorageRead(cost time.Duration) {
+	atomic.AddInt64(&DiffLayerStorageReadCount, 1)
+	DiffLayerStorageReadCost += cost
+	BlockDiffLayerStorageReadCount.Update(atomic.LoadInt64(&DiffLayerStorageReadCount))
+}
+func AddDiskLayerAccountRead(cost time.Duration) {
+	atomic.AddInt64(&DiskLayerAccountReadCount, 1)
+	DiskLayerAccountReadCost += cost
+	BlockDiskLayerAccountReadCount.Update(atomic.LoadInt64(&DiskLayerAccountReadCount))
+}
+func AddDiskLayerStorageRead(cost time.Duration) {
+	atomic.AddInt64(&DiskLayerStorageReadCount, 1)
+	DiskLayerStorageReadCost += cost
+	BlockDiskLayerStorageReadCount.Update(atomic.LoadInt64(&DiskLayerStorageReadCount))
+}
+func AddDiskLayerAccountPebbleRead(cost time.Duration) {
+	atomic.AddInt64(&DiskLayerAccountPebbleReadCount, 1)
+	DiskLayerAccountPebbleReadCost += cost
+	BlockDiskLayerAccountPebbleCount.Update(atomic.LoadInt64(&DiskLayerAccountPebbleReadCount))
+}
+func AddDiskLayerStoragePebbleRead(cost time.Duration) {
+	atomic.AddInt64(&DiskLayerStoragePebbleReadCount, 1)
+	DiskLayerStoragePebbleReadCost += cost
+	BlockDiskLayerStoragePebbleCount.Update(atomic.LoadInt64(&DiskLayerStoragePebbleReadCount))
 }
