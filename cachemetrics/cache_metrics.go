@@ -9,6 +9,7 @@ import (
 type cacheLayerName string
 
 const (
+	//TotalRead cacheLayerName = "CACHE_L1_ACCOUNT"
 	CacheL1ACCOUNT cacheLayerName = "CACHE_L1_ACCOUNT"
 	CacheL2ACCOUNT cacheLayerName = "CACHE_L2_ACCOUNT"
 	CacheL3ACCOUNT cacheLayerName = "CACHE_L3_ACCOUNT"
