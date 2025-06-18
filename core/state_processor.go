@@ -178,7 +178,6 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	for _, receipt := range receipts {
 		allLogs = append(allLogs, receipt.Logs...)
 	}
-
 	// 新增：在 block 处理结束后，累加 statedb 的各 get 方法总耗时到 metrics，并清零
 	if statedb != nil {
 		if statedb.TotalGetBalanceCost > 0 {
