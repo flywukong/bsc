@@ -125,12 +125,10 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 		return nil, ErrNotCoveredYet
 	}
 	// If we're in the disk layer, all diff layers missed
-	routeid := cachemetrics.Goid()
-	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
 	snapshotDirtyAccountMissMeter.Mark(1)
 
 	hitInL3 := false
-	hitInDisk := false
 	var startGetInDisk time.Time
 	defer func() {
 		// if mainProcess
@@ -140,11 +138,6 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 				syncL3AccountHitMeter.Mark(1)
 				cachemetrics.RecordCacheMetrics("CACHE_L3_ACCOUNT", start)
 				cachemetrics.RecordTotalCosts("CACHE_L3_ACCOUNT", start)
-				//	cachemetrics.RecordCacheDepth("CACHE_L3_ACCOUNT")
-			}
-			if hitInDisk {
-				syncL3AccountMissMeter.Mark(1)
-				cachemetrics.RecordCacheMetrics("DISK_L4_ACCOUNT", startGetInDisk)
 			}
 		}
 	}()
@@ -160,9 +153,12 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	startGetInDisk = time.Now()
 	// Cache doesn't contain account, pull from disk and cache for later
 	blob := rawdb.ReadAccountSnapshot(dl.diskdb, hash)
+	if isSyncMainProcess {
+		syncL3AccountMissMeter.Mark(1)
+		cachemetrics.RecordCacheMetrics("DISK_L4_ACCOUNT", startGetInDisk)
+		cachemetrics.RecordTotalCosts("DISK_L4_ACCOUNT", startGetInDisk)
+	}
 	dl.cache.Set(hash[:], blob)
-	hitInDisk = true
-
 	snapshotCleanAccountMissMeter.Mark(1)
 	if n := len(blob); n > 0 {
 		snapshotCleanAccountWriteMeter.Mark(int64(n))
@@ -179,12 +175,10 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	defer dl.lock.RUnlock()
 	start := time.Now()
 
-	routeid := cachemetrics.Goid()
 	hitInL3 := false
-	hitInDisk := false
 	var startGetInDisk time.Time
+	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
 	defer func() {
-		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
 		if isSyncMainProcess {
 			// layer 2 miss
 			syncL2StorageMissMeter.Mark(1)
@@ -192,12 +186,6 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 				syncL3StorageHitMeter.Mark(1)
 				cachemetrics.RecordCacheMetrics("CACHE_L3_STORAGE", start)
 				cachemetrics.RecordTotalCosts("CACHE_L3_STORAGE", start)
-			}
-			if hitInDisk {
-				// layer 3 miss
-				syncL3StorageMissMeter.Mark(1)
-				cachemetrics.RecordCacheMetrics("DISK_L4_STORAGE", startGetInDisk)
-				cachemetrics.RecordTotalCosts("DISK_L4_STORAGE", startGetInDisk)
 			}
 		}
 	}()
@@ -226,8 +214,13 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	startGetInDisk = time.Now()
 	// Cache doesn't contain storage slot, pull from disk and cache for later
 	blob := rawdb.ReadStorageSnapshot(dl.diskdb, accountHash, storageHash)
+	if isSyncMainProcess {
+		// layer 3 miss
+		syncL3StorageMissMeter.Mark(1)
+		cachemetrics.RecordCacheMetrics("DISK_L4_STORAGE", startGetInDisk)
+		cachemetrics.RecordTotalCosts("DISK_L4_STORAGE", startGetInDisk)
+	}
 	dl.cache.Set(key, blob)
-	hitInDisk = true
 	snapshotCleanStorageMissMeter.Mark(1)
 	if n := len(blob); n > 0 {
 		snapshotCleanStorageWriteMeter.Mark(int64(n))

@@ -537,23 +537,29 @@ func (s *StateDB) GetCodeHash(addr common.Address) common.Hash {
 
 // GetState retrieves a value from the given account's storage trie.
 func (s *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
-	start := time.Now()
-	goid := cachemetrics.Goid()
-	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
-	defer func() {
-		if isSyncMainProcess {
-			syncGetDelay := time.Since(start)
-			getStatetSyncIOCost.Update(syncGetDelay)
-			l1AccountMeter.Mark(1)
-		}
-		// s.markMetrics(start, false, "GetState")
-	}()
+	/*
+		start := time.Now()
+		goid := cachemetrics.Goid()
+		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
+		defer func() {
+			if isSyncMainProcess {
+				syncGetDelay := time.Since(start)
+				getStatetSyncIOCost.Update(syncGetDelay)
+				//	l1AccountMeter.Mark(1)
+			}
+			// s.markMetrics(start, false, "GetState")
+		}()
+
+	*/
 
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
-		if isSyncMainProcess {
-			l1StorageMeter.Mark(1)
-		}
+		/*
+			if isSyncMainProcess {
+				l1StorageMeter.Mark(1)
+			}
+
+		*/
 		return stateObject.GetState(hash)
 	}
 	return common.Hash{}
