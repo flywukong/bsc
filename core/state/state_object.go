@@ -269,13 +269,16 @@ func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetS
 	s.db.StorageLoaded++
 
 	var start2 time.Time
-	start2 = time.Now()
-	value, err := s.db.reader.Storage(s.address, key)
+	//isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
+	if s.db.EnablePerf {
+		start2 = time.Now()
+	}
+	value, err := s.db.reader.Storage(s.address, key, s.db.EnablePerf)
 	if err != nil {
 		s.db.setError(err)
 		return common.Hash{}
 	}
-	if isSyncMainProcess {
+	if s.db.EnablePerf {
 		log.Info("main process access storage")
 		readerStorageAccessMeter.Mark(1)
 		s.db.ReaderStorageAccessNum += 1

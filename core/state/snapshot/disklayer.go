@@ -94,8 +94,8 @@ func (dl *diskLayer) markStale() {
 
 // Account directly retrieves the account associated with a particular hash in
 // the snapshot slim data format.
-func (dl *diskLayer) Account(hash common.Hash) (*types.SlimAccount, error) {
-	data, err := dl.AccountRLP(hash)
+func (dl *diskLayer) Account(hash common.Hash, enablePerf bool) (*types.SlimAccount, error) {
+	data, err := dl.AccountRLP(hash, enablePerf)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +111,7 @@ func (dl *diskLayer) Account(hash common.Hash) (*types.SlimAccount, error) {
 
 // AccountRLP directly retrieves the account RLP associated with a particular
 // hash in the snapshot slim data format.
-func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
+func (dl *diskLayer) AccountRLP(hash common.Hash, enablePerf bool) ([]byte, error) {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
 	start := time.Now()
@@ -126,14 +126,14 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 		return nil, ErrNotCoveredYet
 	}
 	// If we're in the disk layer, all diff layers missed
-	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
+	//isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
 	snapshotDirtyAccountMissMeter.Mark(1)
 
 	hitInL3 := false
 	var startGetInDisk time.Time
 	defer func() {
 		// if mainProcess
-		if isSyncMainProcess {
+		if enablePerf {
 			syncL2AccountMissMeter.Mark(1)
 			if hitInL3 {
 				syncL3AccountHitMeter.Mark(1)
@@ -155,7 +155,7 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	startGetInDisk = time.Now()
 	// Cache doesn't contain account, pull from disk and cache for later
 	blob := rawdb.ReadAccountSnapshot(dl.diskdb, hash)
-	if isSyncMainProcess {
+	if enablePerf {
 		syncL3AccountMissMeter.Mark(1)
 		cachemetrics.RecordCacheMetrics("DISK_L4_ACCOUNT", startGetInDisk)
 		//	cachemetrics.RecordTotalCosts("DISK_L4_ACCOUNT", startGetInDisk)
@@ -173,7 +173,7 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 
 // Storage directly retrieves the storage data associated with a particular hash,
 // within a particular account.
-func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, error) {
+func (dl *diskLayer) Storage(accountHash, storageHash common.Hash, enablePerf bool) ([]byte, error) {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
 	start := time.Now()
@@ -185,7 +185,7 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 		log.Info("main process access disklayer storage")
 	}
 	defer func() {
-		if isSyncMainProcess {
+		if enablePerf {
 			// layer 2 miss
 			syncL2StorageMissMeter.Mark(1)
 			if hitInL3 {
@@ -223,6 +223,8 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	blob := rawdb.ReadStorageSnapshot(dl.diskdb, accountHash, storageHash)
 	if isSyncMainProcess {
 		log.Info("main process access pebble storage")
+	}
+	if enablePerf {
 		// layer 3 miss
 		syncL3StorageMissMeter.Mark(1)
 		cachemetrics.RecordCacheMetrics("DISK_L4_STORAGE", startGetInDisk)

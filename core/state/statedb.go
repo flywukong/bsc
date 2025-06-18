@@ -830,7 +830,7 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	s.AccountLoaded++
 
 	start2 := time.Now()
-	acct, err := s.reader.Account(addr)
+	acct, err := s.reader.Account(addr, s.EnablePerf)
 	if err != nil {
 		s.setError(fmt.Errorf("getStateObject (%x) error: %w", addr.Bytes(), err))
 		return nil
