@@ -817,7 +817,21 @@ func (s *StateDB) deleteStateObject(addr common.Address) {
 // the object is not found or was deleted in this execution context.
 func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	// Prefer live objects if any is available
+	start := time.Now()
+	hit := false
+	defer func() {
+		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
+		if isSyncMainProcess && hit {
+			syncL1HitAccountMeter.Mark(1)
+			cachemetrics.RecordCacheMetrics("CACHE_L1_ACCOUNT", start)
+			cachemetrics.RecordTotalCosts("CACHE_L1_ACCOUNT", start)
+			l1AccountMeter.Mark(1)
+		}
+	}()
+
+	// Prefer live objects if any is available
 	if obj := s.stateObjects[addr]; obj != nil {
+		hit = true
 		return obj
 	}
 	// Short circuit if the account is already destructed in this block.
