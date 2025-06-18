@@ -72,8 +72,8 @@ var (
 	BlockDiffLayerStorageReadCost   = metrics.NewRegisteredTimer("block/difflayer/storage/readcost", nil)
 	BlockDiskLayerAccountReadCost   = metrics.NewRegisteredTimer("block/disklayer/account/readcost", nil)
 	BlockDiskLayerStorageReadCost   = metrics.NewRegisteredTimer("block/disklayer/storage/readcost", nil)
-	BlockDiskLayerAccountPebbleCost = metrics.NewRegisteredTimer("block/disklayer/account/pebbleread_cost", nil)
-	BlockDiskLayerStoragePebbleCost = metrics.NewRegisteredTimer("block/disklayer/storage/pebbleread_cost", nil)
+	BlockDiskLayerAccountPebbleCost = metrics.NewRegisteredTimer("block/disklayer/account/pebblecost", nil)
+	BlockDiskLayerStoragePebbleCost = metrics.NewRegisteredTimer("block/disklayer/storage/pebblecost", nil)
 )
 
 // mark the info of total hit counts of each layers
