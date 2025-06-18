@@ -174,7 +174,9 @@ type StateDB struct {
 
 	// Measurements gathered during execution for debugging purposes
 	// MetricsMux should be used in more places, but will affect on performance, so following meteration is not accruate
-	MetricsMux     sync.Mutex
+	MetricsMux      sync.Mutex
+	totalSyncIOCost time.Duration
+
 	AccountReads   time.Duration
 	AccountHashes  time.Duration
 	AccountUpdates time.Duration
@@ -196,6 +198,21 @@ type StateDB struct {
 	StorageLoaded  int          // Number of storage slots retrieved from the database during the state transition
 	StorageUpdated atomic.Int64 // Number of storage slots updated during the state transition
 	StorageDeleted atomic.Int64 // Number of storage slots deleted during the state transition
+
+	// 新增：各 get/set 方法的总耗时统计字段
+	TotalGetBalanceCost     time.Duration
+	TotalGetNonceCost       time.Duration
+	TotalGetStorageRootCost time.Duration
+	TotalGetCodeCost        time.Duration
+	TotalGetCodeSizeCost    time.Duration
+	TotalGetCodeHashCost    time.Duration
+	TotalGetStateCost       time.Duration
+	TotalSetBalanceCost     time.Duration
+	TotalSetNonceCost       time.Duration
+	TotalSetCodeCost        time.Duration
+	TotalSetStateCost       time.Duration
+	TotalEmptyCost          time.Duration
+	TotalExistCost          time.Duration
 }
 
 // NewWithSharedPool creates a new state with sharedStorge on layer 1.5
@@ -421,12 +438,16 @@ func (s *StateDB) SubRefund(gas uint64) {
 // Exist reports whether the given account address exists in the state.
 // Notably this also returns true for self-destructed accounts.
 func (s *StateDB) Exist(addr common.Address) bool {
+	start := time.Now()
+	defer s.markMetrics(start, false, "Exist")
 	return s.getStateObject(addr) != nil
 }
 
 // Empty returns whether the state object is either non-existent
 // or empty according to the EIP161 specification (balance = nonce = code = 0)
 func (s *StateDB) Empty(addr common.Address) bool {
+	start := time.Now()
+	defer s.markMetrics(start, false, "Empty")
 	so := s.getStateObject(addr)
 	return so == nil || so.empty()
 }
@@ -434,7 +455,7 @@ func (s *StateDB) Empty(addr common.Address) bool {
 // GetBalance retrieves the balance from the given address or 0 if object not found
 func (s *StateDB) GetBalance(addr common.Address) *uint256.Int {
 	start := time.Now()
-	defer s.markMetrics(start, false)
+	defer s.markMetrics(start, false, "GetBalance")
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.Balance()
@@ -445,7 +466,7 @@ func (s *StateDB) GetBalance(addr common.Address) *uint256.Int {
 // GetNonce retrieves the nonce from the given address or 0 if object not found
 func (s *StateDB) GetNonce(addr common.Address) uint64 {
 	start := time.Now()
-	defer s.markMetrics(start, false)
+	defer s.markMetrics(start, false, "GetNonce")
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.Nonce()
@@ -456,6 +477,8 @@ func (s *StateDB) GetNonce(addr common.Address) uint64 {
 // GetStorageRoot retrieves the storage root from the given address or empty
 // if object not found.
 func (s *StateDB) GetStorageRoot(addr common.Address) common.Hash {
+	start := time.Now()
+	defer s.markMetrics(start, false, "GetStorageRoot")
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.Root()
@@ -470,7 +493,7 @@ func (s *StateDB) TxIndex() int {
 
 func (s *StateDB) GetCode(addr common.Address) []byte {
 	start := time.Now()
-	defer s.markMetrics(start, false)
+	defer s.markMetrics(start, false, "GetCode")
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		if s.witness != nil {
@@ -491,7 +514,7 @@ func (s *StateDB) GetRoot(addr common.Address) common.Hash {
 
 func (s *StateDB) GetCodeSize(addr common.Address) int {
 	start := time.Now()
-	defer s.markMetrics(start, false)
+	defer s.markMetrics(start, false, "GetCodeSize")
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		if s.witness != nil {
@@ -504,7 +527,7 @@ func (s *StateDB) GetCodeSize(addr common.Address) int {
 
 func (s *StateDB) GetCodeHash(addr common.Address) common.Hash {
 	start := time.Now()
-	defer s.markMetrics(start, false)
+	defer s.markMetrics(start, false, "GetCodeHash")
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return common.BytesToHash(stateObject.CodeHash())
@@ -512,21 +535,41 @@ func (s *StateDB) GetCodeHash(addr common.Address) common.Hash {
 	return common.Hash{}
 }
 
-func (s *StateDB) markMetrics(start time.Time, reachStorage bool) {
-	return
-	/*
-		goid := cachemetrics.Goid()
-		//	start2 := time.Now()
-		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
-		//log.Info("get goid cost time", "cost", time.Since(start2).Nanoseconds())
-		// record metrics of syncing main process
-		if isSyncMainProcess {
-			l1AccountMeter.Mark(1)
-			if reachStorage {
-				l1StorageMeter.Mark(1)
-			}
-		}
-	*/
+func (s *StateDB) markMetrics(start time.Time, reachStorage bool, op string) {
+	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
+	if !isSyncMainProcess {
+		return
+	}
+	elapsed := time.Since(start)
+	s.totalSyncIOCost += elapsed
+	switch op {
+	case "GetBalance":
+		s.TotalGetBalanceCost += elapsed
+	case "GetNonce":
+		s.TotalGetNonceCost += elapsed
+	case "GetStorageRoot":
+		s.TotalGetStorageRootCost += elapsed
+	case "GetCode":
+		s.TotalGetCodeCost += elapsed
+	case "GetCodeSize":
+		s.TotalGetCodeSizeCost += elapsed
+	case "GetCodeHash":
+		s.TotalGetCodeHashCost += elapsed
+	case "GetState":
+		s.TotalGetStateCost += elapsed
+	case "SetBalance":
+		s.TotalSetBalanceCost += elapsed
+	case "SetNonce":
+		s.TotalSetNonceCost += elapsed
+	case "SetCode":
+		s.TotalSetCodeCost += elapsed
+	case "SetState":
+		s.TotalSetStateCost += elapsed
+	case "Empty":
+		s.TotalEmptyCost += elapsed
+	case "Exist":
+		s.TotalExistCost += elapsed
+	}
 }
 
 // GetState retrieves a value from the given account's storage trie.
@@ -535,12 +578,12 @@ func (s *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
 	goid := cachemetrics.Goid()
 	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(goid)
 	defer func() {
-		// record metrics of syncing main process
 		if isSyncMainProcess {
 			syncGetDelay := time.Since(start)
 			getStatetSyncIOCost.Update(syncGetDelay)
 			l1AccountMeter.Mark(1)
 		}
+		s.markMetrics(start, false, "GetState")
 	}()
 
 	stateObject := s.getStateObject(addr)
@@ -558,7 +601,7 @@ func (s *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
 func (s *StateDB) GetCommittedState(addr common.Address, hash common.Hash) common.Hash {
 	start := time.Now()
 	needStorage := false
-	defer s.markMetrics(start, needStorage)
+	defer s.markMetrics(start, needStorage, "GetCommittedState")
 	stateObject := s.getStateObject(addr)
 	hit := false
 
@@ -589,8 +632,8 @@ func (s *StateDB) HasSelfDestructed(addr common.Address) bool {
 // AddBalance adds amount to the account associated with addr.
 func (s *StateDB) AddBalance(addr common.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) uint256.Int {
 	start := time.Now()
-	defer s.markMetrics(start, false)
 	stateObject := s.getOrNewStateObject(addr)
+	s.markMetrics(start, false, "AddBalance")
 	if stateObject == nil {
 		return uint256.Int{}
 	}
@@ -599,9 +642,9 @@ func (s *StateDB) AddBalance(addr common.Address, amount *uint256.Int, reason tr
 
 // SubBalance subtracts amount from the account associated with addr.
 func (s *StateDB) SubBalance(addr common.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) uint256.Int {
-	//	start := time.Now()
-	//	defer s.markMetrics(start, false)
+	start := time.Now()
 	stateObject := s.getOrNewStateObject(addr)
+	s.markMetrics(start, false, "SubBalance")
 	if stateObject == nil {
 		return uint256.Int{}
 	}
@@ -613,8 +656,8 @@ func (s *StateDB) SubBalance(addr common.Address, amount *uint256.Int, reason tr
 
 func (s *StateDB) SetBalance(addr common.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	start := time.Now()
-	defer s.markMetrics(start, false)
 	stateObject := s.getOrNewStateObject(addr)
+	s.markMetrics(start, false, "SetBalance")
 	if stateObject != nil {
 		stateObject.SetBalance(amount)
 	}
@@ -622,8 +665,8 @@ func (s *StateDB) SetBalance(addr common.Address, amount *uint256.Int, reason tr
 
 func (s *StateDB) SetNonce(addr common.Address, nonce uint64, reason tracing.NonceChangeReason) {
 	start := time.Now()
-	defer s.markMetrics(start, false)
 	stateObject := s.getOrNewStateObject(addr)
+	s.markMetrics(start, false, "SetNonce")
 	if stateObject != nil {
 		stateObject.SetNonce(nonce)
 	}
@@ -631,20 +674,19 @@ func (s *StateDB) SetNonce(addr common.Address, nonce uint64, reason tracing.Non
 
 func (s *StateDB) SetCode(addr common.Address, code []byte) (prev []byte) {
 	start := time.Now()
-	defer s.markMetrics(start, false)
 	stateObject := s.getOrNewStateObject(addr)
+	s.markMetrics(start, false, "SetCode")
 	if stateObject != nil {
-		return stateObject.SetCode(crypto.Keccak256Hash(code), code)
+		prev = stateObject.SetCode(crypto.Keccak256Hash(code), code)
 	}
-	return nil
+	return prev
 }
 
 func (s *StateDB) SetState(addr common.Address, key, value common.Hash) common.Hash {
 	start := time.Now()
-	markStorage := false
-	defer s.markMetrics(start, markStorage)
-	if stateObject := s.getOrNewStateObject(addr); stateObject != nil {
-		markStorage = true
+	stateObject := s.getOrNewStateObject(addr)
+	s.markMetrics(start, false, "SetState")
+	if stateObject != nil {
 		return stateObject.SetState(key, value)
 	}
 	return common.Hash{}
@@ -775,22 +817,7 @@ func (s *StateDB) deleteStateObject(addr common.Address) {
 // the object is not found or was deleted in this execution context.
 func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	// Prefer live objects if any is available
-	/*
-		start := time.Now()
-		hit := false
-		defer func() {
-			routeid := cachemetrics.Goid()
-			isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-			if isSyncMainProcess && hit {
-				syncL1HitAccountMeter.Mark(1)
-				cachemetrics.RecordCacheMetrics("CACHE_L1_ACCOUNT", start)
-			}
-		}()
-
-	*/
-
 	if obj := s.stateObjects[addr]; obj != nil {
-		//	hit = true
 		return obj
 	}
 	// Short circuit if the account is already destructed in this block.
@@ -805,7 +832,8 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 		s.setError(fmt.Errorf("getStateObject (%x) error: %w", addr.Bytes(), err))
 		return nil
 	}
-	if metrics.EnabledExpensive() {
+	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
+	if isSyncMainProcess {
 		s.AccountReads += time.Since(start2)
 	}
 
@@ -854,7 +882,7 @@ func (s *StateDB) createObject(addr common.Address) *stateObject {
 // consensus bug eventually.
 func (s *StateDB) CreateAccount(addr common.Address) {
 	start := time.Now()
-	defer s.markMetrics(start, false)
+	defer s.markMetrics(start, false, "CreateAccount")
 	s.createObject(addr)
 }
 
@@ -888,25 +916,21 @@ func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 	// Copy all the basic fields, initialize the memory ones
 	reader, _ := s.db.Reader(s.originalRoot) // impossible to fail
 	state := &StateDB{
-		db:   s.db,
-		trie: mustCopyTrie(s.trie),
-		// noTrie:s.noTrie,
-		reader: reader,
-		// expectedRoot:         s.expectedRoot,
-		originalRoot: s.originalRoot,
-		// fullProcessed:        s.fullProcessed,
+		db:                   s.db,
+		trie:                 mustCopyTrie(s.trie),
+		reader:               reader,
+		originalRoot:         s.originalRoot,
 		stateObjects:         make(map[common.Address]*stateObject, len(s.journal.dirties)),
 		stateObjectsDestruct: make(map[common.Address]*stateObject, len(s.stateObjectsDestruct)),
 		mutations:            make(map[common.Address]*mutation, len(s.mutations)),
 		dbErr:                s.dbErr,
 		storagePool:          s.storagePool,
-		// writeOnSharedStorage: s.writeOnSharedStorage,
-		refund:    s.refund,
-		thash:     s.thash,
-		txIndex:   s.txIndex,
-		logs:      make(map[common.Hash][]*types.Log, len(s.logs)),
-		logSize:   s.logSize,
-		preimages: maps.Clone(s.preimages),
+		refund:               s.refund,
+		thash:                s.thash,
+		txIndex:              s.txIndex,
+		logs:                 make(map[common.Hash][]*types.Log, len(s.logs)),
+		logSize:              s.logSize,
+		preimages:            maps.Clone(s.preimages),
 
 		transientStorage: s.transientStorage.Copy(),
 		journal:          s.journal.copy(),
@@ -1015,6 +1039,15 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 	}
 	// Invalidate journal because reverting across transactions is not allowed.
 	s.clearJournalAndRefund()
+
+	// 新增：清零各 get 方法的总耗时统计字段
+	s.TotalGetBalanceCost = 0
+	s.TotalGetNonceCost = 0
+	s.TotalGetStorageRootCost = 0
+	s.TotalGetCodeCost = 0
+	s.TotalGetCodeSizeCost = 0
+	s.TotalGetCodeHashCost = 0
+	s.TotalGetStateCost = 0
 }
 
 // IntermediateRoot computes the current root hash of the state trie.
