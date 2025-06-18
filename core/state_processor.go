@@ -204,7 +204,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 			}
 		}
 
-	
+
 	*/
 	return &ProcessResult{
 		Receipts: receipts,
