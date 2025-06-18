@@ -158,7 +158,7 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 		syncL3AccountMissMeter.Mark(1)
 		cachemetrics.RecordCacheMetrics("DISK_L4_ACCOUNT", startGetInDisk)
 		//	cachemetrics.RecordTotalCosts("DISK_L4_ACCOUNT", startGetInDisk)
-		cachemetrics.AddDiskLayerStoragePebbleRead(time.Since(startGetInDisk))
+		cachemetrics.AddDiskLayerAccountPebbleRead(time.Since(startGetInDisk))
 	}
 	dl.cache.Set(hash[:], blob)
 	snapshotCleanAccountMissMeter.Mark(1)
