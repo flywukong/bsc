@@ -236,8 +236,8 @@ func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetS
 			if s.db.EnablePerf && *hit {
 				s.db.StorageL1Reads += time.Since(start)
 				syncL1HitStorageMeter.Mark(1)
-				cachemetrics.RecordCacheMetrics("CACHE_L1_STORAGE", start)
-				cachemetrics.RecordTotalCosts("CACHE_L1_STORAGE", start)
+				//		cachemetrics.RecordCacheMetrics("CACHE_L1_STORAGE", start)
+				//		cachemetrics.RecordTotalCosts("CACHE_L1_STORAGE", start)
 			}
 		}
 	}()
