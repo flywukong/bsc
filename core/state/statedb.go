@@ -178,6 +178,8 @@ type StateDB struct {
 	totalSyncIOCost time.Duration
 
 	AccountReads   time.Duration
+	AccountL1Reads time.Duration
+	StorageL1Reads time.Duration
 	AccountHashes  time.Duration
 	AccountUpdates time.Duration
 	AccountCommits time.Duration
@@ -795,6 +797,7 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 			syncL1HitAccountMeter.Mark(1)
 			cachemetrics.RecordCacheMetrics("CACHE_L1_ACCOUNT", start)
 			cachemetrics.RecordTotalCosts("CACHE_L1_ACCOUNT", start)
+			s.AccountL1Reads += time.Since(start)
 			l1AccountMeter.Mark(1)
 		}
 	}()
@@ -816,8 +819,8 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 		s.setError(fmt.Errorf("getStateObject (%x) error: %w", addr.Bytes(), err))
 		return nil
 	}
-	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
-	if isSyncMainProcess {
+	//	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
+	if s.EnablePerf {
 		s.AccountReads += time.Since(start2)
 	}
 

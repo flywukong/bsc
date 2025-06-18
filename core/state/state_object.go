@@ -201,6 +201,7 @@ func (s *stateObject) GetState(key common.Hash) common.Hash {
 		// isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
 		if s.db.EnablePerf && hitInCache {
 			//syncL1HitStorageMeter.Mark(1)
+			s.db.StorageL1Reads += time.Since(start)
 			l1StorageMeter.Mark(1)
 			cachemetrics.RecordCacheMetrics("CACHE_L1_STORAGE", start)
 			cachemetrics.RecordTotalCosts("CACHE_L1_STORAGE", start)
@@ -233,6 +234,7 @@ func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetS
 			//	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
 			l1StorageMeter.Mark(1)
 			if s.db.EnablePerf && *hit {
+				s.db.StorageL1Reads += time.Since(start)
 				syncL1HitStorageMeter.Mark(1)
 				cachemetrics.RecordCacheMetrics("CACHE_L1_STORAGE", start)
 				cachemetrics.RecordTotalCosts("CACHE_L1_STORAGE", start)
@@ -263,8 +265,8 @@ func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetS
 	s.db.StorageLoaded++
 
 	var start2 time.Time
-	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
-	if isSyncMainProcess {
+	//isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
+	if s.db.EnablePerf {
 		start2 = time.Now()
 	}
 	value, err := s.db.reader.Storage(s.address, key)
@@ -272,7 +274,7 @@ func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetS
 		s.db.setError(err)
 		return common.Hash{}
 	}
-	if isSyncMainProcess {
+	if s.db.EnablePerf {
 		s.db.StorageReads += time.Since(start2)
 	}
 

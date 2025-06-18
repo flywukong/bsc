@@ -81,11 +81,13 @@ var (
 	chainInfoGauge = metrics.NewRegisteredGaugeInfo("chain/info", nil)
 
 	accountReadTimer   = metrics.NewRegisteredTimer("chain/account/reads", nil)
+	accountL1ReadTimer = metrics.NewRegisteredTimer("chain/l1account/reads", nil)
 	accountHashTimer   = metrics.NewRegisteredTimer("chain/account/hashes", nil)
 	accountUpdateTimer = metrics.NewRegisteredTimer("chain/account/updates", nil)
 	accountCommitTimer = metrics.NewRegisteredTimer("chain/account/commits", nil)
 
 	storageReadTimer   = metrics.NewRegisteredTimer("chain/storage/reads", nil)
+	storageL1ReadTimer = metrics.NewRegisteredTimer("chain/l1storage/reads", nil)
 	storageUpdateTimer = metrics.NewRegisteredTimer("chain/storage/updates", nil)
 	storageCommitTimer = metrics.NewRegisteredTimer("chain/storage/commits", nil)
 
@@ -100,6 +102,7 @@ var (
 	blockCrossValidationTimer = metrics.NewRegisteredTimer("chain/crossvalidation", nil)
 	blockExecutionTimer       = metrics.NewRegisteredTimer("chain/execution", nil)
 	blockEVMExecutionTimer    = metrics.NewRegisteredTimer("chain/evmexecution", nil)
+	blockEVMExecutionTimer2   = metrics.NewRegisteredTimer("chain/evmexecution2", nil)
 	blockWriteTimer           = metrics.NewRegisteredTimer("chain/write", nil)
 
 	blockReorgMeter     = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
@@ -2484,12 +2487,17 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 		storageUpdateTimer.Update(statedb.StorageUpdates) // Storage updates are complete(in validation)
 		accountHashTimer.Update(statedb.AccountHashes)    // Account hashes are complete(in validation)
 	}
-	accountReadTimer.Update(statedb.AccountReads)                 // Account reads are complete(in processing)
-	storageReadTimer.Update(statedb.StorageReads)                 // Storage reads are complete(in processing)
+	accountReadTimer.Update(statedb.AccountReads)     // Account reads are complete(in processing)
+	storageReadTimer.Update(statedb.StorageReads)     // Storage reads are complete(in processing)
+	accountL1ReadTimer.Update(statedb.AccountL1Reads) // Account reads are complete(in processing)
+	storageL1ReadTimer.Update(statedb.StorageL1Reads) // Storage reads are complete(in processing)
+
 	triehash := statedb.AccountHashes                             // The time spent on tries hashing
 	trieUpdate := statedb.AccountUpdates + statedb.StorageUpdates // The time spent on tries update
 	blockExecutionTimer.Update(ptime)                             // The time spent on EVM processing
 	blockEVMExecutionTimer.Update(ptime - (statedb.AccountReads + statedb.StorageReads))
+	blockEVMExecutionTimer2.Update(ptime - (statedb.AccountReads + statedb.StorageReads + statedb.L1CacheAccountReads +
+		statedb.L1CacheStorageReads))
 	blockValidationTimer.Update(vtime - (triehash + trieUpdate)) // The time spent on block validation
 	blockCrossValidationTimer.Update(xvtime)                     // The time spent on stateless cross validation
 
