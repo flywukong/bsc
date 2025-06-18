@@ -199,6 +199,7 @@ type StateDB struct {
 	StorageUpdated atomic.Int64 // Number of storage slots updated during the state transition
 	StorageDeleted atomic.Int64 // Number of storage slots deleted during the state transition
 
+	EnablePerf bool
 	// 新增：各 get/set 方法的总耗时统计字段
 	// TotalGetBalanceCost     time.Duration
 	// TotalGetNonceCost       time.Duration
@@ -789,8 +790,8 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	start := time.Now()
 	hit := false
 	defer func() {
-		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
-		if isSyncMainProcess && hit {
+		//	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
+		if s.EnablePerf && hit {
 			syncL1HitAccountMeter.Mark(1)
 			cachemetrics.RecordCacheMetrics("CACHE_L1_ACCOUNT", start)
 			cachemetrics.RecordTotalCosts("CACHE_L1_ACCOUNT", start)
