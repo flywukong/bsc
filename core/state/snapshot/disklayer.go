@@ -139,6 +139,8 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 			if hitInL3 {
 				syncL3AccountHitMeter.Mark(1)
 				cachemetrics.RecordCacheMetrics("CACHE_L3_ACCOUNT", start)
+				cachemetrics.RecordTotalCosts("CACHE_L3_ACCOUNT", start)
+				//	cachemetrics.RecordCacheDepth("CACHE_L3_ACCOUNT")
 			}
 			if hitInDisk {
 				syncL3AccountMissMeter.Mark(1)
@@ -189,11 +191,13 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 			if hitInL3 {
 				syncL3StorageHitMeter.Mark(1)
 				cachemetrics.RecordCacheMetrics("CACHE_L3_STORAGE", start)
+				cachemetrics.RecordTotalCosts("CACHE_L3_STORAGE", start)
 			}
 			if hitInDisk {
 				// layer 3 miss
 				syncL3StorageMissMeter.Mark(1)
 				cachemetrics.RecordCacheMetrics("DISK_L4_STORAGE", startGetInDisk)
+				cachemetrics.RecordTotalCosts("DISK_L4_STORAGE", startGetInDisk)
 			}
 		}
 	}()
