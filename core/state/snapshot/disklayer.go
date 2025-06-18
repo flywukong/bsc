@@ -156,7 +156,7 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	if isSyncMainProcess {
 		syncL3AccountMissMeter.Mark(1)
 		cachemetrics.RecordCacheMetrics("DISK_L4_ACCOUNT", startGetInDisk)
-		cachemetrics.RecordTotalCosts("CACHE_L4_ACCOUNT", startGetInDisk)
+		cachemetrics.RecordTotalCosts("DISK_L4_ACCOUNT", startGetInDisk)
 	}
 	dl.cache.Set(hash[:], blob)
 	snapshotCleanAccountMissMeter.Mark(1)
