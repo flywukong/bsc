@@ -26,6 +26,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/metrics"
 
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -226,19 +227,6 @@ func (s *stateObject) getState(key common.Hash, hit *bool, calledByGetState bool
 // GetCommittedState retrieves the value associated with the specific key
 // without any mutations caused in the current execution.
 func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetState bool) common.Hash {
-	/*
-		start := time.Now()
-		defer func() {
-			if !calledByGetState {
-				routeid := cachemetrics.Goid()
-				isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-				if isSyncMainProcess && *hit {
-					syncL1HitStorageMeter.Mark(1)
-					cachemetrics.RecordCacheMetrics("CACHE_L1_STORAGE", start)
-				}
-			}
-		}()
-	*/
 	// If we have a pending write or clean cached, return that
 	if value, pending := s.pendingStorage[key]; pending {
 		*hit = true
@@ -262,7 +250,8 @@ func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetS
 	s.db.StorageLoaded++
 
 	var start2 time.Time
-	if metrics.EnabledExpensive() {
+	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
+	if isSyncMainProcess {
 		start2 = time.Now()
 	}
 	value, err := s.db.reader.Storage(s.address, key)
@@ -270,17 +259,9 @@ func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetS
 		s.db.setError(err)
 		return common.Hash{}
 	}
-	if metrics.EnabledExpensive() {
+	if isSyncMainProcess {
 		s.db.StorageReads += time.Since(start2)
 	}
-
-	// Schedule the resolved storage slots for prefetching if it's enabled.
-	if s.db.prefetcher != nil && s.data.Root != types.EmptyRootHash {
-		if err = s.db.prefetcher.prefetch(s.addrHash, s.origin.Root, s.address, nil, []common.Hash{key}, true); err != nil {
-			log.Error("Failed to prefetch storage slot", "addr", s.address, "key", key, "err", err)
-		}
-	}
-	s.setOriginStorage(key, value)
 	return value
 }
 
