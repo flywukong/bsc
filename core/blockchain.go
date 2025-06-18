@@ -2496,8 +2496,8 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 	trieUpdate := statedb.AccountUpdates + statedb.StorageUpdates // The time spent on tries update
 	blockExecutionTimer.Update(ptime)                             // The time spent on EVM processing
 	blockEVMExecutionTimer.Update(ptime - (statedb.AccountReads + statedb.StorageReads))
-	blockEVMExecutionTimer2.Update(ptime - (statedb.AccountReads + statedb.StorageReads + statedb.L1CacheAccountReads +
-		statedb.L1CacheStorageReads))
+	blockEVMExecutionTimer2.Update(ptime - (statedb.AccountReads + statedb.StorageReads + statedb.AccountL1Reads +
+		statedb.StorageL1Reads))
 	blockValidationTimer.Update(vtime - (triehash + trieUpdate)) // The time spent on block validation
 	blockCrossValidationTimer.Update(xvtime)                     // The time spent on stateless cross validation
 
