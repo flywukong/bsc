@@ -2442,6 +2442,15 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 	}
 	vtime := time.Since(vstart)
 
+	cachemetrics.BlockDiffLayerAccountReadCost.Update(cachemetrics.DiffLayerAccountReadCost)
+	cachemetrics.BlockDiffLayerStorageReadCost.Update(cachemetrics.DiffLayerStorageReadCost)
+	cachemetrics.BlockDiskLayerAccountReadCost.Update(cachemetrics.DiskLayerAccountReadCost)
+	cachemetrics.BlockDiskLayerStorageReadCost.Update(cachemetrics.DiskLayerStorageReadCost)
+	cachemetrics.BlockDiskLayerAccountPebbleCost.Update(cachemetrics.DiskLayerAccountPebbleReadCost)
+	cachemetrics.BlockDiskLayerStoragePebbleCost.Update(cachemetrics.DiskLayerStoragePebbleReadCost)
+
+	cachemetrics.ResetLayerMetrics()
+
 	// If witnesses was generated and stateless self-validation requested, do
 	// that now. Self validation should *never* run in production, it's more of
 	// a tight integration to enable running *all* consensus tests through the

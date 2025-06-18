@@ -137,7 +137,8 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 			if hitInL3 {
 				syncL3AccountHitMeter.Mark(1)
 				cachemetrics.RecordCacheMetrics("CACHE_L3_ACCOUNT", start)
-				cachemetrics.RecordTotalCosts("CACHE_L3_ACCOUNT", start)
+				cachemetrics.AddDiffLayerAccountRead(time.Since(start))
+				//		cachemetrics.RecordTotalCosts("CACHE_L3_ACCOUNT", start)
 			}
 		}
 	}()
@@ -156,7 +157,8 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	if isSyncMainProcess {
 		syncL3AccountMissMeter.Mark(1)
 		cachemetrics.RecordCacheMetrics("DISK_L4_ACCOUNT", startGetInDisk)
-		cachemetrics.RecordTotalCosts("DISK_L4_ACCOUNT", startGetInDisk)
+		//	cachemetrics.RecordTotalCosts("DISK_L4_ACCOUNT", startGetInDisk)
+		cachemetrics.AddDiskLayerStoragePebbleRead(time.Since(startGetInDisk))
 	}
 	dl.cache.Set(hash[:], blob)
 	snapshotCleanAccountMissMeter.Mark(1)
@@ -185,7 +187,8 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 			if hitInL3 {
 				syncL3StorageHitMeter.Mark(1)
 				cachemetrics.RecordCacheMetrics("CACHE_L3_STORAGE", start)
-				cachemetrics.RecordTotalCosts("CACHE_L3_STORAGE", start)
+				cachemetrics.AddDiskLayerStorageRead(time.Since(start))
+				//	cachemetrics.RecordTotalCosts("CACHE_L3_STORAGE", start)
 			}
 		}
 	}()
@@ -218,7 +221,8 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 		// layer 3 miss
 		syncL3StorageMissMeter.Mark(1)
 		cachemetrics.RecordCacheMetrics("DISK_L4_STORAGE", startGetInDisk)
-		cachemetrics.RecordTotalCosts("DISK_L4_STORAGE", startGetInDisk)
+		//	cachemetrics.RecordTotalCosts("DISK_L4_STORAGE", startGetInDisk)
+		cachemetrics.AddDiskLayerAccountPebbleRead(time.Since(startGetInDisk))
 	}
 	dl.cache.Set(key, blob)
 	snapshotCleanStorageMissMeter.Mark(1)

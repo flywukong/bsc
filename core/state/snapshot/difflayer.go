@@ -284,7 +284,8 @@ func (dl *diffLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 			if hitInDifflayer {
 				syncL2AccountHitMeter.Mark(1)
 				cachemetrics.RecordCacheMetrics("CACHE_L2_ACCOUNT", start)
-				cachemetrics.RecordTotalCosts("CACHE_L2_ACCOUNT", start)
+				cachemetrics.AddDiffLayerAccountRead(time.Since(start))
+				//		cachemetrics.RecordTotalCosts("CACHE_L2_ACCOUNT", start)
 			}
 		}
 	}()
@@ -352,7 +353,8 @@ func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 			if hitInDifflayer {
 				syncL2StorageHitMeter.Mark(1)
 				cachemetrics.RecordCacheMetrics("CACHE_L2_STORAGE", start)
-				cachemetrics.RecordTotalCosts("CACHE_L2_STORAGE", start)
+				cachemetrics.AddDiffLayerStorageRead(time.Since(start))
+				//		cachemetrics.RecordTotalCosts("CACHE_L2_STORAGE", start)
 			}
 		}
 	}()
