@@ -178,31 +178,34 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	for _, receipt := range receipts {
 		allLogs = append(allLogs, receipt.Logs...)
 	}
-	// 新增：在 block 处理结束后，累加 statedb 的各 get 方法总耗时到 metrics，并清零
-	if statedb != nil {
-		if statedb.TotalGetBalanceCost > 0 {
-			state.TotalGetBalanceCost.Update(statedb.TotalGetBalanceCost)
+	/*
+		// 新增：在 block 处理结束后，累加 statedb 的各 get 方法总耗时到 metrics，并清零
+		if statedb != nil {
+			if statedb.TotalGetBalanceCost > 0 {
+				state.TotalGetBalanceCost.Update(statedb.TotalGetBalanceCost)
+			}
+			if statedb.TotalGetNonceCost > 0 {
+				state.TotalGetNonceCost.Update(statedb.TotalGetNonceCost)
+			}
+			if statedb.TotalGetStorageRootCost > 0 {
+				state.TotalGetStorageRootCost.Update(statedb.TotalGetStorageRootCost)
+			}
+			if statedb.TotalGetCodeCost > 0 {
+				state.TotalGetCodeCost.Update(statedb.TotalGetCodeCost)
+			}
+			if statedb.TotalGetCodeSizeCost > 0 {
+				state.TotalGetCodeSizeCost.Update(statedb.TotalGetCodeSizeCost)
+			}
+			if statedb.TotalGetCodeHashCost > 0 {
+				state.TotalGetCodeHashCost.Update(statedb.TotalGetCodeHashCost)
+			}
+			if statedb.TotalGetStateCost > 0 {
+				state.TotalGetStateCost.Update(statedb.TotalGetStateCost)
+			}
 		}
-		if statedb.TotalGetNonceCost > 0 {
-			state.TotalGetNonceCost.Update(statedb.TotalGetNonceCost)
-		}
-		if statedb.TotalGetStorageRootCost > 0 {
-			state.TotalGetStorageRootCost.Update(statedb.TotalGetStorageRootCost)
-		}
-		if statedb.TotalGetCodeCost > 0 {
-			state.TotalGetCodeCost.Update(statedb.TotalGetCodeCost)
-		}
-		if statedb.TotalGetCodeSizeCost > 0 {
-			state.TotalGetCodeSizeCost.Update(statedb.TotalGetCodeSizeCost)
-		}
-		if statedb.TotalGetCodeHashCost > 0 {
-			state.TotalGetCodeHashCost.Update(statedb.TotalGetCodeHashCost)
-		}
-		if statedb.TotalGetStateCost > 0 {
-			state.TotalGetStateCost.Update(statedb.TotalGetStateCost)
-		}
-	}
 
+	
+	*/
 	return &ProcessResult{
 		Receipts: receipts,
 		Requests: requests,
