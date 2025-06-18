@@ -68,12 +68,12 @@ var (
 	DiskLayerStoragePebbleReadCost time.Duration
 
 	// block级别的diffLayer和diskLayer访问统计（Timer类型）
-	BlockDiffLayerAccountReadCost   = metrics.NewRegisteredTimer("block/difflayer/account_read_cost", nil)
-	BlockDiffLayerStorageReadCost   = metrics.NewRegisteredTimer("block/difflayer/storage_read_cost", nil)
-	BlockDiskLayerAccountReadCost   = metrics.NewRegisteredTimer("block/disklayer/account_read_cost", nil)
-	BlockDiskLayerStorageReadCost   = metrics.NewRegisteredTimer("block/disklayer/storage_read_cost", nil)
-	BlockDiskLayerAccountPebbleCost = metrics.NewRegisteredTimer("block/disklayer/account_pebble_read_cost", nil)
-	BlockDiskLayerStoragePebbleCost = metrics.NewRegisteredTimer("block/disklayer/storage_pebble_read_cost", nil)
+	BlockDiffLayerAccountReadCost   = metrics.NewRegisteredTimer("block/difflayer/account/readcost", nil)
+	BlockDiffLayerStorageReadCost   = metrics.NewRegisteredTimer("block/difflayer/storage/readcost", nil)
+	BlockDiskLayerAccountReadCost   = metrics.NewRegisteredTimer("block/disklayer/account/readcost", nil)
+	BlockDiskLayerStorageReadCost   = metrics.NewRegisteredTimer("block/disklayer/storage/readcost", nil)
+	BlockDiskLayerAccountPebbleCost = metrics.NewRegisteredTimer("block/disklayer/account/pebbleread_cost", nil)
+	BlockDiskLayerStoragePebbleCost = metrics.NewRegisteredTimer("block/disklayer/storage/pebbleread_cost", nil)
 )
 
 // mark the info of total hit counts of each layers
