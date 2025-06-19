@@ -228,9 +228,12 @@ func (s *stateObject) getState(key common.Hash, hit *bool, calledByGetState bool
 // without any mutations caused in the current execution.
 func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetState bool) common.Hash {
 	start := time.Now()
-	s.db.StorageAccessNum += 1
+
 	defer func() {
 		if !calledByGetState {
+			if s.db.EnablePerf {
+				s.db.StorageAccessNum += 1
+			}
 			//	routeid := cachemetrics.Goid()
 			//	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
 			l1StorageMeter.Mark(1)
