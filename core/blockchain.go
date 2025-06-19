@@ -2504,10 +2504,12 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 		storageUpdateTimer.Update(statedb.StorageUpdates) // Storage updates are complete(in validation)
 		accountHashTimer.Update(statedb.AccountHashes)    // Account hashes are complete(in validation)
 	}
-	accountReadTimer.Update(statedb.AccountReads)     // Account reads are complete(in processing)
-	storageReadTimer.Update(statedb.StorageReads)     // Storage reads are complete(in processing)
-	accountL1ReadTimer.Update(statedb.AccountL1Reads) // Account reads are complete(in processing)
-	storageL1ReadTimer.Update(statedb.StorageL1Reads) // Storage reads are complete(in processing)
+	accountReadTimer.Update(statedb.AccountReads)                // Account reads are complete(in processing)
+	storageReadTimer.Update(statedb.StorageReads)                // Storage reads are complete(in processing)
+	accountL1ReadTimer.Update(statedb.AccountL1Reads)            // Account reads are complete(in processing)
+	storageL1ReadTimer.Update(statedb.StorageL1Reads)            // Storage reads are complete(in processing)
+	state.AccountAccessNumGauge.Update(statedb.AccountAccessNum) // Account access number
+	state.StorageAccessNumGauge.Update(statedb.StorageAccessNum) // Storage access number
 
 	triehash := statedb.AccountHashes                             // The time spent on tries hashing
 	trieUpdate := statedb.AccountUpdates + statedb.StorageUpdates // The time spent on tries update

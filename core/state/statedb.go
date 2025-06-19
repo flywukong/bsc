@@ -77,6 +77,11 @@ var (
 	totalMinerIOCost    = metrics.NewRegisteredTimer("state/cache/miner/delay", nil)
 	totalSyncIOCounter  = metrics.NewRegisteredCounter("state/cache/sync/counter", nil)
 	totalMinerIOCounter = metrics.NewRegisteredCounter("state/cache/miner/counter", nil)
+
+	// Account access number gauge metric
+	AccountAccessNumGauge = metrics.NewRegisteredGauge("state/account/access/num", nil)
+	// Storage access number gauge metric
+	StorageAccessNumGauge = metrics.NewRegisteredGauge("state/storage/access/num", nil)
 )
 
 type mutation struct {
@@ -177,16 +182,18 @@ type StateDB struct {
 	MetricsMux      sync.Mutex
 	totalSyncIOCost time.Duration
 
-	AccountReads   time.Duration
-	AccountL1Reads time.Duration
-	StorageL1Reads time.Duration
-	AccountHashes  time.Duration
-	AccountUpdates time.Duration
-	AccountCommits time.Duration
-	StorageReads   time.Duration
-	StorageUpdates time.Duration
-	StorageCommits time.Duration
-	TrieDBCommits  time.Duration
+	AccountReads     time.Duration
+	AccountL1Reads   time.Duration
+	AccountAccessNum int64
+	StorageAccessNum int64
+	StorageL1Reads   time.Duration
+	AccountHashes    time.Duration
+	AccountUpdates   time.Duration
+	AccountCommits   time.Duration
+	StorageReads     time.Duration
+	StorageUpdates   time.Duration
+	StorageCommits   time.Duration
+	TrieDBCommits    time.Duration
 
 	L1CacheAccountReads  time.Duration
 	L1CacheStorageReads  time.Duration
@@ -798,6 +805,7 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 			cachemetrics.RecordCacheMetrics("CACHE_L1_ACCOUNT", start)
 			//		cachemetrics.RecordTotalCosts("CACHE_L1_ACCOUNT", start)
 			s.AccountL1Reads += time.Since(start)
+			s.AccountAccessNum += 1
 			l1AccountMeter.Mark(1)
 		}
 	}()
@@ -1555,6 +1563,8 @@ func (s *StateDB) commit(deleteEmptyObjects bool, noStorageWiping bool) (*stateU
 	s.StorageLoaded = 0
 	s.StorageUpdated.Store(0)
 	s.StorageDeleted.Store(0)
+	s.AccountAccessNum = 0
+	s.StorageAccessNum = 0
 
 	// Clear all internal flags and update state root at the end.
 	s.mutations = make(map[common.Address]*mutation)
