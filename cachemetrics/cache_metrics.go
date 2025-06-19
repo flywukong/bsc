@@ -180,30 +180,24 @@ func ResetLayerMetrics() {
 func AddDiffLayerAccountRead(cost time.Duration) {
 	atomic.AddInt64(&DiffLayerAccountReadCount, 1)
 	DiffLayerAccountReadCost += cost
-	BlockDiffLayerAccountReadCount.Update(atomic.LoadInt64(&DiffLayerAccountReadCount))
 }
 func AddDiffLayerStorageRead(cost time.Duration) {
 	atomic.AddInt64(&DiffLayerStorageReadCount, 1)
 	DiffLayerStorageReadCost += cost
-	BlockDiffLayerStorageReadCount.Update(atomic.LoadInt64(&DiffLayerStorageReadCount))
 }
 func AddDiskLayerAccountRead(cost time.Duration) {
 	atomic.AddInt64(&DiskLayerAccountReadCount, 1)
 	DiskLayerAccountReadCost += cost
-	BlockDiskLayerAccountReadCount.Update(atomic.LoadInt64(&DiskLayerAccountReadCount))
 }
 func AddDiskLayerStorageRead(cost time.Duration) {
 	atomic.AddInt64(&DiskLayerStorageReadCount, 1)
 	DiskLayerStorageReadCost += cost
-	BlockDiskLayerStorageReadCount.Update(atomic.LoadInt64(&DiskLayerStorageReadCount))
 }
 func AddDiskLayerAccountPebbleRead(cost time.Duration) {
 	atomic.AddInt64(&DiskLayerAccountPebbleReadCount, 1)
 	DiskLayerAccountPebbleReadCost += cost
-	BlockDiskLayerAccountPebbleCount.Update(atomic.LoadInt64(&DiskLayerAccountPebbleReadCount))
 }
 func AddDiskLayerStoragePebbleRead(cost time.Duration) {
 	atomic.AddInt64(&DiskLayerStoragePebbleReadCount, 1)
 	DiskLayerStoragePebbleReadCost += cost
-	BlockDiskLayerStoragePebbleCount.Update(atomic.LoadInt64(&DiskLayerStoragePebbleReadCount))
 }
