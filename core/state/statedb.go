@@ -829,8 +829,8 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 		s.setError(fmt.Errorf("getStateObject (%x) error: %w", addr.Bytes(), err))
 		return nil
 	}
-	//	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
-	if s.EnablePerf {
+	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
+	if isSyncMainProcess {
 		s.AccountReads += time.Since(start2)
 	}
 
