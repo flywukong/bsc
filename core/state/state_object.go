@@ -228,6 +228,7 @@ func (s *stateObject) getState(key common.Hash, hit *bool, calledByGetState bool
 // without any mutations caused in the current execution.
 func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetState bool) common.Hash {
 	start := time.Now()
+	s.db.StorageAccessNum += 1
 	defer func() {
 		if !calledByGetState {
 			//	routeid := cachemetrics.Goid()
@@ -235,7 +236,6 @@ func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetS
 			l1StorageMeter.Mark(1)
 			if s.db.EnablePerf && *hit {
 				s.db.StorageL1Reads += time.Since(start)
-				s.db.StorageAccessNum += 1
 				syncL1HitStorageMeter.Mark(1)
 				cachemetrics.RecordCacheMetrics("CACHE_L1_STORAGE", start)
 				//		cachemetrics.RecordTotalCosts("CACHE_L1_STORAGE", start)

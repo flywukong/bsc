@@ -799,13 +799,15 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	start := time.Now()
 	hit := false
 	defer func() {
+		if s.EnablePerf {
+			s.AccountAccessNum += 1
+		}
 		//	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
 		if s.EnablePerf && hit {
 			syncL1HitAccountMeter.Mark(1)
 			cachemetrics.RecordCacheMetrics("CACHE_L1_ACCOUNT", start)
 			//		cachemetrics.RecordTotalCosts("CACHE_L1_ACCOUNT", start)
 			s.AccountL1Reads += time.Since(start)
-			s.AccountAccessNum += 1
 			l1AccountMeter.Mark(1)
 		}
 	}()
