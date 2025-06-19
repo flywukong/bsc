@@ -187,18 +187,19 @@ type StateDB struct {
 	AccountReadSeconds   int64
 	AccountL1ReadSeconds int64
 
-	AccountAccessNum     int64
-	StorageAccessNum     int64
-	StorageL1Reads       time.Duration
-	StorageL1ReadSeconds int64
-	AccountHashes        time.Duration
-	AccountUpdates       time.Duration
-	AccountCommits       time.Duration
-	StorageReads         time.Duration
-	StorageReadSeconds   int64
-	StorageUpdates       time.Duration
-	StorageCommits       time.Duration
-	TrieDBCommits        time.Duration
+	AccountAccessNum       int64
+	StorageAccessNum       int64
+	ReaderStorageAccessNum int64
+	StorageL1Reads         time.Duration
+	StorageL1ReadSeconds   int64
+	AccountHashes          time.Duration
+	AccountUpdates         time.Duration
+	AccountCommits         time.Duration
+	StorageReads           time.Duration
+	StorageReadSeconds     int64
+	StorageUpdates         time.Duration
+	StorageCommits         time.Duration
+	TrieDBCommits          time.Duration
 
 	L1CacheAccountReads  time.Duration
 	L1CacheStorageReads  time.Duration
@@ -1556,6 +1557,7 @@ func (s *StateDB) commit(deleteEmptyObjects bool, noStorageWiping bool) (*stateU
 	}
 	accountReadMeters.Mark(int64(s.AccountLoaded))
 	storageReadMeters.Mark(int64(s.StorageLoaded))
+	readerStorageAccessMeter.Mark(s.ReaderStorageAccessNum)
 	accountUpdatedMeter.Mark(int64(s.AccountUpdated))
 	storageUpdatedMeter.Mark(s.StorageUpdated.Load())
 	accountDeletedMeter.Mark(int64(s.AccountDeleted))
@@ -1572,6 +1574,7 @@ func (s *StateDB) commit(deleteEmptyObjects bool, noStorageWiping bool) (*stateU
 	s.StorageDeleted.Store(0)
 	s.AccountAccessNum = 0
 	s.StorageAccessNum = 0
+	s.ReaderStorageAccessNum = 0
 
 	// Clear all internal flags and update state root at the end.
 	s.mutations = make(map[common.Address]*mutation)

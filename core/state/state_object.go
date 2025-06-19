@@ -270,15 +270,14 @@ func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetS
 
 	var start2 time.Time
 	//isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
-	if s.db.EnablePerf {
-		start2 = time.Now()
-	}
+	start2 = time.Now()
 	value, err := s.db.reader.Storage(s.address, key)
 	if err != nil {
 		s.db.setError(err)
 		return common.Hash{}
 	}
 	if s.db.EnablePerf {
+		readerStorageAccessMeter.Mark(1)
 		s.db.StorageReadSeconds += time.Since(start2).Nanoseconds()
 	}
 
