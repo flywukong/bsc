@@ -107,6 +107,7 @@ var (
 	blockValidationTimer      = metrics.NewRegisteredTimer("chain/validation", nil)
 	blockCrossValidationTimer = metrics.NewRegisteredTimer("chain/crossvalidation", nil)
 	blockExecutionTimer       = metrics.NewRegisteredTimer("chain/execution", nil)
+	blockExecutionTimer2      = metrics.NewRegisteredGauge("chain/execution2", nil)
 	blockEVMExecutionTimer    = metrics.NewRegisteredTimer("chain/evmexecution", nil)
 	blockEVMExecutionTimer2   = metrics.NewRegisteredTimer("chain/evmexecution2", nil)
 	blockWriteTimer           = metrics.NewRegisteredTimer("chain/write", nil)
@@ -2526,6 +2527,7 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 	triehash := statedb.AccountHashes                             // The time spent on tries hashing
 	trieUpdate := statedb.AccountUpdates + statedb.StorageUpdates // The time spent on tries update
 	blockExecutionTimer.Update(ptime)                             // The time spent on EVM processing
+	blockExecutionTimer2.Update(ptime.Nanoseconds())              // The time spent on EVM processing (absolute value in nanoseconds)
 	blockEVMExecutionTimer.Update(ptime - (statedb.AccountReads + statedb.StorageReads))
 	blockEVMExecutionTimer2.Update(ptime - (statedb.AccountReads + statedb.StorageReads + statedb.AccountL1Reads +
 		statedb.StorageL1Reads))
