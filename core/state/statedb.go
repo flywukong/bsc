@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum/cachemetrics"
 	"github.com/ethereum/go-ethereum/metrics"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -794,7 +795,7 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 		//	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
 		if s.EnablePerf && hit {
 			syncL1HitAccountMeter.Mark(1)
-			//		cachemetrics.RecordCacheMetrics("CACHE_L1_ACCOUNT", start)
+			cachemetrics.RecordCacheMetrics("CACHE_L1_ACCOUNT", start)
 			//		cachemetrics.RecordTotalCosts("CACHE_L1_ACCOUNT", start)
 			s.AccountL1Reads += time.Since(start)
 			l1AccountMeter.Mark(1)
