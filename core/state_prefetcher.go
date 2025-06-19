@@ -20,7 +20,13 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
+)
+
+var (
+	statePrefetchTimer   = metrics.NewRegisteredTimer("state/prefetch/delay", nil)
+	statePrefetchCounter = metrics.NewRegisteredCounter("state/prefetch/total", nil)
 )
 
 const prefetchThread = 3
@@ -94,6 +100,7 @@ func (p *statePrefetcher) Prefetch(transactions types.Transactions, header *type
 			return
 		}
 	}
+
 }
 
 // PrefetchMining processes the state changes according to the Ethereum rules by running

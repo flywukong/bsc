@@ -19,6 +19,9 @@ package snapshot
 import (
 	"bytes"
 	"sync"
+	"time"
+
+	"github.com/ethereum/go-ethereum/cachemetrics"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
@@ -110,7 +113,7 @@ func (dl *diskLayer) Account(hash common.Hash) (*types.SlimAccount, error) {
 func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
-
+	start := time.Now()
 	// If the layer was flattened into, consider it invalid (any live reference to
 	// the original should be marked as unusable).
 	if dl.stale {
@@ -122,18 +125,42 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 		return nil, ErrNotCoveredYet
 	}
 	// If we're in the disk layer, all diff layers missed
+	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
 	snapshotDirtyAccountMissMeter.Mark(1)
+
+	hitInL3 := false
+	var startGetInDisk time.Time
+	defer func() {
+		// if mainProcess
+		if isSyncMainProcess {
+			syncL2AccountMissMeter.Mark(1)
+			if hitInL3 {
+				syncL3AccountHitMeter.Mark(1)
+				cachemetrics.RecordCacheMetrics("CACHE_L3_ACCOUNT", start)
+				cachemetrics.AddDiskLayerAccountRead(time.Since(start))
+				//		cachemetrics.RecordTotalCosts("CACHE_L3_ACCOUNT", start)
+			}
+		}
+	}()
 
 	// Try to retrieve the account from the memory cache
 	if blob, found := dl.cache.HasGet(nil, hash[:]); found {
+		hitInL3 = true
 		snapshotCleanAccountHitMeter.Mark(1)
 		snapshotCleanAccountReadMeter.Mark(int64(len(blob)))
 		return blob, nil
 	}
+
+	startGetInDisk = time.Now()
 	// Cache doesn't contain account, pull from disk and cache for later
 	blob := rawdb.ReadAccountSnapshot(dl.diskdb, hash)
+	if isSyncMainProcess {
+		syncL3AccountMissMeter.Mark(1)
+		cachemetrics.RecordCacheMetrics("DISK_L4_ACCOUNT", startGetInDisk)
+		//	cachemetrics.RecordTotalCosts("DISK_L4_ACCOUNT", startGetInDisk)
+		cachemetrics.AddDiskLayerAccountPebbleRead(time.Since(startGetInDisk))
+	}
 	dl.cache.Set(hash[:], blob)
-
 	snapshotCleanAccountMissMeter.Mark(1)
 	if n := len(blob); n > 0 {
 		snapshotCleanAccountWriteMeter.Mark(int64(n))
@@ -148,6 +175,23 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, error) {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
+	start := time.Now()
+
+	hitInL3 := false
+	var startGetInDisk time.Time
+	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
+	defer func() {
+		if isSyncMainProcess {
+			// layer 2 miss
+			syncL2StorageMissMeter.Mark(1)
+			if hitInL3 {
+				syncL3StorageHitMeter.Mark(1)
+				cachemetrics.RecordCacheMetrics("CACHE_L3_STORAGE", start)
+				cachemetrics.AddDiskLayerStorageRead(time.Since(start))
+				//	cachemetrics.RecordTotalCosts("CACHE_L3_STORAGE", start)
+			}
+		}
+	}()
 
 	// If the layer was flattened into, consider it invalid (any live reference to
 	// the original should be marked as unusable).
@@ -163,17 +207,24 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	}
 	// If we're in the disk layer, all diff layers missed
 	snapshotDirtyStorageMissMeter.Mark(1)
-
 	// Try to retrieve the storage slot from the memory cache
 	if blob, found := dl.cache.HasGet(nil, key); found {
 		snapshotCleanStorageHitMeter.Mark(1)
 		snapshotCleanStorageReadMeter.Mark(int64(len(blob)))
+		hitInL3 = true
 		return blob, nil
 	}
+	startGetInDisk = time.Now()
 	// Cache doesn't contain storage slot, pull from disk and cache for later
 	blob := rawdb.ReadStorageSnapshot(dl.diskdb, accountHash, storageHash)
+	if isSyncMainProcess {
+		// layer 3 miss
+		syncL3StorageMissMeter.Mark(1)
+		cachemetrics.RecordCacheMetrics("DISK_L4_STORAGE", startGetInDisk)
+		//	cachemetrics.RecordTotalCosts("DISK_L4_STORAGE", startGetInDisk)
+		cachemetrics.AddDiskLayerStoragePebbleRead(time.Since(startGetInDisk))
+	}
 	dl.cache.Set(key, blob)
-
 	snapshotCleanStorageMissMeter.Mark(1)
 	if n := len(blob); n > 0 {
 		snapshotCleanStorageWriteMeter.Mark(int64(n))

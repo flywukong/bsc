@@ -32,10 +32,16 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 )
 
 const largeTxGasLimit = 10000000 // 10M Gas, to measure the execution time of large tx
+
+var (
+	// Transaction count gauge metric
+	TransactionCountGauge = metrics.NewRegisteredGauge("block/transaction/count", nil)
+)
 
 // StateProcessor is a basic Processor, which takes care of transitioning
 // state from one point to another.
@@ -72,6 +78,11 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		gp          = new(GasPool).AddGas(block.GasLimit())
 	)
 
+	statedb.EnablePerf = true
+	defer func() {
+		statedb.EnablePerf = false
+	}()
+
 	// Mutate the block and state according to any hard-fork specs
 	if p.config.DAOForkSupport && p.config.DAOForkBlock != nil && p.config.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(statedb)
@@ -91,6 +102,8 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		err     error
 	)
 
+	// Update transaction count metric
+	TransactionCountGauge.Update(int64(txNum))
 	// Apply pre-execution system calls.
 	var tracingStateDB = vm.StateDB(statedb)
 	if hooks := cfg.Tracer; hooks != nil {
