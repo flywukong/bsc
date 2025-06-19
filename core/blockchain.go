@@ -2449,6 +2449,14 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 	cachemetrics.BlockDiskLayerAccountPebbleCost.Update(cachemetrics.DiskLayerAccountPebbleReadCost)
 	cachemetrics.BlockDiskLayerStoragePebbleCost.Update(cachemetrics.DiskLayerStoragePebbleReadCost)
 
+	// Update count metrics
+	cachemetrics.BlockDiffLayerAccountReadCount.Update(cachemetrics.DiffLayerAccountReadCount)
+	cachemetrics.BlockDiffLayerStorageReadCount.Update(cachemetrics.DiffLayerStorageReadCount)
+	cachemetrics.BlockDiskLayerAccountReadCount.Update(cachemetrics.DiskLayerAccountReadCount)
+	cachemetrics.BlockDiskLayerStorageReadCount.Update(cachemetrics.DiskLayerStorageReadCount)
+	cachemetrics.BlockDiskLayerAccountPebbleCount.Update(cachemetrics.DiskLayerAccountPebbleReadCount)
+	cachemetrics.BlockDiskLayerStoragePebbleCount.Update(cachemetrics.DiskLayerStoragePebbleReadCount)
+
 	cachemetrics.ResetLayerMetrics()
 
 	// If witnesses was generated and stateless self-validation requested, do
