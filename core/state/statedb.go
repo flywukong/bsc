@@ -182,18 +182,23 @@ type StateDB struct {
 	MetricsMux      sync.Mutex
 	totalSyncIOCost time.Duration
 
-	AccountReads     time.Duration
-	AccountL1Reads   time.Duration
-	AccountAccessNum int64
-	StorageAccessNum int64
-	StorageL1Reads   time.Duration
-	AccountHashes    time.Duration
-	AccountUpdates   time.Duration
-	AccountCommits   time.Duration
-	StorageReads     time.Duration
-	StorageUpdates   time.Duration
-	StorageCommits   time.Duration
-	TrieDBCommits    time.Duration
+	AccountReads         time.Duration
+	AccountL1Reads       time.Duration
+	AccountReadSeconds   int64
+	AccountL1ReadSeconds int64
+
+	AccountAccessNum     int64
+	StorageAccessNum     int64
+	StorageL1Reads       time.Duration
+	StorageL1ReadSeconds int64
+	AccountHashes        time.Duration
+	AccountUpdates       time.Duration
+	AccountCommits       time.Duration
+	StorageReads         time.Duration
+	StorageReadSeconds   int64
+	StorageUpdates       time.Duration
+	StorageCommits       time.Duration
+	TrieDBCommits        time.Duration
 
 	L1CacheAccountReads  time.Duration
 	L1CacheStorageReads  time.Duration
@@ -807,7 +812,7 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 			syncL1HitAccountMeter.Mark(1)
 			cachemetrics.RecordCacheMetrics("CACHE_L1_ACCOUNT", start)
 			//		cachemetrics.RecordTotalCosts("CACHE_L1_ACCOUNT", start)
-			s.AccountL1Reads += time.Since(start)
+			s.AccountL1ReadSeconds += time.Since(start).Nanoseconds()
 			l1AccountMeter.Mark(1)
 		}
 	}()
@@ -829,9 +834,9 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 		s.setError(fmt.Errorf("getStateObject (%x) error: %w", addr.Bytes(), err))
 		return nil
 	}
-	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
-	if isSyncMainProcess {
-		s.AccountReads += time.Since(start2)
+	//	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
+	if s.EnablePerf {
+		s.AccountReadSeconds += time.Since(start2).Nanoseconds()
 	}
 
 	// Short circuit if the account is not found

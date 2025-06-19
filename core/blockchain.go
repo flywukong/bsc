@@ -82,12 +82,18 @@ var (
 
 	accountReadTimer   = metrics.NewRegisteredTimer("chain/account/reads", nil)
 	accountL1ReadTimer = metrics.NewRegisteredTimer("chain/l1account/reads", nil)
+	accountReadGauge   = metrics.NewRegisteredGauge("chain/account/readsecond", nil)
+	accountL1ReadGauge = metrics.NewRegisteredGauge("chain/l1account/readsecond", nil)
+
 	accountHashTimer   = metrics.NewRegisteredTimer("chain/account/hashes", nil)
 	accountUpdateTimer = metrics.NewRegisteredTimer("chain/account/updates", nil)
 	accountCommitTimer = metrics.NewRegisteredTimer("chain/account/commits", nil)
 
 	storageReadTimer   = metrics.NewRegisteredTimer("chain/storage/reads", nil)
 	storageL1ReadTimer = metrics.NewRegisteredTimer("chain/l1storage/reads", nil)
+	storageReadGauge   = metrics.NewRegisteredGauge("chain/storage/readsecond", nil)
+	storageL1ReadGauge = metrics.NewRegisteredGauge("chain/l1storage/readsecond", nil)
+
 	storageUpdateTimer = metrics.NewRegisteredTimer("chain/storage/updates", nil)
 	storageCommitTimer = metrics.NewRegisteredTimer("chain/storage/commits", nil)
 
@@ -2504,10 +2510,16 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 		storageUpdateTimer.Update(statedb.StorageUpdates) // Storage updates are complete(in validation)
 		accountHashTimer.Update(statedb.AccountHashes)    // Account hashes are complete(in validation)
 	}
-	accountReadTimer.Update(statedb.AccountReads)                // Account reads are complete(in processing)
-	storageReadTimer.Update(statedb.StorageReads)                // Storage reads are complete(in processing)
-	accountL1ReadTimer.Update(statedb.AccountL1Reads)            // Account reads are complete(in processing)
-	storageL1ReadTimer.Update(statedb.StorageL1Reads)            // Storage reads are complete(in processing)
+	accountReadTimer.Update(statedb.AccountReads)     // Account reads are complete(in processing)
+	storageReadTimer.Update(statedb.StorageReads)     // Storage reads are complete(in processing)
+	accountL1ReadTimer.Update(statedb.AccountL1Reads) // Account reads are complete(in processing)
+	storageL1ReadTimer.Update(statedb.StorageL1Reads) // Storage reads are complete(in processing)
+
+	accountReadGauge.Update(statedb.AccountReadSeconds)
+	storageReadGauge.Update(statedb.StorageReadSeconds)
+	accountL1ReadGauge.Update(statedb.AccountL1ReadSeconds) // Account reads are complete(in processing)
+	storageL1ReadGauge.Update(statedb.StorageL1ReadSeconds)
+
 	state.AccountAccessNumGauge.Update(statedb.AccountAccessNum) // Account access number
 	state.StorageAccessNumGauge.Update(statedb.StorageAccessNum) // Storage access number
 
