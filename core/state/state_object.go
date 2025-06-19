@@ -278,6 +278,7 @@ func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetS
 	}
 	if s.db.EnablePerf {
 		readerStorageAccessMeter.Mark(1)
+		s.db.ReaderStorageAccessNum += 1
 		s.db.StorageReadSeconds += time.Since(start2).Nanoseconds()
 	}
 

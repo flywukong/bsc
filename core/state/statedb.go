@@ -1557,7 +1557,7 @@ func (s *StateDB) commit(deleteEmptyObjects bool, noStorageWiping bool) (*stateU
 	}
 	accountReadMeters.Mark(int64(s.AccountLoaded))
 	storageReadMeters.Mark(int64(s.StorageLoaded))
-	readerStorageAccessMeter.Mark(s.ReaderStorageAccessNum)
+	readerStorageAccessGauge.Update(s.ReaderStorageAccessNum)
 	accountUpdatedMeter.Mark(int64(s.AccountUpdated))
 	storageUpdatedMeter.Mark(s.StorageUpdated.Load())
 	accountDeletedMeter.Mark(int64(s.AccountDeleted))

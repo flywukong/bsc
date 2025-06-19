@@ -22,6 +22,7 @@ var (
 	accountReadMeters        = metrics.NewRegisteredMeter("state/read/accounts", nil)
 	storageReadMeters        = metrics.NewRegisteredMeter("state/read/storage", nil)
 	readerStorageAccessMeter = metrics.NewRegisteredMeter("state/reader/storage/access", nil)
+	readerStorageAccessGauge = metrics.NewRegisteredGauge("state/reader/storage/access/gauge", nil)
 	accountUpdatedMeter      = metrics.NewRegisteredMeter("state/update/account", nil)
 	storageUpdatedMeter      = metrics.NewRegisteredMeter("state/update/storage", nil)
 	accountDeletedMeter      = metrics.NewRegisteredMeter("state/delete/account", nil)
