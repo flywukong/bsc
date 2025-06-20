@@ -180,8 +180,8 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash, enablePerf bo
 
 	hitInL3 := false
 	var startGetInDisk time.Time
-	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
-	if isSyncMainProcess {
+	//isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
+	if enablePerf {
 		log.Info("main process access disklayer storage")
 	}
 	defer func() {
@@ -221,7 +221,7 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash, enablePerf bo
 	startGetInDisk = time.Now()
 	// Cache doesn't contain storage slot, pull from disk and cache for later
 	blob := rawdb.ReadStorageSnapshot(dl.diskdb, accountHash, storageHash)
-	if isSyncMainProcess {
+	if enablePerf {
 		log.Info("main process access pebble storage")
 	}
 	if enablePerf {

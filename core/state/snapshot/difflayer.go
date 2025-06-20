@@ -345,10 +345,10 @@ func (dl *diffLayer) Storage(accountHash, storageHash common.Hash, enablePerf bo
 	// Check the bloom filter first whether there's even a point in reaching into
 	// all the maps in all the layers below
 	start := time.Now()
-	routeid := cachemetrics.Goid()
+	//routeid := cachemetrics.Goid()
 	hitInDifflayer := false
-	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-	if isSyncMainProcess {
+	//	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+	if enablePerf {
 		log.Info("main process access difflayer")
 	}
 	defer func() {
