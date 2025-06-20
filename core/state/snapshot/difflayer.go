@@ -347,10 +347,12 @@ func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	start := time.Now()
 	routeid := cachemetrics.Goid()
 	hitInDifflayer := false
+	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
+	if isSyncMainProcess {
+		log.Info("main process access difflayer")
+	}
 	defer func() {
-		isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
 		if isSyncMainProcess {
-			log.Info("main process access difflayer")
 			syncL1MissStorageMeter.Mark(1)
 			if hitInDifflayer {
 				syncL2StorageHitMeter.Mark(1)
