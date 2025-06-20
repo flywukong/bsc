@@ -204,6 +204,7 @@ func (s *stateObject) GetState(key common.Hash) common.Hash {
 			s.db.StorageL1Reads += time.Since(start)
 			l1StorageMeter.Mark(1)
 			cachemetrics.RecordCacheMetrics("CACHE_L1_STORAGE", start)
+			s.db.StorageL1ReadSeconds += time.Since(start).Nanoseconds()
 			//	cachemetrics.RecordTotalCosts("CACHE_L1_STORAGE", start)
 		}
 	}()
