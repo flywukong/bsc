@@ -231,13 +231,13 @@ func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetS
 	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
 	defer func() {
 		if !calledByGetState {
-			if isSyncMainProcess {
+			if s.db.EnablePerf {
 				s.db.StorageAccessNum += 1
 			}
 			//	routeid := cachemetrics.Goid()
 			//	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-			l1StorageMeter.Mark(1)
 			if isSyncMainProcess && *hit {
+				l1StorageMeter.Mark(1)
 				s.db.StorageL1ReadSeconds += time.Since(start).Nanoseconds()
 				syncL1HitStorageMeter.Mark(1)
 				cachemetrics.RecordCacheMetrics("CACHE_L1_STORAGE", start)

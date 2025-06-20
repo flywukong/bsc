@@ -190,6 +190,7 @@ type StateDB struct {
 	AccountAccessNum       int64
 	StorageAccessNum       int64
 	ReaderStorageAccessNum int64
+	ReaderAccountAccessNum int64
 	StorageL1Reads         time.Duration
 	StorageL1ReadSeconds   int64
 	AccountHashes          time.Duration
@@ -810,9 +811,8 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 		}
 		//	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
 		if s.EnablePerf && hit {
-			syncL1HitAccountMeter.Mark(1)
+			// syncL1HitAccountMeter.Mark(1)
 			cachemetrics.RecordCacheMetrics("CACHE_L1_ACCOUNT", start)
-			//		cachemetrics.RecordTotalCosts("CACHE_L1_ACCOUNT", start)
 			s.AccountL1ReadSeconds += time.Since(start).Nanoseconds()
 			l1AccountMeter.Mark(1)
 		}
@@ -838,6 +838,8 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	//	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
 	if s.EnablePerf {
 		s.AccountReadSeconds += time.Since(start2).Nanoseconds()
+		readerAccountAccessMeter.Mark(1)
+		s.ReaderAccountAccessNum += 1
 	}
 
 	// Short circuit if the account is not found
@@ -1558,6 +1560,7 @@ func (s *StateDB) commit(deleteEmptyObjects bool, noStorageWiping bool) (*stateU
 	accountReadMeters.Mark(int64(s.AccountLoaded))
 	storageReadMeters.Mark(int64(s.StorageLoaded))
 	readerStorageAccessGauge.Update(s.ReaderStorageAccessNum)
+	readerAccountAccessGauge.Update(s.ReaderAccountAccessNum)
 	accountUpdatedMeter.Mark(int64(s.AccountUpdated))
 	storageUpdatedMeter.Mark(s.StorageUpdated.Load())
 	accountDeletedMeter.Mark(int64(s.AccountDeleted))
@@ -1575,6 +1578,7 @@ func (s *StateDB) commit(deleteEmptyObjects bool, noStorageWiping bool) (*stateU
 	s.AccountAccessNum = 0
 	s.StorageAccessNum = 0
 	s.ReaderStorageAccessNum = 0
+	s.ReaderAccountAccessNum = 0
 
 	// Clear all internal flags and update state root at the end.
 	s.mutations = make(map[common.Address]*mutation)
