@@ -2466,18 +2466,57 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 
 	cachemetrics.ResetLayerMetrics()
 
-	// Check if StateDB read costs are less than disk layer pebble read costs and log warnings
 	if statedb.AccountReadSeconds < cachemetrics.DiskLayerAccountPebbleReadCost {
 		log.Warn("StateDB account read cost is less than disk layer pebble read cost",
 			"block", block.Number(),
 			"statedb_account_read_us", statedb.AccountReadSeconds/1000,
 			"disk_layer_account_pebble_read_us", cachemetrics.DiskLayerAccountPebbleReadCost/1000)
+	} else {
+		log.Info("StateDB account read cost vs disk layer pebble read cost",
+			"block", block.Number(),
+			"statedb_account_read_us", statedb.AccountReadSeconds/1000,
+			"disk_layer_account_pebble_read_us", cachemetrics.DiskLayerAccountPebbleReadCost/1000)
+
+		// Calculate layer access percentages for accounts using read cost
+		totalAccountReadCost := cachemetrics.DiffLayerAccountReadCost + cachemetrics.DiskLayerAccountReadCost
+		if totalAccountReadCost > 0 {
+			diffLayerAccountPct := float64(cachemetrics.DiffLayerAccountReadCost) / float64(totalAccountReadCost) * 100
+			diskLayerAccountPct := float64(cachemetrics.DiskLayerAccountReadCost) / float64(totalAccountReadCost) * 100
+			pebbleAccountPct := float64(cachemetrics.DiskLayerAccountPebbleReadCost) / float64(totalAccountReadCost) * 100
+			log.Info("Account layer access distribution",
+				"block", block.Number(),
+				"diff_layer_account_pct", fmt.Sprintf("%.2f%%", diffLayerAccountPct),
+				"disk_layer_account_pct", fmt.Sprintf("%.2f%%", diskLayerAccountPct),
+				"pebble_account_pct", fmt.Sprintf("%.2f%%", pebbleAccountPct))
+		}
 	}
+
 	if statedb.StorageReadSeconds < cachemetrics.DiskLayerStoragePebbleReadCost {
 		log.Warn("StateDB storage read cost is less than disk layer pebble read cost",
 			"block", block.Number(),
 			"statedb_storage_read_us", statedb.StorageReadSeconds/1000,
 			"disk_layer_storage_pebble_read_us", cachemetrics.DiskLayerStoragePebbleReadCost/1000)
+	} else {
+		log.Info("StateDB storage read cost vs disk layer pebble read cost",
+			"block", block.Number(),
+			"statedb_storage_read_us", statedb.StorageReadSeconds/1000,
+			"disk_layer_storage_pebble_read_us", cachemetrics.DiskLayerStoragePebbleReadCost/1000)
+
+		// Calculate layer access percentages for storage using read cost
+		totalStorageReadCost := cachemetrics.DiffLayerStorageReadCost + cachemetrics.DiskLayerStorageReadCost
+		if totalStorageReadCost > 0 {
+			diffLayerStoragePct := float64(cachemetrics.DiffLayerStorageReadCost) / float64(totalStorageReadCost) * 100
+			diskLayerStoragePct := float64(cachemetrics.DiskLayerStorageReadCost) / float64(totalStorageReadCost) * 100
+			pebbleStoragePct := float64(cachemetrics.DiskLayerStoragePebbleReadCost) / float64(totalStorageReadCost) * 100
+			log.Info("Storage layer access distribution",
+				"block", block.Number(),
+				//	"diff_layer_storage_count", cachemetrics.DiffLayerStorageReadCount,
+				//	"disk_layer_storage_count", cachemetrics.DiskLayerStorageReadCount,
+				// ebble_storage_count", cachemetrics.DiskLayerStoragePebbleReadCount,
+				"diff_layer_storage_pct", fmt.Sprintf("%.2f%%", diffLayerStoragePct),
+				"disk_layer_storage_pct", fmt.Sprintf("%.2f%%", diskLayerStoragePct),
+				"pebble_storage_pct", fmt.Sprintf("%.2f%%", pebbleStoragePct))
+		}
 	}
 
 	// If witnesses was generated and stateless self-validation requested, do
