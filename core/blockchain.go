@@ -2466,6 +2466,20 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 
 	cachemetrics.ResetLayerMetrics()
 
+	// Check if StateDB read costs are less than disk layer pebble read costs and log warnings
+	if statedb.AccountReadSeconds < cachemetrics.DiskLayerAccountPebbleReadCost {
+		log.Warn("StateDB account read cost is less than disk layer pebble read cost",
+			"block", block.Number(),
+			"statedb_account_read_us", statedb.AccountReadSeconds/1000,
+			"disk_layer_account_pebble_read_us", cachemetrics.DiskLayerAccountPebbleReadCost/1000)
+	}
+	if statedb.StorageReadSeconds < cachemetrics.DiskLayerStoragePebbleReadCost {
+		log.Warn("StateDB storage read cost is less than disk layer pebble read cost",
+			"block", block.Number(),
+			"statedb_storage_read_us", statedb.StorageReadSeconds/1000,
+			"disk_layer_storage_pebble_read_us", cachemetrics.DiskLayerStoragePebbleReadCost/1000)
+	}
+
 	// If witnesses was generated and stateless self-validation requested, do
 	// that now. Self validation should *never* run in production, it's more of
 	// a tight integration to enable running *all* consensus tests through the
