@@ -27,8 +27,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/cachemetrics"
-	"github.com/ethereum/go-ethereum/log"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -348,9 +346,6 @@ func (dl *diffLayer) Storage(accountHash, storageHash common.Hash, enablePerf bo
 	//routeid := cachemetrics.Goid()
 	hitInDifflayer := false
 	//	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
-	if enablePerf {
-		log.Info("main process access difflayer")
-	}
 	defer func() {
 		//	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
 		if enablePerf {

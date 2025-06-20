@@ -222,9 +222,6 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash, enablePerf bo
 	// Cache doesn't contain storage slot, pull from disk and cache for later
 	blob := rawdb.ReadStorageSnapshot(dl.diskdb, accountHash, storageHash)
 	if enablePerf {
-		log.Info("main process access pebble storage")
-	}
-	if enablePerf {
 		// layer 3 miss
 		syncL3StorageMissMeter.Mark(1)
 		cachemetrics.RecordCacheMetrics("DISK_L4_STORAGE", startGetInDisk)
