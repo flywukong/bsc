@@ -2492,7 +2492,12 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 				"disk_layer_account_read_us", cachemetrics.DiskLayerAccountReadCost/1000,
 				"diff_layer_account_pct", fmt.Sprintf("%.2f%%", diffLayerAccountPct),
 				"disk_layer_account_pct", fmt.Sprintf("%.2f%%", diskLayerAccountPct),
-				"pebble_account_pct", fmt.Sprintf("%.2f%%", pebbleAccountPct))
+				"pebble_account_pct", fmt.Sprintf("%.2f%%", pebbleAccountPct),
+				"disk_layer_account_pebble_read_us", cachemetrics.DiskLayerAccountPebbleReadCost/1000,
+				"diff_layer_account_count", cachemetrics.DiffLayerAccountReadCount,
+				"disk_layer_account_count", cachemetrics.DiskLayerAccountReadCount,
+				"pebble_account_count", cachemetrics.DiskLayerAccountPebbleReadCount,
+				"total_account_access", statedb.AccountAccessNum)
 		}
 	}
 
@@ -2524,7 +2529,11 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 				// ebble_storage_count", cachemetrics.DiskLayerStoragePebbleReadCount,
 				"diff_layer_storage_pct", fmt.Sprintf("%.2f%%", diffLayerStoragePct),
 				"disk_layer_storage_pct", fmt.Sprintf("%.2f%%", diskLayerStoragePct),
-				"pebble_storage_pct", fmt.Sprintf("%.2f%%", pebbleStoragePct))
+				"pebble_storage_pct", fmt.Sprintf("%.2f%%", pebbleStoragePct),
+				"diff_layer_storage_count", cachemetrics.DiffLayerStorageReadCount,
+				"disk_layer_storage_count", cachemetrics.DiskLayerStorageReadCount,
+				"pebble_storage_count", cachemetrics.DiskLayerStoragePebbleReadCount,
+				"total_storage_access", statedb.ReaderStorageAccessNum)
 		}
 	}
 	cachemetrics.ResetLayerMetrics()
