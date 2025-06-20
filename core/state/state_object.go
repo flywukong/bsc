@@ -276,6 +276,7 @@ func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetS
 		return common.Hash{}
 	}
 	if isSyncMainProcess {
+		log.Info("main process access storage")
 		readerStorageAccessMeter.Mark(1)
 		s.db.ReaderStorageAccessNum += 1
 		s.db.StorageReadSeconds += time.Since(start2).Nanoseconds()

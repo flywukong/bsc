@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/cachemetrics"
+	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
@@ -180,6 +181,9 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	hitInL3 := false
 	var startGetInDisk time.Time
 	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
+	if isSyncMainProcess {
+		log.Info("main process access disklayer storage")
+	}
 	defer func() {
 		if isSyncMainProcess {
 			// layer 2 miss
@@ -218,6 +222,7 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	// Cache doesn't contain storage slot, pull from disk and cache for later
 	blob := rawdb.ReadStorageSnapshot(dl.diskdb, accountHash, storageHash)
 	if isSyncMainProcess {
+		log.Info("main process access pebble storage")
 		// layer 3 miss
 		syncL3StorageMissMeter.Mark(1)
 		cachemetrics.RecordCacheMetrics("DISK_L4_STORAGE", startGetInDisk)

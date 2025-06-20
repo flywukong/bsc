@@ -23,6 +23,8 @@ var (
 	storageReadMeters          = metrics.NewRegisteredMeter("state/read/storage", nil)
 	readerStorageAccessMeter   = metrics.NewRegisteredMeter("state/reader/storage/access", nil)
 	readerStorageAccessGauge   = metrics.NewRegisteredGauge("state/reader/storage/access/gauge", nil)
+	readerStorageAccessGauge2  = metrics.NewRegisteredGauge("state/reader/storage/access/gauge", nil)
+	readerStorageAccessGauge3  = metrics.NewRegisteredGauge("state/reader/storage/access/gauge", nil)
 	readerIOStorageAccessGauge = metrics.NewRegisteredGauge("state/reader/storage/io/gauge", nil)
 
 	accountUpdatedMeter      = metrics.NewRegisteredMeter("state/update/account", nil)

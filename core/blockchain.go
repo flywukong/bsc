@@ -2463,12 +2463,20 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 	cachemetrics.BlockDiskLayerStorageReadCount.Update(cachemetrics.DiskLayerStorageReadCount)
 	cachemetrics.BlockDiskLayerAccountPebbleCount.Update(cachemetrics.DiskLayerAccountPebbleReadCount)
 	cachemetrics.BlockDiskLayerStoragePebbleCount.Update(cachemetrics.DiskLayerStoragePebbleReadCount)
+	accountReadGauge.Update(statedb.AccountReadSeconds)
+	storageReadGauge.Update(statedb.StorageReadSeconds)
+	accountL1ReadGauge.Update(statedb.AccountL1ReadSeconds) // Account reads are complete(in processing)
+	storageL1ReadGauge.Update(statedb.StorageL1ReadSeconds)
 
 	if statedb.AccountReadSeconds < cachemetrics.DiskLayerAccountPebbleReadCost {
 		log.Warn("StateDB account read cost is less than disk layer pebble read cost",
 			"block", block.Number(),
 			"statedb_account_read_us", statedb.AccountReadSeconds/1000,
-			"disk_layer_account_pebble_read_us", cachemetrics.DiskLayerAccountPebbleReadCost/1000)
+			"disk_layer_account_pebble_read_us", cachemetrics.DiskLayerAccountPebbleReadCost/1000,
+			"diff_layer_account_count", cachemetrics.DiffLayerAccountReadCount,
+			"disk_layer_account_count", cachemetrics.DiskLayerAccountReadCount,
+			"pebble_account_count", cachemetrics.DiskLayerAccountPebbleReadCount,
+			"total_account_access", statedb.AccountAccessNum)
 	} else {
 		// Calculate layer access percentages for accounts using read cost
 		// totalAccountReadCost := cachemetrics.DiffLayerAccountReadCost + cachemetrics.DiskLayerAccountReadCost
@@ -2492,7 +2500,11 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 		log.Warn("StateDB storage read cost is less than disk layer pebble read cost",
 			"block", block.Number(),
 			"statedb_storage_read_us", statedb.StorageReadSeconds/1000,
-			"disk_layer_storage_pebble_read_us", cachemetrics.DiskLayerStoragePebbleReadCost/1000)
+			"disk_layer_storage_pebble_read_us", cachemetrics.DiskLayerStoragePebbleReadCost/1000,
+			"diff_layer_storage_count", cachemetrics.DiffLayerStorageReadCount,
+			"disk_layer_storage_count", cachemetrics.DiskLayerStorageReadCount,
+			"pebble_storage_count", cachemetrics.DiskLayerStoragePebbleReadCount,
+			"total_storage_access", statedb.ReaderStorageAccessNum)
 	} else {
 		// Calculate layer access percentages for storage using read cost
 		if statedb.StorageReadSeconds > 0 {
@@ -2565,11 +2577,6 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 	storageReadTimer.Update(statedb.StorageReads)     // Storage reads are complete(in processing)
 	accountL1ReadTimer.Update(statedb.AccountL1Reads) // Account reads are complete(in processing)
 	storageL1ReadTimer.Update(statedb.StorageL1Reads) // Storage reads are complete(in processing)
-
-	accountReadGauge.Update(statedb.AccountReadSeconds)
-	storageReadGauge.Update(statedb.StorageReadSeconds)
-	accountL1ReadGauge.Update(statedb.AccountL1ReadSeconds) // Account reads are complete(in processing)
-	storageL1ReadGauge.Update(statedb.StorageL1ReadSeconds)
 
 	state.AccountAccessNumGauge.Update(statedb.AccountAccessNum) // Account access number
 	state.StorageAccessNumGauge.Update(statedb.StorageAccessNum) // Storage access number
