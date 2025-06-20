@@ -40,14 +40,39 @@ var (
 	snapshotCleanAccountReadMeter  = metrics.NewRegisteredMeter("state/snapshot/clean/account/read", nil)
 	snapshotCleanAccountWriteMeter = metrics.NewRegisteredMeter("state/snapshot/clean/account/write", nil)
 
-	snapshotCleanStorageHitMeter   = metrics.NewRegisteredMeter("state/snapshot/clean/storage/hit", nil)
-	snapshotCleanStorageMissMeter  = metrics.NewRegisteredMeter("state/snapshot/clean/storage/miss", nil)
+	snapshotCleanStorageHitMeter  = metrics.NewRegisteredMeter("state/snapshot/clean/storage/hit", nil)
+	snapshotCleanStorageMissMeter = metrics.NewRegisteredMeter("state/snapshot/clean/storage/miss", nil)
+
+	syncL1MissAccountMeter  = metrics.NewRegisteredMeter("syncinfo/account/layer1/miss", nil)
+	minerL1MissAccountMeter = metrics.NewRegisteredMeter("minerinfo/account/layer1/miss", nil)
+	syncL1MissStorageMeter  = metrics.NewRegisteredMeter("syncinfo/storage/layer1/miss", nil)
+	minerL1MissStorageMeter = metrics.NewRegisteredMeter("minerinfo/storage/layer1/miss", nil)
+
+	syncL2AccountHitMeter  = metrics.NewRegisteredMeter("syncinfo/account/layer2/hit", nil)
+	syncL2AccountMissMeter = metrics.NewRegisteredMeter("syncinfo/account/layer2/miss", nil)
+	syncL2StorageHitMeter  = metrics.NewRegisteredMeter("syncinfo/storage/layer2/hit", nil)
+	syncL2StorageMissMeter = metrics.NewRegisteredMeter("syncinfo/storage/layer2/miss", nil)
+	syncL3AccountHitMeter  = metrics.NewRegisteredMeter("syncinfo/account/layer3/hit", nil)
+	syncL3AccountMissMeter = metrics.NewRegisteredMeter("syncinfo/account/layer3/miss", nil)
+	syncL3StorageHitMeter  = metrics.NewRegisteredMeter("syncinfo/storage/layer3/hit", nil)
+	syncL3StorageMissMeter = metrics.NewRegisteredMeter("syncinfo/storage/layer3/miss", nil)
+
+	minerL2AccountHitMeter  = metrics.NewRegisteredMeter("minerinfo/account/layer2/hit", nil)
+	minerL2AccountMissMeter = metrics.NewRegisteredMeter("minerinfo/account/layer2/miss", nil)
+	minerL2StorageHitMeter  = metrics.NewRegisteredMeter("minerinfo/storage/layer2/hit", nil)
+	minerL2StorageMissMeter = metrics.NewRegisteredMeter("minerinfo/storage/layer2/miss", nil)
+	minerL3AccountHitMeter  = metrics.NewRegisteredMeter("minerinfo/account/layer3/hit", nil)
+	minerL3AccountMissMeter = metrics.NewRegisteredMeter("minerinfo/account/layer3/miss", nil)
+	minerL3StorageHitMeter  = metrics.NewRegisteredMeter("minerinfo/storage/layer3/hit", nil)
+	minerL3StorageMissMeter = metrics.NewRegisteredMeter("minerinfo/storage/layer3/miss", nil)
+
 	snapshotCleanStorageInexMeter  = metrics.NewRegisteredMeter("state/snapshot/clean/storage/inex", nil)
 	snapshotCleanStorageReadMeter  = metrics.NewRegisteredMeter("state/snapshot/clean/storage/read", nil)
 	snapshotCleanStorageWriteMeter = metrics.NewRegisteredMeter("state/snapshot/clean/storage/write", nil)
 
-	snapshotDirtyAccountHitMeter   = metrics.NewRegisteredMeter("state/snapshot/dirty/account/hit", nil)
-	snapshotDirtyAccountMissMeter  = metrics.NewRegisteredMeter("state/snapshot/dirty/account/miss", nil)
+	snapshotDirtyAccountHitMeter  = metrics.NewRegisteredMeter("state/snapshot/dirty/account/hit", nil)
+	snapshotDirtyAccountMissMeter = metrics.NewRegisteredMeter("state/snapshot/dirty/account/miss", nil)
+
 	snapshotDirtyAccountInexMeter  = metrics.NewRegisteredMeter("state/snapshot/dirty/account/inex", nil)
 	snapshotDirtyAccountReadMeter  = metrics.NewRegisteredMeter("state/snapshot/dirty/account/read", nil)
 	snapshotDirtyAccountWriteMeter = metrics.NewRegisteredMeter("state/snapshot/dirty/account/write", nil)
@@ -102,7 +127,7 @@ type Snapshot interface {
 
 	// Account directly retrieves the account associated with a particular hash in
 	// the snapshot slim data format.
-	Account(hash common.Hash) (*types.SlimAccount, error)
+	Account(hash common.Hash, enablePerf bool) (*types.SlimAccount, error)
 
 	// Accounts directly retrieves all accounts in current snapshot in
 	// the snapshot slim data format.
@@ -110,11 +135,11 @@ type Snapshot interface {
 
 	// AccountRLP directly retrieves the account RLP associated with a particular
 	// hash in the snapshot slim data format.
-	AccountRLP(hash common.Hash) ([]byte, error)
+	AccountRLP(hash common.Hash, enablePerf bool) ([]byte, error)
 
 	// Storage directly retrieves the storage data associated with a particular hash,
 	// within a particular account.
-	Storage(accountHash, storageHash common.Hash) ([]byte, error)
+	Storage(accountHash, storageHash common.Hash, enablePerf bool) ([]byte, error)
 
 	// Parent returns the subsequent layer of a snapshot, or nil if the base was
 	// reached.
