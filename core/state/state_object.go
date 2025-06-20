@@ -228,16 +228,16 @@ func (s *stateObject) getState(key common.Hash, hit *bool, calledByGetState bool
 // without any mutations caused in the current execution.
 func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetState bool) common.Hash {
 	start := time.Now()
-
+	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
 	defer func() {
 		if !calledByGetState {
-			if s.db.EnablePerf {
+			if isSyncMainProcess {
 				s.db.StorageAccessNum += 1
 			}
 			//	routeid := cachemetrics.Goid()
 			//	isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(routeid)
 			l1StorageMeter.Mark(1)
-			if s.db.EnablePerf && *hit {
+			if isSyncMainProcess && *hit {
 				s.db.StorageL1ReadSeconds += time.Since(start).Nanoseconds()
 				syncL1HitStorageMeter.Mark(1)
 				cachemetrics.RecordCacheMetrics("CACHE_L1_STORAGE", start)
@@ -269,14 +269,13 @@ func (s *stateObject) GetCommittedState(key common.Hash, hit *bool, calledByGetS
 	s.db.StorageLoaded++
 
 	var start2 time.Time
-	//isSyncMainProcess := cachemetrics.IsSyncMainRoutineID(cachemetrics.Goid())
 	start2 = time.Now()
 	value, err := s.db.reader.Storage(s.address, key)
 	if err != nil {
 		s.db.setError(err)
 		return common.Hash{}
 	}
-	if s.db.EnablePerf {
+	if isSyncMainProcess {
 		readerStorageAccessMeter.Mark(1)
 		s.db.ReaderStorageAccessNum += 1
 		s.db.StorageReadSeconds += time.Since(start2).Nanoseconds()
