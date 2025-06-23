@@ -2257,6 +2257,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 		}
 
 		if bc.cacheAmongBlocks == nil {
+			log.Info("init cache amone blocks")
 			bc.cacheAmongBlocks = state.NewCacheAmongBlocks(parent.Root)
 		}
 		// Check whether the cache pool among blocks can be used, if parent root is the same, use it
@@ -2268,7 +2269,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 		}
 
 		//log.Info("new state db with cache", "cache root", bc.cacheAmongBlocks.GetRoot())
-		statedb, err := state.NewWithCacheAmongBlocks(parent.Root, bc.statedb, cacheAmongBlocks)
+		statedb, err := state.NewWithCacheAmongBlocks(parent.Root, bc.statedb, bc.cacheAmongBlocks)
 
 		//	statedb, err := state.NewWithSharedPool(parent.Root, bc.statedb)
 		if err != nil {

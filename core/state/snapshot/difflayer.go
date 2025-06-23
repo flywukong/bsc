@@ -28,7 +28,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"golang.org/x/exp/maps"
@@ -373,10 +372,13 @@ func (dl *diffLayer) storage(accountHash, storageHash common.Hash, depth int) ([
 		}
 	}
 
-	// If the account is known locally, but deleted, return an empty slot
-	if _, ok := dl.destructSet[accountHash]; ok {
-		snapshotDirtyStorageHitMeter.Mark(1)
+	// Storage slot unknown to this diff, resolve from parent
+	if diff, ok := dl.parent.(*diffLayer); ok {
+		return diff.storage(accountHash, storageHash, depth+1)
+	}
+	// Failed to resolve through diff layers, mark a bloom error and use the disk
 	snapshotBloomStorageFalseHitMeter.Mark(1)
+
 	return dl.parent.Storage(accountHash, storageHash)
 }
 
