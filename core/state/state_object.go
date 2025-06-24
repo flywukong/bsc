@@ -176,6 +176,7 @@ func (s *stateObject) getOriginStorage(key common.Hash) (common.Hash, bool) {
 		if !ok {
 			return common.Hash{}, false
 		}
+		log.Info("shared pool hit")
 		storage := val.(common.Hash)
 		s.originStorage[key] = storage
 		return storage, true
