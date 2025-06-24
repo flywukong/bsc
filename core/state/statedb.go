@@ -177,7 +177,7 @@ type StateDB struct {
 
 // NewWithCacheAmongBlocks creates a new state with a cache which store the data among blocks
 func NewWithCacheAmongBlocks(root common.Hash, db Database, cache *CacheAmongBlocks) (*StateDB, error) {
-	statedb, err := New(root, db)
+	statedb, err := NewWithSharedPool(root, db)
 	if err != nil {
 		return nil, err
 	}
