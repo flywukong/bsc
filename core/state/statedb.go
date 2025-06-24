@@ -81,13 +81,14 @@ func (m *mutation) isDelete() bool {
 // must be created with new root and updated database for accessing post-
 // commit states.
 type StateDB struct {
-	db             Database
-	prefetcherLock sync.Mutex
-	prefetcher     *triePrefetcher
-	trie           Trie
-	noTrie         bool
-	reader         Reader
-
+	db               Database
+	prefetcherLock   sync.Mutex
+	prefetcher       *triePrefetcher
+	trie             Trie
+	noTrie           bool
+	reader           Reader
+	hasher           crypto.KeccakState
+	cacheAmongBlocks *CacheAmongBlocks
 	// originalRoot is the pre-state root, before any changes were made.
 	// It will be updated when the Commit is called.
 	originalRoot common.Hash
@@ -170,6 +171,17 @@ type StateDB struct {
 	StorageDeleted atomic.Int64 // Number of storage slots deleted during the state transition
 }
 
+// NewWithCacheAmongBlocks creates a new state with a cache which store the data among blocks
+func NewWithCacheAmongBlocks(root common.Hash, db Database, cache *CacheAmongBlocks) (*StateDB, error) {
+	statedb, err := New(root, db)
+	if err != nil {
+		return nil, err
+	}
+
+	statedb.cacheAmongBlocks = cache
+	return statedb, nil
+}
+
 // NewWithSharedPool creates a new state with sharedStorge on layer 1.5
 func NewWithSharedPool(root common.Hash, db Database) (*StateDB, error) {
 	statedb, err := New(root, db)
@@ -205,6 +217,7 @@ func New(root common.Hash, db Database) (*StateDB, error) {
 		journal:              newJournal(),
 		accessList:           newAccessList(),
 		transientStorage:     newTransientStorage(),
+		hasher:               crypto.NewKeccakState(),
 	}
 	if db.TrieDB().IsVerkle() {
 		sdb.accessEvents = NewAccessEvents(db.PointCache())
@@ -695,14 +708,48 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	}
 	s.AccountLoaded++
 
+	// If no live objects are available, attempt to use snapshots
+	var err error
+	var exist bool
 	start := time.Now()
-	acct, err := s.reader.Account(addr)
-	if err != nil {
-		s.setError(fmt.Errorf("getStateObject (%x) error: %w", addr.Bytes(), err))
-		return nil
+	var acct *types.StateAccount
+	var data *types.SlimAccount
+	// Try to get from cache among blocks if the cache root is the pre-state root
+	if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() == s.originalRoot {
+		data, exist = s.cacheAmongBlocks.GetAccount(crypto.HashData(s.hasher, addr.Bytes()))
+		if exist {
+			SnapshotBlockCacheAccountHitMeter.Mark(1)
+			//	log.Info("account hit in cache among blocks")
+			if data == nil {
+				return nil
+			}
+			acct = &types.StateAccount{
+				Nonce:    data.Nonce,
+				Balance:  data.Balance,
+				CodeHash: data.CodeHash,
+				Root:     common.BytesToHash(data.Root),
+			}
+			if len(acct.CodeHash) == 0 {
+				acct.CodeHash = types.EmptyCodeHash.Bytes()
+			}
+			if acct.Root == (common.Hash{}) {
+				acct.Root = types.EmptyRootHash
+			}
+		} else {
+			//	log.Info("account hit in cache among blocks", "account", addr)
+			SnapshotBlockCacheAccountMissMeter.Mark(1)
+		}
+
 	}
-	if metrics.EnabledExpensive() {
-		s.AccountReads += time.Since(start)
+	if !exist {
+		acct, err = s.reader.Account(addr)
+		if err != nil {
+			s.setError(fmt.Errorf("getStateObject (%x) error: %w", addr.Bytes(), err))
+			return nil
+		}
+		if metrics.EnabledExpensive() {
+			s.AccountReads += time.Since(start)
+		}
 	}
 
 	// Short circuit if the account is not found
@@ -804,10 +851,14 @@ func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 
 		transientStorage: s.transientStorage.Copy(),
 		journal:          s.journal.copy(),
+		hasher:           crypto.NewKeccakState(),
 	}
+
 	if s.witness != nil {
 		state.witness = s.witness.Copy()
 	}
+	state.cacheAmongBlocks = s.cacheAmongBlocks
+
 	// Do we need to copy the access list and transient storage?
 	// In practice: No. At the start of a transaction, these two lists are empty.
 	// In practice, we only ever copy state _between_ transactions/blocks, never
@@ -1249,6 +1300,7 @@ func (s *StateDB) handleDestruction(noStorageWiping bool) (map[common.Hash]*acco
 		op := &accountDelete{
 			address: addr,
 			origin:  types.SlimAccountRLP(*prev),
+			obj:     prevObj,
 		}
 		deletes[addrHash] = op
 
@@ -1445,7 +1497,7 @@ func (s *StateDB) commit(deleteEmptyObjects bool, noStorageWiping bool) (*stateU
 	origin := s.originalRoot
 	s.originalRoot = root
 
-	return newStateUpdate(noStorageWiping, origin, root, deletes, updates, nodes), nil
+	return newStateUpdate(s, noStorageWiping, origin, root, deletes, updates, nodes), nil
 }
 
 // commitAndFlush is a wrapper of commit which also commits the state mutations
@@ -1505,6 +1557,9 @@ func (s *StateDB) commitAndFlush(block uint64, deleteEmptyObjects bool, noStorag
 				s.TrieDBCommits += time.Since(start)
 			}
 		}
+	}
+	if s.cacheAmongBlocks != nil {
+		s.cacheAmongBlocks.SetRoot(s.originalRoot)
 	}
 	s.reader, _ = s.db.Reader(s.originalRoot)
 	return ret, err
