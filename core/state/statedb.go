@@ -179,7 +179,6 @@ func NewWithCacheAmongBlocks(root common.Hash, db Database, cache *CacheAmongBlo
 	}
 
 	statedb.cacheAmongBlocks = cache
-	log.Info("set cache among blocks")
 	return statedb, nil
 }
 
@@ -715,32 +714,15 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	start := time.Now()
 	var acct *types.StateAccount
 	var data *types.SlimAccount
-	accounthash := crypto.HashData(s.hasher, addr.Bytes())
-
-	accountHash := crypto.Keccak256Hash(addr[:])
-
-	if accountHash != accounthash {
-		log.Info("account hash is not the same as accounthash", "account", addr,
-			"account hash1", accountHash, "account hash2", accounthash)
-	}
 	// Try to get from cache among blocks if the cache root is the pre-state root
-	if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() != s.originalRoot {
-		log.Info("cache among blocks root is not the pre-state root", "cache root", s.cacheAmongBlocks.GetRoot(), "pre-state root", s.originalRoot)
-	}
 	if s.cacheAmongBlocks != nil && s.cacheAmongBlocks.GetRoot() == s.originalRoot {
-		data, exist = s.cacheAmongBlocks.GetAccount(accounthash)
-		if exist {
-			log.Info("account hit in cache among blocks", "account", addr, "account hash", accounthash, "root", s.originalRoot)
-		} else {
-			log.Info("account miss in cache among blocks", "account", addr, "account hash", accounthash, "root", s.originalRoot)
-		}
+		data, exist = s.cacheAmongBlocks.GetAccount(crypto.HashData(s.hasher, addr.Bytes()))
 		if exist {
 			SnapshotBlockCacheAccountHitMeter.Mark(1)
 			//	log.Info("account hit in cache among blocks")
 			if data == nil {
 				return nil
 			}
-			log.Info("account hit in cache among blocks", "account", addr)
 			acct = &types.StateAccount{
 				Nonce:    data.Nonce,
 				Balance:  data.Balance,
@@ -1515,12 +1497,6 @@ func (s *StateDB) commit(deleteEmptyObjects bool, noStorageWiping bool) (*stateU
 	origin := s.originalRoot
 	s.originalRoot = root
 
-	/*
-		if s.cacheAmongBlocks != nil {
-			s.cacheAmongBlocks.SetRoot(root)
-		}
-
-	*/
 	return newStateUpdate(s, noStorageWiping, origin, root, deletes, updates, nodes), nil
 }
 
