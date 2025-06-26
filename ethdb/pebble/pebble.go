@@ -285,8 +285,6 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 		// By setting the WALBytesPerSync, the cached WAL writes will be periodically
 		// flushed at the background if the accumulated size exceeds this threshold.
 		WALBytesPerSync: 5 * ethdb.IdealBatchSize,
-
-		L0CompactionThreshold: 2,
 	}
 
 	for i := 0; i < len(opt.Levels); i++ {
