@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
@@ -27,8 +28,15 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 )
+
+// Timer metric for monitoring storage snapshot read latency
+var storageTrieReadTimer = metrics.NewRegisteredTimer("triedb/storage/read", nil)
+
+// Timer metric for monitoring account snapshot read latency
+var accountTrieReadTimer = metrics.NewRegisteredTimer("triedb/account/read", nil)
 
 // trienodebuffer is a collection of modified trie nodes to aggregate the disk
 // write. The content of the trienodebuffer must be checked before diving into
@@ -187,10 +195,13 @@ func (dl *diskLayer) node(owner common.Hash, path []byte, hash common.Hash, dept
 	}
 	// Try to retrieve the trie node from the disk.
 	var blob []byte
+	start := time.Now()
 	if owner == (common.Hash{}) {
 		blob = rawdb.ReadAccountTrieNode(dl.db.diskdb, path)
+		accountTrieReadTimer.Update(time.Since(start))
 	} else {
 		blob = rawdb.ReadStorageTrieNode(dl.db.diskdb, owner, path)
+		storageTrieReadTimer.Update(time.Since(start))
 	}
 	if dl.nodes != nil && len(blob) > 0 {
 		dl.nodes.Set(key, blob)
