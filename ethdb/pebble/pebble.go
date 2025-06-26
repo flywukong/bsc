@@ -234,17 +234,16 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 		// writeOptions: pebble.NoSync,
 		writeOptions: pebble.Sync,
 	}
-	cacheSize := pebble.NewCache(int64(cache * 1024 * 1024 * 2))
 	opt := &pebble.Options{
 		// Pebble has a single combined cache area and the write
 		// buffers are taken from this too. Assign all available
 		// memory allowance for cache.
-		Cache:        cacheSize,
+		Cache:        pebble.NewCache(int64(cache * 1024 * 1024)),
 		MaxOpenFiles: handles,
 
 		// The size of memory table(as well as the write buffer).
 		// Note, there may have more than two memory tables in the system.
-		MemTableSize: uint64(memTableSize * 2),
+		MemTableSize: uint64(memTableSize),
 
 		// MemTableStopWritesThreshold places a hard limit on the size
 		// of the existent MemTables(including the frozen one).
@@ -286,8 +285,6 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 		// By setting the WALBytesPerSync, the cached WAL writes will be periodically
 		// flushed at the background if the accumulated size exceeds this threshold.
 		WALBytesPerSync: 5 * ethdb.IdealBatchSize,
-
-		//		L0CompactionThreshold: 2,
 	}
 
 	for i := 0; i < len(opt.Levels); i++ {
