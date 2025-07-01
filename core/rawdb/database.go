@@ -657,7 +657,6 @@ type DataType int
 
 const (
 	StateDataType DataType = iota
-	BlockDataType
 	ChainDataType
 	Unknown
 )
@@ -671,24 +670,11 @@ func DataTypeByKey(key []byte) DataType {
 		IsStorageTrieNode(key):
 		return StateDataType
 
-	// block
-	case bytes.HasPrefix(key, headerPrefix) && len(key) == (len(headerPrefix)+8+common.HashLength),
-		bytes.HasPrefix(key, blockBodyPrefix) && len(key) == (len(blockBodyPrefix)+8+common.HashLength),
-		bytes.HasPrefix(key, blockReceiptsPrefix) && len(key) == (len(blockReceiptsPrefix)+8+common.HashLength),
-		bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerTDSuffix),
-		bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerHashSuffix),
-		bytes.HasPrefix(key, headerNumberPrefix) && len(key) == (len(headerNumberPrefix)+common.HashLength):
-		return BlockDataType
 	default:
 		for _, meta := range [][]byte{
 			fastTrieProgressKey, persistentStateIDKey, trieJournalKey, snapSyncStatusFlagKey} {
 			if bytes.Equal(key, meta) {
 				return StateDataType
-			}
-		}
-		for _, meta := range [][]byte{headHeaderKey, headFinalizedBlockKey, headBlockKey, headFastBlockKey} {
-			if bytes.Equal(key, meta) {
-				return BlockDataType
 			}
 		}
 		return ChainDataType

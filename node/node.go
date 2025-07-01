@@ -786,8 +786,7 @@ func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool
 	if isMultiDatabase {
 		// Resource allocation rules:
 		// 1) Allocate a fixed percentage of memory for chainDb based on chainDbMemoryPercentage & chainDbHandlesPercentage.
-		// 2) Allocate a fixed size for blockDb based on blockDbCacheSize & blockDbHandlesSize.
-		// 3) Allocate the remaining resources to stateDb.
+		// 2) Allocate the remaining resources to stateDb.
 		chainDbCache = int(float64(config.DatabaseCache) * chainDbMemoryPercentage / 100)
 		chainDataHandles = int(float64(config.DatabaseHandles) * chainDbHandlesPercentage / 100)
 
