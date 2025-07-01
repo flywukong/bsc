@@ -557,8 +557,8 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td, ttd *
 		} else {
 			d.ancientLimit = 0
 		}
-		frozen, _ := d.stateDB.BlockStore().Ancients() // Ignore the error here since light client can also hit here.
-		itemAmountInAncient, _ := d.stateDB.BlockStore().ItemAmountInAncient()
+		frozen, _ := d.stateDB.Ancients() // Ignore the error here since light client can also hit here.
+		itemAmountInAncient, _ := d.stateDB.ItemAmountInAncient()
 		// If a part of blockchain data has already been written into active store,
 		// disable the ancient style insertion explicitly.
 		if origin >= frozen && itemAmountInAncient != 0 {

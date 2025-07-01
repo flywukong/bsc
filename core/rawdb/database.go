@@ -42,7 +42,6 @@ type freezerdb struct {
 
 	ethdb.AncientFreezer
 	stateStore ethdb.Database
-	blockStore ethdb.Database
 }
 
 func (frdb *freezerdb) StateStoreReader() ethdb.Reader {
@@ -50,13 +49,6 @@ func (frdb *freezerdb) StateStoreReader() ethdb.Reader {
 		return frdb
 	}
 	return frdb.stateStore
-}
-
-func (frdb *freezerdb) BlockStoreReader() ethdb.Reader {
-	if frdb.blockStore == nil {
-		return frdb
-	}
-	return frdb.blockStore
 }
 
 // AncientDatadir returns the path of root ancient directory.
@@ -79,11 +71,6 @@ func (frdb *freezerdb) Close() error {
 			errs = append(errs, err)
 		}
 	}
-	if frdb.blockStore != nil {
-		if err := frdb.blockStore.Close(); err != nil {
-			errs = append(errs, err)
-		}
-	}
 	if len(errs) != 0 {
 		return fmt.Errorf("%v", errs)
 	}
@@ -99,32 +86,6 @@ func (frdb *freezerdb) GetStateStore() ethdb.Database {
 		return frdb.stateStore
 	}
 	return frdb
-}
-
-func (frdb *freezerdb) SetStateStore(state ethdb.Database) {
-	if frdb.stateStore != nil {
-		frdb.stateStore.Close()
-	}
-	frdb.stateStore = state
-}
-
-func (frdb *freezerdb) BlockStore() ethdb.Database {
-	if frdb.blockStore != nil {
-		return frdb.blockStore
-	} else {
-		return frdb
-	}
-}
-
-func (frdb *freezerdb) SetBlockStore(block ethdb.Database) {
-	if frdb.blockStore != nil {
-		frdb.blockStore.Close()
-	}
-	frdb.blockStore = block
-}
-
-func (frdb *freezerdb) HasSeparateBlockStore() bool {
-	return frdb.blockStore != nil
 }
 
 // Freeze is a helper method used for external testing to trigger and block until
@@ -251,21 +212,6 @@ func (db *nofreezedb) BlockStore() ethdb.Database {
 	return db
 }
 
-func (db *nofreezedb) SetBlockStore(block ethdb.Database) {
-	db.blockStore = block
-}
-
-func (db *nofreezedb) HasSeparateBlockStore() bool {
-	return db.blockStore != nil
-}
-
-func (db *nofreezedb) BlockStoreReader() ethdb.Reader {
-	if db.blockStore != nil {
-		return db.blockStore
-	}
-	return db
-}
-
 func (db *nofreezedb) ReadAncients(fn func(reader ethdb.AncientReaderOp) error) (err error) {
 	// Unlike other ancient-related methods, this method does not return
 	// errNotSupported when invoked.
@@ -375,9 +321,6 @@ func (db *emptyfreezedb) GetStateStore() ethdb.Database      { return db }
 func (db *emptyfreezedb) SetStateStore(state ethdb.Database) {}
 func (db *emptyfreezedb) StateStoreReader() ethdb.Reader     { return db }
 func (db *emptyfreezedb) BlockStore() ethdb.Database         { return db }
-func (db *emptyfreezedb) SetBlockStore(block ethdb.Database) {}
-func (db *emptyfreezedb) HasSeparateBlockStore() bool        { return false }
-func (db *emptyfreezedb) BlockStoreReader() ethdb.Reader     { return db }
 func (db *emptyfreezedb) ReadAncients(fn func(reader ethdb.AncientReaderOp) error) (err error) {
 	return nil
 }
@@ -761,15 +704,11 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	defer it.Release()
 
 	var trieIter ethdb.Iterator
-	var blockIter ethdb.Iterator
 	if db.StateStore() != nil {
 		trieIter = db.StateStore().NewIterator(keyPrefix, nil)
 		defer trieIter.Release()
 	}
-	if db.HasSeparateBlockStore() {
-		blockIter = db.BlockStore().NewIterator(keyPrefix, nil)
-		defer blockIter.Release()
-	}
+
 	var (
 		count  int64
 		start  = time.Now()
@@ -956,55 +895,6 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			}
 		}
 		log.Info("Inspecting separate state database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
-	}
-	// inspect separate block db
-	if blockIter != nil {
-		count = 0
-		logged = time.Now()
-
-		for blockIter.Next() {
-			var (
-				key   = blockIter.Key()
-				value = blockIter.Value()
-				size  = common.StorageSize(len(key) + len(value))
-			)
-			total += size
-
-			switch {
-			case bytes.HasPrefix(key, headerPrefix) && len(key) == (len(headerPrefix)+8+common.HashLength):
-				headers.Add(size)
-			case bytes.HasPrefix(key, blockBodyPrefix) && len(key) == (len(blockBodyPrefix)+8+common.HashLength):
-				bodies.Add(size)
-			case bytes.HasPrefix(key, blockReceiptsPrefix) && len(key) == (len(blockReceiptsPrefix)+8+common.HashLength):
-				receipts.Add(size)
-			case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerTDSuffix):
-				tds.Add(size)
-			case bytes.HasPrefix(key, BlockBlobSidecarsPrefix):
-				blobSidecars.Add(size)
-			case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerHashSuffix):
-				numHashPairings.Add(size)
-			case bytes.HasPrefix(key, headerNumberPrefix) && len(key) == (len(headerNumberPrefix)+common.HashLength):
-				hashNumPairings.Add(size)
-			default:
-				var accounted bool
-				for _, meta := range [][]byte{headHeaderKey, headFinalizedBlockKey, headBlockKey, headFastBlockKey} {
-					if bytes.Equal(key, meta) {
-						metadata.Add(size)
-						accounted = true
-						break
-					}
-				}
-				if !accounted {
-					unaccounted.Add(size)
-				}
-			}
-			count++
-			if count%1000 == 0 && time.Since(logged) > 8*time.Second {
-				log.Info("Inspecting separate block database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
-				logged = time.Now()
-			}
-		}
-		log.Info("Inspecting separate block database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
 	}
 	// Display the database statistic of key-value store.
 	stats := [][]string{

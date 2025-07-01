@@ -301,13 +301,6 @@ func (db *Database) StateStoreReader() ethdb.Reader {
 	return db.stateStore
 }
 
-func (db *Database) BlockStoreReader() ethdb.Reader {
-	if db.blockStore == nil {
-		return db
-	}
-	return db.blockStore
-}
-
 // keyvalue is a key-value tuple tagged with a deletion field to allow creating
 // memory-database write batches.
 type keyvalue struct {

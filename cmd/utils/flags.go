@@ -2565,8 +2565,6 @@ func MakeChainDatabase(ctx *cli.Context, stack *node.Node, readonly, disableFree
 		if stack.CheckIfMultiDataBase() && err == nil {
 			stateDiskDb := MakeStateDataBase(ctx, stack, readonly, false)
 			chainDb.SetStateStore(stateDiskDb)
-			blockDb := MakeBlockDatabase(ctx, stack, readonly, false)
-			chainDb.SetBlockStore(blockDb)
 		}
 	}
 	if err != nil {
@@ -2584,17 +2582,6 @@ func MakeStateDataBase(ctx *cli.Context, stack *node.Node, readonly, disableFree
 		Fatalf("Failed to open separate trie database: %v", err)
 	}
 	return statediskdb
-}
-
-// MakeBlockDatabase open a separate block database using the flags passed to the client and will hard crash if it fails.
-func MakeBlockDatabase(ctx *cli.Context, stack *node.Node, readonly, disableFreeze bool) ethdb.Database {
-	cache := ctx.Int(CacheFlag.Name) * ctx.Int(CacheDatabaseFlag.Name) / 100
-	handles := MakeDatabaseHandles(ctx.Int(FDLimitFlag.Name)) / 10
-	blockDb, err := stack.OpenDatabaseWithFreezer("chaindata/block", cache, handles, "", "", readonly, disableFreeze, false, false)
-	if err != nil {
-		Fatalf("Failed to open separate block database: %v", err)
-	}
-	return blockDb
 }
 
 func PathDBConfigAddJournalFilePath(stack *node.Node, config *pathdb.Config) *pathdb.Config {

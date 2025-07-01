@@ -190,20 +190,9 @@ type AncientStater interface {
 	AncientDatadir() (string, error)
 }
 
+// StateStoreReader wraps the StateStoreReader method.
 type StateStoreReader interface {
 	StateStoreReader() Reader
-}
-
-type BlockStoreReader interface {
-	BlockStoreReader() Reader
-}
-
-// MultiDatabaseReader contains the methods required to read data from both key-value as well as
-// blockStore or stateStore.
-type MultiDatabaseReader interface {
-	KeyValueReader
-	StateStoreReader
-	BlockStoreReader
 }
 
 // Reader contains the methods required to read data from both key-value as well as
@@ -212,7 +201,6 @@ type Reader interface {
 	KeyValueReader
 	AncientReader
 	StateStoreReader
-	BlockStoreReader
 }
 
 // AncientStore contains all the methods required to allow handling different
@@ -232,8 +220,6 @@ type StateStore interface {
 
 type BlockStore interface {
 	BlockStore() Database
-	SetBlockStore(block Database)
-	HasSeparateBlockStore() bool
 }
 
 // ResettableAncientStore extends the AncientStore interface by adding a Reset method.
@@ -248,9 +234,7 @@ type ResettableAncientStore interface {
 // only access the key-value data store but also the ancient chain store.
 type Database interface {
 	StateStore
-	BlockStore
 	StateStoreReader
-	BlockStoreReader
 	AncientFreezer
 
 	KeyValueStore
