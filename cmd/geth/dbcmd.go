@@ -855,8 +855,6 @@ func dbDelete(ctx *cli.Context) error {
 		keyType := rawdb.DataTypeByKey(key)
 		if keyType == rawdb.StateDataType {
 			opDb = db.StateStore()
-		} else if keyType == rawdb.BlockDataType {
-			opDb = db.BlockStore()
 		}
 	}
 
@@ -980,8 +978,6 @@ func dbPut(ctx *cli.Context) error {
 		keyType := rawdb.DataTypeByKey(key)
 		if keyType == rawdb.StateDataType {
 			opDb = db.StateStore()
-		} else if keyType == rawdb.BlockDataType {
-			opDb = db.BlockStore()
 		}
 	}
 
@@ -1220,7 +1216,7 @@ func showMetaData(ctx *cli.Context) error {
 	defer stack.Close()
 	db := utils.MakeChainDatabase(ctx, stack, true, false)
 	defer db.Close()
-	ancients, err := db.BlockStore().Ancients()
+	ancients, err := db.Ancients()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error accessing ancients: %v", err)
 	}
@@ -1267,7 +1263,7 @@ func hbss2pbss(ctx *cli.Context) error {
 	defer stack.Close()
 
 	db := utils.MakeChainDatabase(ctx, stack, false, false)
-	db.BlockStore().SyncAncient()
+	db.SyncAncient()
 	stateDiskDb := db.StateStore()
 	defer db.Close()
 

@@ -45,7 +45,6 @@ type Database struct {
 	lock sync.RWMutex
 
 	stateStore ethdb.Database
-	blockStore ethdb.Database
 }
 
 func (db *Database) ModifyAncients(f func(ethdb.AncientWriteOp) error) (int64, error) {

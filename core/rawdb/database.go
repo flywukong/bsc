@@ -115,7 +115,6 @@ func (frdb *freezerdb) SetupFreezerEnv(env *ethdb.FreezerEnv) error {
 type nofreezedb struct {
 	ethdb.KeyValueStore
 	stateStore ethdb.Database
-	blockStore ethdb.Database
 }
 
 // HasAncient returns an error as we don't have a backing chain freezer.
@@ -201,13 +200,6 @@ func (db *nofreezedb) GetStateStore() ethdb.Database {
 func (db *nofreezedb) StateStoreReader() ethdb.Reader {
 	if db.stateStore != nil {
 		return db.stateStore
-	}
-	return db
-}
-
-func (db *nofreezedb) BlockStore() ethdb.Database {
-	if db.blockStore != nil {
-		return db.blockStore
 	}
 	return db
 }
@@ -320,7 +312,6 @@ func (db *emptyfreezedb) StateStore() ethdb.Database         { return db }
 func (db *emptyfreezedb) GetStateStore() ethdb.Database      { return db }
 func (db *emptyfreezedb) SetStateStore(state ethdb.Database) {}
 func (db *emptyfreezedb) StateStoreReader() ethdb.Reader     { return db }
-func (db *emptyfreezedb) BlockStore() ethdb.Database         { return db }
 func (db *emptyfreezedb) ReadAncients(fn func(reader ethdb.AncientReaderOp) error) (err error) {
 	return nil
 }
@@ -607,7 +598,7 @@ func AncientInspect(db ethdb.Database) error {
 	offset := counter(ReadOffSetOfCurrentAncientFreezer(db))
 	// Get number of ancient rows inside the freezer.
 	ancients := counter(0)
-	if count, err := db.BlockStore().ItemAmountInAncient(); err != nil {
+	if count, err := db.ItemAmountInAncient(); err != nil {
 		log.Error("failed to get the items amount in ancientDB", "err", err)
 		return err
 	} else {
@@ -924,7 +915,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		{"Light client", "Bloom trie nodes", bloomTrieNodes.Size(), bloomTrieNodes.Count()},
 	}
 	// Inspect all registered append-only file store then.
-	ancients, err := inspectFreezers(db.BlockStore())
+	ancients, err := inspectFreezers(db)
 	if err != nil {
 		return err
 	}

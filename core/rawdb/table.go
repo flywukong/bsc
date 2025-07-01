@@ -27,10 +27,6 @@ type table struct {
 	prefix string
 }
 
-func (t *table) BlockStore() ethdb.Database {
-	return t
-}
-
 // NewTable returns a database object that prefixes all keys with a given string.
 func NewTable(db ethdb.Database, prefix string) ethdb.Database {
 	return &table{

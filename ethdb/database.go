@@ -218,10 +218,6 @@ type StateStore interface {
 	GetStateStore() Database
 }
 
-type BlockStore interface {
-	BlockStore() Database
-}
-
 // ResettableAncientStore extends the AncientStore interface by adding a Reset method.
 type ResettableAncientStore interface {
 	AncientStore
