@@ -99,8 +99,8 @@ var (
 	}
 	MultiDataBaseFlag = &cli.BoolFlag{
 		Name: "multidatabase",
-		Usage: "Enable a separated state and block database, it will be created within two subdirectory called state and block, " +
-			"Users can copy this state or block directory to another directory or disk, and then create a symbolic link to the state directory under the chaindata",
+		Usage: "Enable a separated state database, it will be created subdirectory called state, " +
+			"Users can copy this state directory to another directory or disk, and then create a symbolic link to the state directory under the chaindata",
 		Category: flags.EthCategory,
 	}
 	DirectBroadcastFlag = &cli.BoolFlag{

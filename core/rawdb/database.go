@@ -81,6 +81,13 @@ func (frdb *freezerdb) StateStore() ethdb.Database {
 	return frdb.stateStore
 }
 
+func (frdb *freezerdb) SetStateStore(state ethdb.Database) {
+	if frdb.stateStore != nil {
+		frdb.stateStore.Close()
+	}
+	frdb.stateStore = state
+}
+
 func (frdb *freezerdb) GetStateStore() ethdb.Database {
 	if frdb.stateStore != nil {
 		return frdb.stateStore
