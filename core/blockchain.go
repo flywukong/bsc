@@ -3091,14 +3091,14 @@ func (bc *BlockChain) PruneBlockHistory(blockHistory uint64) error {
 		return nil
 	}
 	pruneHeight := bestHeight - blockHistory
-	ancientHead, err := bc.db.BlockStore().Ancients()
+	ancientHead, err := bc.db.Ancients()
 	if err != nil {
 		return err
 	}
 	if pruneHeight > ancientHead {
 		pruneHeight = ancientHead
 	}
-	old, err := bc.db.BlockStore().TruncateTail(pruneHeight)
+	old, err := bc.db.TruncateTail(pruneHeight)
 	if err != nil {
 		return err
 	}
