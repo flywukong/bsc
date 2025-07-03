@@ -1744,6 +1744,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 			rawdb.WriteBlobSidecars(blockBatch, block.Hash(), block.NumberU64(), block.Sidecars())
 		}
 		if bc.db.HasSeparateStateStore() {
+			log.Info("write to separate state store")
 			rawdb.WritePreimages(bc.db.GetStateStore(), statedb.Preimages())
 		} else {
 			rawdb.WritePreimages(blockBatch, statedb.Preimages())
