@@ -1743,8 +1743,9 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		if bc.chainConfig.IsCancun(block.Number(), block.Time()) {
 			rawdb.WriteBlobSidecars(blockBatch, block.Hash(), block.NumberU64(), block.Sidecars())
 		}
-		if bc.db.StateStore() != nil {
-			rawdb.WritePreimages(bc.db.StateStore(), statedb.Preimages())
+		if bc.db.HasSeparateStateStore() {
+			log.Info("write to separate state store")
+			rawdb.WritePreimages(bc.db.GetStateStore(), statedb.Preimages())
 		} else {
 			rawdb.WritePreimages(blockBatch, statedb.Preimages())
 		}
