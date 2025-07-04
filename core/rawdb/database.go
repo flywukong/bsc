@@ -1258,7 +1258,7 @@ func SplitDatabase(db ethdb.Database, trieDB ethdb.Database) error {
 		)
 		value := make([]byte, len(v))
 		copy(value, v)
-
+		fmt.Println("find key1")
 		if !isTrieKey(key, value) {
 			continue
 		}
@@ -1275,7 +1275,7 @@ func SplitDatabase(db ethdb.Database, trieDB ethdb.Database) error {
 
 		tempBatch[string(key[:])] = value
 		count++
-		log.Info("find key")
+		fmt.Println("find key2")
 		// make a batch contain 100 keys , and send job work pool
 		if count >= 1 && count%100 == 0 {
 			// make a batch as a job, send it to worker pool
