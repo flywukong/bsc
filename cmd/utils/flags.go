@@ -2618,18 +2618,18 @@ func SplitTrieDatabase(ctx *cli.Context, stack *node.Node, readonly, disableFree
 		handles = MakeDatabaseHandles(ctx.Int(FDLimitFlag.Name))
 	)
 	// Allocate half of the  handles and chainDbCache to this separate state data database
-	stateDiskDb, err := stack.OpenDatabaseWithFreezer("state", cache, handles/2,, "", "eth/db/statedata/", readonly, true)
+	stateDiskDb, err := stack.OpenDatabaseWithFreezer("state", cache, handles/2, "", "eth/db/statedata/", readonly, true)
 	if err != nil {
 		Fatalf("Could not open trie database: %v", err)
 	}
 	/*
-	trieDB, err := stack.OpenDatabaseWithFreezer("chaindata", cache, handles/2,
-		ctx.String(AncientFlag.Name), "eth/db/chaindata/", false, false, false, false)
-	if err != nil {
-		Fatalf("Could not open trie database: %v", err)
-	}
+		trieDB, err := stack.OpenDatabaseWithFreezer("chaindata", cache, handles/2,
+			ctx.String(AncientFlag.Name), "eth/db/chaindata/", false, false, false, false)
+		if err != nil {
+			Fatalf("Could not open trie database: %v", err)
+		}
 
-	 */
+	*/
 	return stateDiskDb
 }
 
