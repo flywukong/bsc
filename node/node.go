@@ -854,6 +854,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
 			ReadOnly:          readonly,
 			DisableFreeze:     disableFreeze,
 		})
+		log.Info("open path", "path", n.ResolvePath(name))
 	}
 	if err == nil {
 		db = n.wrapDatabase(db)

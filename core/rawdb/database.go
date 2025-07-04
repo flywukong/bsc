@@ -1275,6 +1275,7 @@ func SplitDatabase(db ethdb.Database, trieDB ethdb.Database) error {
 
 		tempBatch[string(key[:])] = value
 		count++
+		log.Info("find key")
 		// make a batch contain 100 keys , and send job work pool
 		if count >= 1 && count%100 == 0 {
 			// make a batch as a job, send it to worker pool
