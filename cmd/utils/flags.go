@@ -2617,13 +2617,20 @@ func SplitTrieDatabase(ctx *cli.Context, stack *node.Node, readonly, disableFree
 		cache   = ctx.Int(CacheFlag.Name) * ctx.Int(CacheDatabaseFlag.Name) / 100
 		handles = MakeDatabaseHandles(ctx.Int(FDLimitFlag.Name))
 	)
-
-	trieDB, err := stack.OpenDatabaseForTrie("chaindata", cache, handles/2,
+	// Allocate half of the  handles and chainDbCache to this separate state data database
+	stateDiskDb, err := stack.OpenDatabaseWithFreezer("state", cache, handles/2,, "", "eth/db/statedata/", readonly, true)
+	if err != nil {
+		Fatalf("Could not open trie database: %v", err)
+	}
+	/*
+	trieDB, err := stack.OpenDatabaseWithFreezer("chaindata", cache, handles/2,
 		ctx.String(AncientFlag.Name), "eth/db/chaindata/", false, false, false, false)
 	if err != nil {
 		Fatalf("Could not open trie database: %v", err)
 	}
-	return trieDB
+
+	 */
+	return stateDiskDb
 }
 
 // tryMakeReadOnlyDatabase try to open the chain database in read-only mode,
