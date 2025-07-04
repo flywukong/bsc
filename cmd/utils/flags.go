@@ -2612,13 +2612,13 @@ func PathDBConfigAddJournalFilePath(stack *node.Node, config *pathdb.Config) *pa
 	return config
 }
 
-func SplitTrieDatabase(ctx *cli.Context, stack *node.Node, readonly, disableFreeze bool) ethdb.Database {
+func SplitTrieDatabase(ctx *cli.Context, stack *node.Node, readonly, disableFreeze bool, trie string) ethdb.Database {
 	var (
 		cache   = ctx.Int(CacheFlag.Name) * ctx.Int(CacheDatabaseFlag.Name) / 100
 		handles = MakeDatabaseHandles(ctx.Int(FDLimitFlag.Name))
 	)
 	// Allocate half of the  handles and chainDbCache to this separate state data database
-	stateDiskDb, err := stack.OpenDatabaseWithFreezer("state", cache, handles/2, "", "eth/db/statedata/", readonly, true)
+	stateDiskDb, err := stack.OpenDatabaseWithFreezer(trie+"/state", cache, handles/2, "", "eth/db/statedata/", readonly, true)
 	if err != nil {
 		Fatalf("Could not open trie database: %v", err)
 	}
