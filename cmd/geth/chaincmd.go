@@ -270,16 +270,6 @@ func initGenesis(ctx *cli.Context) error {
 	// Open and initialise both full and light databases
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
-<<<<<<< HEAD
-=======
-
-	for _, name := range []string{"chaindata", "lightchaindata"} {
-		chaindb, err := stack.OpenDatabaseWithFreezer(name, 0, 0, ctx.String(utils.AncientFlag.Name), "", false, false, false, false)
-		if err != nil {
-			utils.Fatalf("Failed to open database: %v", err)
-		}
-		defer chaindb.Close()
->>>>>>> 22c120368 (feat: support split trie command)
 
 	var overrides core.ChainOverrides
 	if ctx.IsSet(utils.OverridePassedForkTime.Name) {
