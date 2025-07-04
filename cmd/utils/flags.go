@@ -101,7 +101,7 @@ var (
 		Name: "multidatabase",
 		Usage: "Enable a separated state and block database, it will be created within two subdirectory called state and block, " +
 			"Users can copy this state or block directory to another directory or disk, and then create a symbolic link to the state directory under the chaindata",
-
+	}
 	TrieDirFlag = &flags.DirectoryFlag{
 		Name:     "triedir",
 		Usage:    "Data directory for the trie data base",
