@@ -537,9 +537,16 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 	if !disableFreeze && !readonly {
 		frdb.wg.Add(1)
 		go func() {
+			log.Info("freeze thread start")
 			frdb.freeze(db)
 			frdb.wg.Done()
 		}()
+	} else {
+		if disableFreeze {
+			log.Info("disable freeze")
+		} else {
+			log.Info("read only")
+		}
 	}
 	return freezerDb, nil
 }
