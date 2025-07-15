@@ -481,12 +481,14 @@ func (f *chainFreezer) freezeRangeWithBlobs(nfdb *nofreezedb, number, limit uint
 // The parameters (number, limit) specify the relevant block range, both of which
 // are included.
 func (f *chainFreezer) freezeRange(nfdb *nofreezedb, number, limit uint64) (hashes []common.Hash, err error) {
+	log.Info("freeze range begin")
 	if number > limit {
 		return nil, nil
 	}
 
 	env, _ := f.freezeEnv.Load().(*ethdb.FreezerEnv)
 	hashes = make([]common.Hash, 0, limit-number+1)
+	log.Info("freeze range begin modify ancient")
 	_, err = f.ModifyAncients(func(op ethdb.AncientWriteOp) error {
 		for ; number <= limit; number++ {
 			// Retrieve all the components of the canonical block.
