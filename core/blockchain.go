@@ -1528,6 +1528,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 
 		// Write all chain data to ancients.
 		td := bc.GetTd(first.Hash(), first.NumberU64())
+		log.Info("WriteAncientBlocksWithBlobs in InsertReceiptChain")
 		writeSize, err := rawdb.WriteAncientBlocksWithBlobs(bc.db, blockChain, receiptChain, td)
 		if err != nil {
 			log.Error("Error importing chain data to ancients", "err", err)

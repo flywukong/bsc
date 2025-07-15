@@ -757,6 +757,7 @@ func WriteBlock(db ethdb.KeyValueWriter, block *types.Block) {
 // WriteAncientBlocksWithBlobs writes entire block data with blobs into ancient store and returns the total written size.
 func WriteAncientBlocksWithBlobs(db ethdb.AncientWriter, blocks []*types.Block, receipts []types.Receipts, td *big.Int) (int64, error) {
 	// find cancun index, it's used for new added blob ancient table
+	log.Info("write block ancient with blobs", "block", blocks[0].NumberU64(), "len", len(blocks))
 	cancunIndex := -1
 	for i, block := range blocks {
 		if block.Sidecars() != nil {
@@ -764,7 +765,7 @@ func WriteAncientBlocksWithBlobs(db ethdb.AncientWriter, blocks []*types.Block, 
 			break
 		}
 	}
-	log.Debug("WriteAncientBlocks", "startAt", blocks[0].Number(), "cancunIndex", cancunIndex, "len", len(blocks))
+	log.Info("WriteAncientBlocks", "startAt", blocks[0].Number(), "cancunIndex", cancunIndex, "len", len(blocks))
 
 	var (
 		tdSum   = new(big.Int).Set(td)
@@ -802,6 +803,7 @@ func WriteAncientBlocks(db ethdb.AncientWriter, blocks []*types.Block, receipts 
 		tdSum      = new(big.Int).Set(td)
 		stReceipts []*types.ReceiptForStorage
 	)
+	log.Info("WriteAncientBlocks2", "startAt", blocks[0].Number(), "len", len(blocks))
 	return db.ModifyAncients(func(op ethdb.AncientWriteOp) error {
 		for i, block := range blocks {
 			// Convert receipts to storage format and sum up total difficulty.
