@@ -544,7 +544,7 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 	} else {
 		if disableFreeze {
 			log.Info("disable freeze")
-		} else {
+		} else if readonly {
 			log.Info("read only")
 		}
 	}
