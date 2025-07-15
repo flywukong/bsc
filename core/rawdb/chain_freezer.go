@@ -207,6 +207,7 @@ func (f *chainFreezer) freeze(db ethdb.KeyValueStore) {
 
 		// use finalized block as the chain freeze indicator was used for multiDatabase feature, if multiDatabase is false, keep 9W blocks in db
 		if f.multiDatabase {
+			log.Info("check freezer block status1")
 			threshold, err = f.freezeThreshold(nfdb)
 			if err != nil {
 				backoff = true
@@ -247,10 +248,11 @@ func (f *chainFreezer) freeze(db ethdb.KeyValueStore) {
 				last = freezerBatchLimit + first - 1
 			}
 		} else {
+			log.Info("check freezer block status")
 			// Retrieve the freezing threshold.
 			hash = ReadHeadBlockHash(nfdb)
 			if hash == (common.Hash{}) {
-				log.Debug("Current full block hash unavailable") // new chain, empty database
+				log.Info("Current full block hash unavailable") // new chain, empty database
 				backoff = true
 				continue
 			}
@@ -264,12 +266,12 @@ func (f *chainFreezer) freeze(db ethdb.KeyValueStore) {
 				continue
 
 			case *number < threshold:
-				log.Debug("Current full block not old enough to freeze", "number", *number, "hash", hash, "delay", threshold)
+				log.Info("Current full block not old enough to freeze", "number", *number, "hash", hash, "delay", threshold)
 				backoff = true
 				continue
 
 			case *number-threshold <= frozen:
-				log.Debug("Ancient blocks frozen already", "number", *number, "hash", hash, "frozen", frozen)
+				log.Info("Ancient blocks frozen already", "number", *number, "hash", hash, "frozen", frozen)
 				backoff = true
 				continue
 			}
@@ -286,6 +288,7 @@ func (f *chainFreezer) freeze(db ethdb.KeyValueStore) {
 			}
 		}
 
+		log.Info("check freezer env")
 		// check env first before chain freeze, it must wait when the env is necessary
 		if err := f.checkFreezerEnv(); err != nil {
 			f.waitEnvTimes++
@@ -428,7 +431,7 @@ func getBlobExtraReserveFromEnv(env *ethdb.FreezerEnv) uint64 {
 
 func (f *chainFreezer) freezeRangeWithBlobs(nfdb *nofreezedb, number, limit uint64) (hashes []common.Hash, err error) {
 	defer func() {
-		log.Debug("freezeRangeWithBlobs", "from", number, "to", limit, "err", err)
+		log.Info("freezeRangeWithBlobs", "from", number, "to", limit, "err", err)
 	}()
 	lastHash := ReadCanonicalHash(nfdb, limit)
 	if lastHash == (common.Hash{}) {
