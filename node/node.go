@@ -792,7 +792,6 @@ func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool
 
 		stateDbCache = config.DatabaseCache - chainDbCache
 		stateDbHandles = config.DatabaseHandles - chainDataHandles
-		disableChainDbFreeze = true
 	}
 
 	chainDB, err := n.OpenDatabaseWithFreezer(name, chainDbCache, chainDataHandles, config.DatabaseFreezer, namespace, readonly, disableChainDbFreeze, false, config.PruneAncientData)
