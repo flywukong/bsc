@@ -772,10 +772,8 @@ func (n *Node) OpenDatabase(name string, cache, handles int, namespace string, r
 
 func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool, config *ethconfig.Config) (ethdb.Database, error) {
 	var (
-		err                  error
-		stateDiskDb          ethdb.Database
-		disableChainDbFreeze = false
-		//	blockDbHandlesSize           int
+		err                          error
+		stateDiskDb                  ethdb.Database
 		chainDataHandles             = config.DatabaseHandles
 		chainDbCache                 = config.DatabaseCache
 		stateDbCache, stateDbHandles int
@@ -794,14 +792,14 @@ func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool
 		stateDbHandles = config.DatabaseHandles - chainDataHandles
 	}
 
-	chainDB, err := n.OpenDatabaseWithFreezer(name, chainDbCache, chainDataHandles, config.DatabaseFreezer, namespace, readonly, disableChainDbFreeze, false, config.PruneAncientData)
+	chainDB, err := n.OpenDatabaseWithFreezer(name, chainDbCache, chainDataHandles, config.DatabaseFreezer, namespace, readonly, false, false, config.PruneAncientData)
 	if err != nil {
 		return nil, err
 	}
 
 	if isMultiDatabase {
 		// Allocate half of the  handles and chainDbCache to this separate state data database
-		stateDiskDb, err = n.OpenDatabaseWithFreezer(name+"/state", stateDbCache, stateDbHandles, "", "eth/db/statedata/", readonly, true, false, config.PruneAncientData)
+		stateDiskDb, err = n.OpenDatabaseWithFreezer(name+"/state", stateDbCache, stateDbHandles, "", "eth/db/statedata/", readonly, false, false, config.PruneAncientData)
 		if err != nil {
 			return nil, err
 		}
