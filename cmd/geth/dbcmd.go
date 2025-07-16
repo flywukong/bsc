@@ -1440,19 +1440,21 @@ func inspectHistory(ctx *cli.Context) error {
 		}
 		id := rawdb.ReadStateID(db.GetStateStore(), header.Root)
 		if id == nil {
+			log.Info("id is zero")
+		}
+
+		id2 := rawdb.ReadStateID(db, header.Root)
+		if id2 == nil {
+			log.Info("id2 is zero")
+		}
+		if id == nil {
 			first, last, err := triedb.HistoryRange()
 			if err == nil {
 				return 0, fmt.Errorf("history of block #%d is not existent, available history range: [#%d-#%d]", blockNumber, first, last)
 			}
 			return 0, fmt.Errorf("history of block #%d is not existent", blockNumber)
 		}
-		if id == nil {
-			log.Info("id is zero")
-		}
-		id2 := rawdb.ReadStateID(db, header.Root)
-		if id2 == nil {
-			log.Info("id2 is zero")
-		}
+
 		log.Info("block id is", "id", *id)
 		log.Info("block id2 is", "id2", *id2)
 		return *id, nil

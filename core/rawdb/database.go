@@ -86,6 +86,7 @@ func (frdb *freezerdb) SetStateStore(state ethdb.Database) {
 
 func (frdb *freezerdb) GetStateStore() ethdb.Database {
 	if frdb.stateStore != nil {
+		log.Info("return state store")
 		return frdb.stateStore
 	}
 	return frdb
