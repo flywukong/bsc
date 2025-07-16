@@ -1446,9 +1446,15 @@ func inspectHistory(ctx *cli.Context) error {
 			}
 			return 0, fmt.Errorf("history of block #%d is not existent", blockNumber)
 		}
-		id2 := rawdb.ReadStateID(db.GetStateStore(), header.Root)
-		fmt.Println("block id is", "id", *id)
-		fmt.Println("block id2 is", "id2", *id2)
+		if id == nil {
+			log.Info("id is zero")
+		}
+		id2 := rawdb.ReadStateID(db, header.Root)
+		if id2 == nil {
+			log.Info("id2 is zero")
+		}
+		log.Info("block id is", "id", *id)
+		log.Info("block id2 is", "id2", *id2)
 		return *id, nil
 	}
 	// Parse the starting block number for inspection.
@@ -1467,6 +1473,7 @@ func inspectHistory(ctx *cli.Context) error {
 			return err
 		}
 	}
+	log.Info("start block", "start", startNumber, "end ", endBlock)
 	// Inspect the state history.
 	if slot == (common.Hash{}) {
 		return inspectAccount(triedb, start, end, address, ctx.Bool("raw"))
