@@ -1434,8 +1434,10 @@ func inspectHistory(ctx *cli.Context) error {
 	// To address this, load the corresponding block header and perform the
 	// conversion by this function.
 	blockToID := func(blockNumber uint64) (uint64, error) {
+		log.Info("block number is ", blockNumber)
 		header := rawdb.ReadHeader(db, rawdb.ReadCanonicalHash(db, blockNumber), blockNumber)
 		if header == nil {
+			log.Info("head not exist", "blocknumber", blockNumber)
 			return 0, fmt.Errorf("block #%d is not existent", blockNumber)
 		}
 		id := rawdb.ReadStateID(db.GetStateStore(), header.Root)
