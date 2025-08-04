@@ -827,6 +827,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient,
 	if n.config.DataDir == "" {
 		db, err = rawdb.NewDatabaseWithFreezer(memorydb.New(), "", namespace, readonly, disableFreeze, false)
 	} else {
+		fmt.Println("config dir", n.config.DataDir)
 		db, err = openDatabase(openOptions{
 			Type:              n.config.DBEngine,
 			Directory:         n.ResolvePath(name),
