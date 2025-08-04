@@ -802,13 +802,31 @@ func (r *PerfRunner) calculateHashRoot() {
 	trieDB := triedb.NewDatabase(ethDB, nil)
 
 	// Try to get a valid state root from the database
-	// First try to read the head block header to get the state root
+	// Follow the same approach as inspectTrie command for "latest"
 	stateRoot := types.EmptyRootHash
-	if headHash := rawdb.ReadHeadBlockHash(ethDB); headHash != (common.Hash{}) {
-		if headerNum := rawdb.ReadHeaderNumber(ethDB, headHash); headerNum != nil {
-			if header := rawdb.ReadHeader(ethDB, headHash, *headerNum); header != nil {
-				stateRoot = header.Root
-				log.Info("Using state root from head block", "root", stateRoot.Hex(), "block", header.Number)
+	foundValidRoot := false
+
+	// Get the latest header hash first
+	headerHash := rawdb.ReadHeadHeaderHash(ethDB)
+	if headerHash != (common.Hash{}) {
+		// Get block number from header hash
+		if headerNum := rawdb.ReadHeaderNumber(ethDB, headerHash); headerNum != nil {
+			blockNumber := *headerNum
+			// Get canonical hash for this block number
+			headerBlockHash := rawdb.ReadCanonicalHash(ethDB, blockNumber)
+			if headerBlockHash != (common.Hash{}) {
+				// Read the actual header to get the state root
+				if blockHeader := rawdb.ReadHeader(ethDB, headerBlockHash, blockNumber); blockHeader != nil {
+					stateRoot = blockHeader.Root
+					if stateRoot != types.EmptyRootHash {
+						foundValidRoot = true
+						log.Info("Found latest state root",
+							"root", stateRoot.Hex(),
+							"block", blockNumber,
+							"header_hash", headerHash.Hex(),
+							"canonical_hash", headerBlockHash.Hex())
+					}
+				}
 			}
 		}
 	}
@@ -818,6 +836,26 @@ func (r *PerfRunner) calculateHashRoot() {
 	if err != nil {
 		log.Warn("Failed to create state trie from benchmark DB", "err", err, "root", stateRoot.Hex())
 		return
+	}
+
+	// If we didn't find a valid state root, add some test data to make hash calculation meaningful
+	if !foundValidRoot {
+		log.Info("No valid state root found, adding test data for meaningful hash calculation")
+
+		// Add some realistic test data to simulate actual state trie operations
+		for i := 0; i < 1000; i++ {
+			// Generate account-like keys (20 bytes address)
+			key := make([]byte, 32)
+			value := make([]byte, 64) // Account data size
+
+			// Generate more realistic key patterns
+			mathrand.Read(key[:20]) // Address part
+			mathrand.Read(value)    // Account data
+
+			secureTrie.MustUpdate(key, value)
+		}
+
+		log.Info("Added test data to trie", "entries", 1000)
 	}
 
 	// Measure Commit time
@@ -832,14 +870,21 @@ func (r *PerfRunner) calculateHashRoot() {
 
 	totalDuration := time.Since(totalStart)
 
+	// Calculate ratio safely
+	var commitVsHashRatio float64
+	if hashDuration.Microseconds() > 0 {
+		commitVsHashRatio = float64(commitDuration.Microseconds()) / float64(hashDuration.Microseconds())
+	}
+
 	// Log comparison of different hash calculation methods
 	log.Info("Hash calculation comparison (using benchmark DB trie data)",
-		"state_root", stateRoot.Hex(),
+		"original_state_root", stateRoot.Hex(),
+		"has_real_data", foundValidRoot,
 		"commit_time_μs", commitDuration.Microseconds(),
 		"hash_time_μs", hashDuration.Microseconds(),
 		"total_time_μs", totalDuration.Microseconds(),
 		"computed_root_hash", rootHash.Hex(),
-		"commit_vs_hash_ratio", float64(commitDuration.Microseconds())/float64(hashDuration.Microseconds()))
+		"commit_vs_hash_ratio", fmt.Sprintf("%.2f", commitVsHashRatio))
 
 	// Update statistics (use total time for overall measurement)
 	atomic.AddInt64(&r.totalHashOps, 1)
@@ -849,6 +894,7 @@ func (r *PerfRunner) calculateHashRoot() {
 		"total_duration", totalDuration,
 		"commit_duration", commitDuration,
 		"hash_duration", hashDuration,
-		"state_root", stateRoot.Hex(),
-		"computed_hash", rootHash.Hex())
+		"original_root", stateRoot.Hex(),
+		"computed_hash", rootHash.Hex(),
+		"data_source", map[bool]string{true: "real_blockchain_data", false: "test_data"}[foundValidRoot])
 }
