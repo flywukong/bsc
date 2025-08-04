@@ -379,6 +379,7 @@ func (c *Config) ResolvePath(path string) string {
 	if filepath.IsAbs(path) {
 		return path
 	}
+	fmt.Println("path", path)
 	if c.DataDir == "" {
 		return ""
 	}
@@ -397,6 +398,7 @@ func (c *Config) ResolvePath(path string) string {
 			return oldpath
 		}
 	}
+	fmt.Println("instance dir", c.instanceDir())
 	return filepath.Join(c.instanceDir(), path)
 }
 
