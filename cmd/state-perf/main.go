@@ -931,7 +931,15 @@ func makeConfigNode(ctx *cli.Context) (*node.Node, error) {
 	// Create default configuration
 	cfg := node.DefaultConfig
 	cfg.Name = "state-perf"
-	cfg.DataDir = "." // Use current directory as default
+
+	// Use datadir from CLI context if available, otherwise use current directory
+	if ctx != nil && ctx.IsSet("datadir") {
+		cfg.DataDir = ctx.String("datadir")
+	} else if ctx != nil && ctx.GlobalIsSet("datadir") {
+		cfg.DataDir = ctx.GlobalString("datadir")
+	} else {
+		cfg.DataDir = "." // Use current directory as default
+	}
 
 	// Apply any CLI context flags to node config if available
 	if ctx != nil {
