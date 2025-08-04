@@ -33,6 +33,7 @@ import (
 	"github.com/ethereum/go-ethereum/cmd/utils"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/node"
@@ -92,7 +93,9 @@ type PerfRunner struct {
 	db       *pebble.Database
 	config   PerfConfig
 	taskChan chan *Task
-	ctx      *cli.Context // CLI context for database operations
+	ctx      *cli.Context   // CLI context for database operations
+	chainDB  ethdb.Database // Chain database for hash calculations
+	stack    *node.Node     // Node stack for chainDB
 
 	// Statistics
 	blockHeight     uint64
@@ -272,6 +275,7 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 
 	// Create and start performance runner
 	runner := NewPerfRunner(dataSet, benchDB, *config, c)
+	defer runner.Close() // Ensure cleanup
 
 	ctx, cancel := context.WithTimeout(context.Background(), config.RuntimeDur)
 	defer cancel()
@@ -344,13 +348,33 @@ func loadDataSet(testCaseDir string) (*DataSet, error) {
 }
 
 func NewPerfRunner(dataSet *DataSet, db *pebble.Database, config PerfConfig, ctx *cli.Context) *PerfRunner {
+	// Create a new node for chainDB
+	stack, err := makeConfigNode(ctx, config.BenchDBPath)
+	if err != nil {
+		log.Crit("Failed to create node for chainDB", "err", err)
+	}
+
+	chainDB := utils.MakeChainDatabase(ctx, stack, true, false)
+
 	return &PerfRunner{
 		dataSet:      dataSet,
 		db:           db,
 		config:       config,
 		taskChan:     make(chan *Task, 10),
 		ctx:          ctx,
+		chainDB:      chainDB,
+		stack:        stack,
 		lastStatTime: time.Now(),
+	}
+}
+
+// Close cleans up PerfRunner resources
+func (r *PerfRunner) Close() {
+	if r.chainDB != nil {
+		r.chainDB.Close()
+	}
+	if r.stack != nil {
+		r.stack.Close()
 	}
 }
 
@@ -823,16 +847,8 @@ func (r *PerfRunner) printHashSummary() {
 func (r *PerfRunner) calculateHashRoot() {
 	totalStart := time.Now()
 
-	// Use inspect-trie approach for database initialization
-	stack, err := makeConfigNode(r.ctx, r.config.BenchDBPath)
-	if err != nil {
-		log.Warn("Failed to create config node", "err", err)
-		return
-	}
-	defer stack.Close()
-
-	db := utils.MakeChainDatabase(r.ctx, stack, true, false)
-	defer db.Close()
+	// Use pre-created chainDB instead of creating new connections
+	db := r.chainDB
 
 	var (
 		blockNumber  uint64
@@ -874,7 +890,7 @@ func (r *PerfRunner) calculateHashRoot() {
 	var config *triedb.Config
 	if dbScheme == rawdb.PathScheme {
 		config = &triedb.Config{
-			PathDB: utils.PathDBConfigAddJournalFilePath(stack, pathdb.ReadOnly),
+			PathDB: utils.PathDBConfigAddJournalFilePath(r.stack, pathdb.ReadOnly),
 			Cache:  0,
 		}
 	} else if dbScheme == rawdb.HashScheme {
@@ -908,6 +924,12 @@ func (r *PerfRunner) calculateHashRoot() {
 		commitVsHashRatio = float64(commitDuration.Nanoseconds()) / float64(hashDuration.Nanoseconds())
 	}
 
+	// 计算更新的节点数量，防止空指针解引用
+	var nodesUpdated int
+	if nodes != nil && nodes.Nodes != nil {
+		nodesUpdated = len(nodes.Nodes)
+	}
+
 	// 记录结果
 	log.Info("Hash calculation with real blockchain data",
 		"original_root", trieRootHash.Hex(),
@@ -919,7 +941,7 @@ func (r *PerfRunner) calculateHashRoot() {
 		"hash_time_μs", hashDuration.Microseconds(),
 		"total_time_μs", totalDuration.Microseconds(),
 		"commit_vs_hash_ratio", fmt.Sprintf("%.2f", commitVsHashRatio),
-		"nodes_updated", len(nodes.Nodes))
+		"nodes_updated", nodesUpdated)
 
 	// 更新统计
 	atomic.AddInt64(&r.totalHashOps, 1)
