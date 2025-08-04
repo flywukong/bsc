@@ -121,7 +121,7 @@ func main() {
 	var config PerfConfig
 
 	app := &cli.App{
-		Name:    "state-perf",
+		Name:    "",
 		Usage:   "A CLI-based performance testing tool for PebbleDB state operations",
 		Version: version,
 		Commands: []*cli.Command{
