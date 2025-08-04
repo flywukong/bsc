@@ -930,7 +930,7 @@ func (r *PerfRunner) calculateHashRoot() {
 func makeConfigNode(ctx *cli.Context, benchDBPath string) (*node.Node, error) {
 	// Create default configuration
 	cfg := node.DefaultConfig
-	cfg.Name = "state-perf"
+	cfg.Name = ""
 	cfg.DataDir = benchDBPath // Use bench-db path as data directory
 
 	// Apply any CLI context flags to node config if available
