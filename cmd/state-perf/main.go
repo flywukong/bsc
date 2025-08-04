@@ -824,7 +824,7 @@ func (r *PerfRunner) calculateHashRoot() {
 	totalStart := time.Now()
 
 	// Use inspect-trie approach for database initialization
-	stack, err := makeConfigNode(r.ctx)
+	stack, err := makeConfigNode(r.ctx, r.config.BenchDBPath)
 	if err != nil {
 		log.Warn("Failed to create config node", "err", err)
 		return
@@ -927,23 +927,18 @@ func (r *PerfRunner) calculateHashRoot() {
 }
 
 // makeConfigNode creates a simplified node configuration for database access
-func makeConfigNode(ctx *cli.Context) (*node.Node, error) {
+func makeConfigNode(ctx *cli.Context, benchDBPath string) (*node.Node, error) {
 	// Create default configuration
 	cfg := node.DefaultConfig
 	cfg.Name = "state-perf"
-
-	// Use datadir from CLI context if available, otherwise use current directory
-	if ctx != nil && ctx.IsSet("datadir") {
-		cfg.DataDir = ctx.String("datadir")
-	} else if ctx != nil && ctx.GlobalIsSet("datadir") {
-		cfg.DataDir = ctx.GlobalString("datadir")
-	} else {
-		cfg.DataDir = "." // Use current directory as default
-	}
+	cfg.DataDir = benchDBPath // Use bench-db path as data directory
 
 	// Apply any CLI context flags to node config if available
+	// This will properly handle other node flags
 	if ctx != nil {
 		utils.SetNodeConfig(ctx, &cfg)
+		// Override DataDir with benchDBPath to ensure we use the correct path
+		cfg.DataDir = benchDBPath
 	}
 
 	// Create the node
