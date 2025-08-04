@@ -25,6 +25,8 @@ import (
 	mathrand "math/rand"
 	"os"
 	"os/signal"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -112,90 +114,90 @@ func main() {
 			{
 				Name:  "press-test",
 				Usage: "Press test with random state data operations",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:        "testcase",
+						Aliases:     []string{"tc"},
+						Usage:       "Path to test-case pebble database directory",
+						Value:       "test-case",
+						Destination: &config.TestCaseDir,
+					},
+					&cli.StringFlag{
+						Name:        "bench-db",
+						Aliases:     []string{"bdb"},
+						Usage:       "Path for benchmark pebble database",
+						Value:       "bench-pebble",
+						Destination: &config.BenchDBPath,
+					},
+					&cli.Uint64Flag{
+						Name:        "batch",
+						Aliases:     []string{"b"},
+						Usage:       "Batch size for task generation",
+						Value:       5000,
+						Destination: &config.BatchSize,
+					},
+					&cli.Float64Flag{
+						Name:        "read-ratio",
+						Aliases:     []string{"rr"},
+						Usage:       "Read operations ratio (0.0-1.0)",
+						Value:       0.6,
+						Destination: &config.ReadRatio,
+					},
+					&cli.Float64Flag{
+						Name:        "write-ratio",
+						Aliases:     []string{"wr"},
+						Usage:       "Write operations ratio (0.0-1.0)",
+						Value:       0.2,
+						Destination: &config.WriteRatio,
+					},
+					&cli.Float64Flag{
+						Name:        "update-ratio",
+						Aliases:     []string{"ur"},
+						Usage:       "Update operations ratio (0.0-1.0)",
+						Value:       0.2,
+						Destination: &config.UpdateRatio,
+					},
+					&cli.IntFlag{
+						Name:        "threads",
+						Aliases:     []string{"t"},
+						Usage:       "Number of worker threads",
+						Value:       1,
+						Destination: &config.NumThreads,
+					},
+					&cli.DurationFlag{
+						Name:        "runtime",
+						Aliases:     []string{"rt"},
+						Usage:       "Duration to run the benchmark",
+						Value:       60 * time.Second,
+						Destination: &config.RuntimeDur,
+					},
+					&cli.StringFlag{
+						Name:        "metrics.addr",
+						Aliases:     []string{"ma"},
+						Usage:       "Metrics address",
+						Value:       "127.0.0.1",
+						Destination: &config.MetricsAddr,
+					},
+					&cli.IntFlag{
+						Name:        "metrics.port",
+						Aliases:     []string{"mp"},
+						Usage:       "Metrics HTTP server listening port",
+						Value:       8545,
+						Destination: &config.MetricsPort,
+					},
+				},
+				Before: func(c *cli.Context) error {
+					// Validate ratios sum to 1.0
+					total := config.ReadRatio + config.WriteRatio + config.UpdateRatio
+					if math.Abs(total-1.0) > 0.01 {
+						return fmt.Errorf("read-ratio + write-ratio + update-ratio must equal 1.0, got %.2f", total)
+					}
+					return nil
+				},
 				Action: func(c *cli.Context) error {
 					return runPerfTest(c, &config)
 				},
 			},
-		},
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:        "testcase",
-				Aliases:     []string{"tc"},
-				Usage:       "Path to test-case pebble database directory",
-				Value:       "test-case",
-				Destination: &config.TestCaseDir,
-			},
-			&cli.StringFlag{
-				Name:        "bench-db",
-				Aliases:     []string{"bdb"},
-				Usage:       "Path for benchmark pebble database",
-				Value:       "bench-pebble",
-				Destination: &config.BenchDBPath,
-			},
-			&cli.Uint64Flag{
-				Name:        "batch",
-				Aliases:     []string{"b"},
-				Usage:       "Batch size for task generation",
-				Value:       5000,
-				Destination: &config.BatchSize,
-			},
-			&cli.Float64Flag{
-				Name:        "read-ratio",
-				Aliases:     []string{"rr"},
-				Usage:       "Read operations ratio (0.0-1.0)",
-				Value:       0.6,
-				Destination: &config.ReadRatio,
-			},
-			&cli.Float64Flag{
-				Name:        "write-ratio",
-				Aliases:     []string{"wr"},
-				Usage:       "Write operations ratio (0.0-1.0)",
-				Value:       0.2,
-				Destination: &config.WriteRatio,
-			},
-			&cli.Float64Flag{
-				Name:        "update-ratio",
-				Aliases:     []string{"ur"},
-				Usage:       "Update operations ratio (0.0-1.0)",
-				Value:       0.2,
-				Destination: &config.UpdateRatio,
-			},
-			&cli.IntFlag{
-				Name:        "threads",
-				Aliases:     []string{"t"},
-				Usage:       "Number of worker threads",
-				Value:       1,
-				Destination: &config.NumThreads,
-			},
-			&cli.DurationFlag{
-				Name:        "runtime",
-				Aliases:     []string{"rt"},
-				Usage:       "Duration to run the benchmark",
-				Value:       60 * time.Second,
-				Destination: &config.RuntimeDur,
-			},
-			&cli.StringFlag{
-				Name:        "metrics.addr",
-				Aliases:     []string{"ma"},
-				Usage:       "Metrics address",
-				Value:       "127.0.0.1",
-				Destination: &config.MetricsAddr,
-			},
-			&cli.IntFlag{
-				Name:        "metrics.port",
-				Aliases:     []string{"mp"},
-				Usage:       "Metrics HTTP server listening port",
-				Value:       8545,
-				Destination: &config.MetricsPort,
-			},
-		},
-		Before: func(c *cli.Context) error {
-			// Validate ratios sum to 1.0
-			total := config.ReadRatio + config.WriteRatio + config.UpdateRatio
-			if math.Abs(total-1.0) > 0.01 {
-				return fmt.Errorf("read-ratio + write-ratio + update-ratio must equal 1.0, got %.2f", total)
-			}
-			return nil
 		},
 		Action: func(c *cli.Context) error {
 			fmt.Printf("State Performance Tool v%s\n", version)
@@ -446,36 +448,110 @@ func (r *PerfRunner) runInternal(ctx context.Context) {
 }
 
 func (r *PerfRunner) processTask(task *Task) {
-	// Process read operations
-	readStart := time.Now()
-	for _, kv := range task.ReadKVs {
-		_, err := r.db.Get(kv.Key)
-		if err != nil {
-			// Key might not exist, continue
-		}
-		r.totalReadOps++
-	}
-	r.totalReadTime += time.Since(readStart)
+	var wg sync.WaitGroup
 
-	// Process update operations (single write)
-	updateStart := time.Now()
-	for _, kv := range task.UpdateKVs {
-		// Modify value slightly for update
-		newValue := append(kv.Value, byte(mathrand.Intn(256)))
-		err := r.db.Put(kv.Key, newValue)
-		if err != nil {
-			log.Warn("Failed to update key", "err", err)
-		}
-		r.totalUpdateOps++
+	// Process read operations with multi-threading
+	if len(task.ReadKVs) > 0 {
+		readStart := time.Now()
+		r.processReadsParallel(task.ReadKVs, &wg)
+		wg.Wait()
+		atomic.AddInt64((*int64)(&r.totalReadTime), int64(time.Since(readStart)))
 	}
-	r.totalUpdateTime += time.Since(updateStart)
 
-	// Process write operations (batch writes with prefix preserved)
+	// Process update operations with multi-threading
+	if len(task.UpdateKVs) > 0 {
+		updateStart := time.Now()
+		r.processUpdatesParallel(task.UpdateKVs, &wg)
+		wg.Wait()
+		atomic.AddInt64((*int64)(&r.totalUpdateTime), int64(time.Since(updateStart)))
+	}
+
+	// Process write operations (batch writes - single threaded)
 	writeStart := time.Now()
 	if len(task.WriteKVs) > 0 {
 		r.batchWrite(task.WriteKVs)
 	}
-	r.totalWriteTime += time.Since(writeStart)
+	atomic.AddInt64((*int64)(&r.totalWriteTime), int64(time.Since(writeStart)))
+}
+
+func (r *PerfRunner) processReadsParallel(readKVs []KeyValue, wg *sync.WaitGroup) {
+	numThreads := r.config.NumThreads
+	if numThreads <= 0 {
+		numThreads = 1
+	}
+
+	chunkSize := len(readKVs) / numThreads
+	if chunkSize == 0 {
+		chunkSize = 1
+	}
+
+	for i := 0; i < numThreads; i++ {
+		start := i * chunkSize
+		end := start + chunkSize
+		if i == numThreads-1 {
+			end = len(readKVs) // Last thread handles remaining items
+		}
+		if start >= len(readKVs) {
+			break
+		}
+
+		wg.Add(1)
+		go func(kvs []KeyValue) {
+			defer wg.Done()
+			localReadOps := int64(0)
+
+			for _, kv := range kvs {
+				_, err := r.db.Get(kv.Key)
+				if err != nil {
+					// Key might not exist, continue
+				}
+				localReadOps++
+			}
+
+			atomic.AddInt64(&r.totalReadOps, localReadOps)
+		}(readKVs[start:end])
+	}
+}
+
+func (r *PerfRunner) processUpdatesParallel(updateKVs []KeyValue, wg *sync.WaitGroup) {
+	numThreads := r.config.NumThreads
+	if numThreads <= 0 {
+		numThreads = 1
+	}
+
+	chunkSize := len(updateKVs) / numThreads
+	if chunkSize == 0 {
+		chunkSize = 1
+	}
+
+	for i := 0; i < numThreads; i++ {
+		start := i * chunkSize
+		end := start + chunkSize
+		if i == numThreads-1 {
+			end = len(updateKVs) // Last thread handles remaining items
+		}
+		if start >= len(updateKVs) {
+			break
+		}
+
+		wg.Add(1)
+		go func(kvs []KeyValue) {
+			defer wg.Done()
+			localUpdateOps := int64(0)
+
+			for _, kv := range kvs {
+				// Modify value slightly for update
+				newValue := append(kv.Value, byte(mathrand.Intn(256)))
+				err := r.db.Put(kv.Key, newValue)
+				if err != nil {
+					log.Warn("Failed to update key", "err", err)
+				}
+				localUpdateOps++
+			}
+
+			atomic.AddInt64(&r.totalUpdateOps, localUpdateOps)
+		}(updateKVs[start:end])
+	}
 }
 
 // batchWrite performs batch write operations with size control (230MB-256MB per batch)
