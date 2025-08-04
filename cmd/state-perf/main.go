@@ -93,9 +93,11 @@ type PerfRunner struct {
 	db       *pebble.Database
 	config   PerfConfig
 	taskChan chan *Task
-	ctx      *cli.Context   // CLI context for database operations
-	chainDB  ethdb.Database // Chain database for hash calculations
-	stack    *node.Node     // Node stack for chainDB
+	ctx      *cli.Context     // CLI context for database operations
+	chainDB  ethdb.Database   // Chain database for hash calculations
+	stack    *node.Node       // Node stack for chainDB
+	trieDB   *triedb.Database // Cached trie database
+	theTrie  *trie.Trie       // Cached trie for hash calculations
 
 	// Statistics
 	blockHeight     uint64
@@ -109,9 +111,10 @@ type PerfRunner struct {
 	totalBatchCount int64 // Total number of batches processed
 
 	// Hash calculation statistics
-	totalHashOps  int64
-	totalHashTime time.Duration
-	trieDir       string // Directory for trie operations
+	totalHashOps    int64
+	totalHashTime   time.Duration
+	totalCommitTime time.Duration // Total commit time for average calculation
+	trieDir         string        // Directory for trie operations
 
 	// For interval TPS calculation
 	lastReadOps    int64
@@ -370,6 +373,9 @@ func NewPerfRunner(dataSet *DataSet, db *pebble.Database, config PerfConfig, ctx
 
 // Close cleans up PerfRunner resources
 func (r *PerfRunner) Close() {
+	if r.trieDB != nil {
+		r.trieDB.Close()
+	}
 	if r.chainDB != nil {
 		r.chainDB.Close()
 	}
@@ -831,10 +837,31 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 func (r *PerfRunner) printHashSummary() {
 	if r.totalHashOps > 0 {
 		avgHashLatency := float64(r.totalHashTime.Microseconds()) / float64(r.totalHashOps)
+		avgCommitLatency := float64(r.totalCommitTime.Microseconds()) / float64(r.totalHashOps)
+
 		fmt.Printf("=== Hash Calculation Summary ===\n")
 		fmt.Printf("Total Hash Operations: %d\n", r.totalHashOps)
 		fmt.Printf("Total Hash Time: %v\n", r.totalHashTime)
-		fmt.Printf("Average Hash Latency: %.2f μs\n", avgHashLatency)
+		fmt.Printf("Total Commit Time: %v\n", r.totalCommitTime)
+
+		// Format hash latency with appropriate units
+		if avgHashLatency >= 1000000 { // >= 1 second
+			fmt.Printf("Average Hash Latency: %.2f s\n", avgHashLatency/1000000)
+		} else if avgHashLatency >= 1000 { // >= 1 millisecond
+			fmt.Printf("Average Hash Latency: %.2f ms\n", avgHashLatency/1000)
+		} else {
+			fmt.Printf("Average Hash Latency: %.2f μs\n", avgHashLatency)
+		}
+
+		// Format commit latency with appropriate units
+		if avgCommitLatency >= 1000000 { // >= 1 second
+			fmt.Printf("Average Commit Latency: %.2f s\n", avgCommitLatency/1000000)
+		} else if avgCommitLatency >= 1000 { // >= 1 millisecond
+			fmt.Printf("Average Commit Latency: %.2f ms\n", avgCommitLatency/1000)
+		} else {
+			fmt.Printf("Average Commit Latency: %.2f μs\n", avgCommitLatency)
+		}
+
 		fmt.Printf("===============================\n")
 	} else {
 		fmt.Printf("=== Hash Calculation Summary ===\n")
@@ -847,7 +874,61 @@ func (r *PerfRunner) printHashSummary() {
 func (r *PerfRunner) calculateHashRoot() {
 	totalStart := time.Now()
 
-	// Use pre-created chainDB instead of creating new connections
+	// Initialize trie components only once
+	if r.trieDB == nil || r.theTrie == nil {
+		if err := r.initializeTrie(); err != nil {
+			log.Warn("Failed to initialize trie", "err", err)
+			return
+		}
+	}
+
+	// Measure hash calculation before commit (to see if it's cached)
+	hashBeforeStart := time.Now()
+	hashBefore := r.theTrie.Hash()
+	hashBeforeDuration := time.Since(hashBeforeStart)
+
+	// Execute commit operation
+	commitStart := time.Now()
+	newRoot, nodes := r.theTrie.Commit(false)
+	commitDuration := time.Since(commitStart)
+
+	// Measure hash calculation after commit
+	hashAfterStart := time.Now()
+	computedHash := r.theTrie.Hash()
+	hashAfterDuration := time.Since(hashAfterStart)
+
+	totalDuration := time.Since(totalStart)
+
+	// Calculate updated nodes count, prevent nil pointer dereference
+	var nodesUpdated int
+	if nodes != nil && nodes.Nodes != nil {
+		nodesUpdated = len(nodes.Nodes)
+	}
+
+	// Record results with detailed timing
+	log.Info("Hash calculation with real blockchain data",
+		"hash_before", hashBefore.Hex(),
+		"computed_hash", computedHash.Hex(),
+		"new_root", newRoot.Hex(),
+		"commit_time_μs", commitDuration.Microseconds(),
+		"hash_before_μs", hashBeforeDuration.Microseconds(),
+		"hash_after_μs", hashAfterDuration.Microseconds(),
+		"commit_time_ns", commitDuration.Nanoseconds(),
+		"hash_before_ns", hashBeforeDuration.Nanoseconds(),
+		"hash_after_ns", hashAfterDuration.Nanoseconds(),
+		"total_time_μs", totalDuration.Microseconds(),
+		"nodes_updated", nodesUpdated,
+		"hash_values_equal", hashBefore == computedHash)
+
+	// Update statistics using the actual hash time we want to measure
+	atomic.AddInt64(&r.totalHashOps, 1)
+	atomic.AddInt64((*int64)(&r.totalHashTime), int64(totalDuration))
+	atomic.AddInt64((*int64)(&r.totalCommitTime), int64(commitDuration))
+}
+
+// initializeTrie initializes the trie components once
+func (r *PerfRunner) initializeTrie() error {
+	// Use pre-created chainDB
 	db := r.chainDB
 
 	var (
@@ -864,8 +945,7 @@ func (r *PerfRunner) calculateHashRoot() {
 			if blockNumber != math.MaxUint64 {
 				headerBlockHash := rawdb.ReadCanonicalHash(db, blockNumber)
 				if headerBlockHash == (common.Hash{}) {
-					log.Error("ReadHeadBlockHash empty hash")
-					return
+					return fmt.Errorf("ReadHeadBlockHash empty hash")
 				}
 				blockHeader := rawdb.ReadHeader(db, headerBlockHash, blockNumber)
 				if blockHeader != nil {
@@ -874,16 +954,16 @@ func (r *PerfRunner) calculateHashRoot() {
 			}
 		}
 	} else {
-		log.Warn("No head header hash found in database")
-		return
+		return fmt.Errorf("No head header hash found in database")
 	}
 
 	if trieRootHash == (common.Hash{}) {
-		log.Error("Empty root hash")
-		return
+		return fmt.Errorf("Empty root hash")
 	}
 
-	fmt.Printf("ReadBlockHeader, root: %v, blocknum: %v\n", trieRootHash, blockNumber)
+	log.Info("Initializing trie for hash calculations",
+		"root", trieRootHash.Hex(),
+		"block_number", blockNumber)
 
 	// Detect database scheme and create corresponding triedb config
 	dbScheme := rawdb.ReadStateScheme(db)
@@ -897,55 +977,17 @@ func (r *PerfRunner) calculateHashRoot() {
 		config = triedb.HashDefaults
 	}
 
-	// Create triedb and trie
-	trieDB := triedb.NewDatabase(db, config)
-	defer trieDB.Close()
+	// Create triedb and trie (only once)
+	r.trieDB = triedb.NewDatabase(db, config)
 
-	theTrie, err := trie.New(trie.TrieID(trieRootHash), trieDB)
+	theTrie, err := trie.New(trie.TrieID(trieRootHash), r.trieDB)
 	if err != nil {
-		log.Warn("Failed to create trie", "err", err, "root", trieRootHash.Hex())
-		return
+		return fmt.Errorf("failed to create trie: %v", err)
 	}
+	r.theTrie = theTrie
 
-	// 执行hash计算性能测试
-	commitStart := time.Now()
-	newRoot, nodes := theTrie.Commit(false)
-	commitDuration := time.Since(commitStart)
-
-	hashStart := time.Now()
-	computedHash := theTrie.Hash()
-	hashDuration := time.Since(hashStart)
-
-	totalDuration := time.Since(totalStart)
-
-	// 计算比值
-	var commitVsHashRatio float64
-	if hashDuration.Nanoseconds() > 0 {
-		commitVsHashRatio = float64(commitDuration.Nanoseconds()) / float64(hashDuration.Nanoseconds())
-	}
-
-	// 计算更新的节点数量，防止空指针解引用
-	var nodesUpdated int
-	if nodes != nil && nodes.Nodes != nil {
-		nodesUpdated = len(nodes.Nodes)
-	}
-
-	// 记录结果
-	log.Info("Hash calculation with real blockchain data",
-		"original_root", trieRootHash.Hex(),
-		"computed_hash", computedHash.Hex(),
-		"new_root", newRoot.Hex(),
-		"block_number", blockNumber,
-		"db_scheme", dbScheme,
-		"commit_time_μs", commitDuration.Microseconds(),
-		"hash_time_μs", hashDuration.Microseconds(),
-		"total_time_μs", totalDuration.Microseconds(),
-		"commit_vs_hash_ratio", fmt.Sprintf("%.2f", commitVsHashRatio),
-		"nodes_updated", nodesUpdated)
-
-	// 更新统计
-	atomic.AddInt64(&r.totalHashOps, 1)
-	atomic.AddInt64((*int64)(&r.totalHashTime), int64(totalDuration))
+	log.Info("Trie initialized successfully", "db_scheme", dbScheme)
+	return nil
 }
 
 // makeConfigNode creates a simplified node configuration for database access
