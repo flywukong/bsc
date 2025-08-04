@@ -110,9 +110,12 @@ type PerfRunner struct {
 	lastStatTime    time.Time
 	totalBatchCount int64 // Total number of batches processed
 
-	// Update batch statistics
-	totalUpdateKVs  int64 // Total number of KVs in update batches
-	totalUpdateSize int64 // Total size of update batches in bytes
+	// Update batch statistics - for 256MB accumulated batch write
+	totalUpdateKVs        int64      // Total number of KVs in update batches
+	totalUpdateSize       int64      // Total size of update batches in bytes
+	accumulatedUpdateKVs  []KeyValue // In-memory accumulation for 256MB batch
+	accumulatedUpdateSize int64      // Current accumulated size in bytes
+	updateMutex           sync.Mutex // Protect accumulated update data
 
 	// Hash calculation statistics
 	totalHashOps    int64
@@ -379,6 +382,16 @@ func NewPerfRunner(dataSet *DataSet, db *pebble.Database, config PerfConfig, ctx
 
 // Close cleans up PerfRunner resources
 func (r *PerfRunner) Close() {
+	// Flush any remaining accumulated updates before closing
+	r.updateMutex.Lock()
+	hasData := len(r.accumulatedUpdateKVs) > 0
+	r.updateMutex.Unlock()
+
+	if hasData {
+		log.Info("Flushing remaining accumulated updates before shutdown")
+		r.flushAccumulatedUpdates()
+	}
+
 	if r.trieDB != nil {
 		r.trieDB.Close()
 	}
@@ -536,15 +549,13 @@ func (r *PerfRunner) processTask(task *Task) {
 		}()
 	}
 
-	// Process update operations concurrently
+	// Accumulate update operations in memory (no immediate write)
 	if len(task.UpdateKVs) > 0 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			updateStart := time.Now()
-			var updateWG sync.WaitGroup
-			r.processUpdatesParallel(task.UpdateKVs, &updateWG)
-			updateWG.Wait()
+			r.accumulateUpdates(task.UpdateKVs)
 			atomic.AddInt64((*int64)(&r.totalUpdateTime), int64(time.Since(updateStart)))
 		}()
 	}
@@ -603,55 +614,107 @@ func (r *PerfRunner) processReadsParallel(readKVs []KeyValue, wg *sync.WaitGroup
 	}
 }
 
-func (r *PerfRunner) processUpdatesParallel(updateKVs []KeyValue, wg *sync.WaitGroup) {
-	numThreads := r.config.NumThreads
-	if numThreads <= 0 {
-		numThreads = 1
-	}
+// accumulateUpdates accumulates update KVs in memory until 256MB, then triggers batch write
+func (r *PerfRunner) accumulateUpdates(updateKVs []KeyValue) {
+	const targetBatchSize = 256 * 1024 * 1024 // 256MB
 
-	// Calculate total batch size for this update operation
-	totalBatchSize := int64(0)
+	// Prepare expanded KVs for accumulation
+	expandedKVs := make([]KeyValue, 0, len(updateKVs))
+	totalSize := int64(0)
+
 	for _, kv := range updateKVs {
-		totalBatchSize += int64(len(kv.Key) + len(kv.Value))
-	}
+		// Modify value to reach larger size for 256MB target
+		// Expand each value by approximately 5x to reach target size
+		originalSize := len(kv.Value)
+		expandFactor := 5
 
-	chunkSize := len(updateKVs) / numThreads
-	if chunkSize == 0 {
-		chunkSize = 1
-	}
+		// Create a larger value by repeating the original data and adding random bytes
+		newValue := make([]byte, 0, originalSize*expandFactor+256)
 
-	for i := 0; i < numThreads; i++ {
-		start := i * chunkSize
-		end := start + chunkSize
-		if i == numThreads-1 {
-			end = len(updateKVs) // Last thread handles remaining items
-		}
-		if start >= len(updateKVs) {
-			break
+		// Repeat original value multiple times
+		for i := 0; i < expandFactor; i++ {
+			newValue = append(newValue, kv.Value...)
 		}
 
-		wg.Add(1)
-		go func(kvs []KeyValue) {
-			defer wg.Done()
-			localUpdateOps := int64(0)
+		// Add additional random bytes to ensure size variation
+		additionalBytes := make([]byte, 256)
+		rand.Read(additionalBytes)
+		newValue = append(newValue, additionalBytes...)
 
-			for _, kv := range kvs {
-				// Modify value slightly for update
-				newValue := append(kv.Value, byte(mathrand.Intn(256)))
-				err := r.db.Put(kv.Key, newValue)
-				if err != nil {
-					log.Warn("Failed to update key", "err", err)
-				}
-				localUpdateOps++
-			}
-
-			atomic.AddInt64(&r.totalUpdateOps, localUpdateOps)
-		}(updateKVs[start:end])
+		expandedKV := KeyValue{
+			Key:   kv.Key,
+			Value: newValue,
+			Type:  kv.Type,
+		}
+		expandedKVs = append(expandedKVs, expandedKV)
+		totalSize += int64(len(kv.Key) + len(newValue))
 	}
 
-	// Update batch statistics
+	// Thread-safe accumulation
+	r.updateMutex.Lock()
+	r.accumulatedUpdateKVs = append(r.accumulatedUpdateKVs, expandedKVs...)
+	r.accumulatedUpdateSize += totalSize
+	currentSize := r.accumulatedUpdateSize
+	shouldTriggerWrite := currentSize >= targetBatchSize
+	r.updateMutex.Unlock()
+
+	// Update statistics
+	atomic.AddInt64(&r.totalUpdateOps, int64(len(updateKVs)))
 	atomic.AddInt64(&r.totalUpdateKVs, int64(len(updateKVs)))
-	atomic.AddInt64(&r.totalUpdateSize, totalBatchSize)
+	atomic.AddInt64(&r.totalUpdateSize, totalSize)
+
+	// Trigger batch write if we've accumulated enough data
+	if shouldTriggerWrite {
+		go r.flushAccumulatedUpdates()
+	}
+}
+
+// flushAccumulatedUpdates performs a single 256MB batch write of accumulated updates
+func (r *PerfRunner) flushAccumulatedUpdates() {
+	// Get accumulated data and reset
+	r.updateMutex.Lock()
+	if len(r.accumulatedUpdateKVs) == 0 {
+		r.updateMutex.Unlock()
+		return
+	}
+
+	kvs := make([]KeyValue, len(r.accumulatedUpdateKVs))
+	copy(kvs, r.accumulatedUpdateKVs)
+	batchSize := r.accumulatedUpdateSize
+
+	// Reset accumulation
+	r.accumulatedUpdateKVs = r.accumulatedUpdateKVs[:0]
+	r.accumulatedUpdateSize = 0
+	r.updateMutex.Unlock()
+
+	// Perform actual batch write
+	writeStart := time.Now()
+
+	// Create batch with the exact size needed
+	batch := r.db.NewBatchWithSize(int(batchSize * 11 / 10)) // Extra 10% for pebble overhead
+
+	for _, kv := range kvs {
+		if err := batch.Put(kv.Key, kv.Value); err != nil {
+			log.Warn("Failed to add KV to batch", "err", err)
+			continue
+		}
+	}
+
+	// Execute the batch write
+	if err := batch.Write(); err != nil {
+		log.Error("Failed to write 256MB update batch", "err", err, "kvCount", len(kvs), "size", batchSize)
+	} else {
+		writeDuration := time.Since(writeStart)
+		sizeMB := float64(batchSize) / (1024 * 1024)
+		log.Info("256MB update batch written successfully",
+			"kvCount", len(kvs),
+			"sizeMB", sizeMB,
+			"durationMs", writeDuration.Milliseconds(),
+			"throughputMB/s", sizeMB*1000/float64(writeDuration.Milliseconds()))
+	}
+
+	// Add to write time statistics (this is our actual write operation)
+	atomic.AddInt64((*int64)(&r.totalWriteTime), int64(time.Since(writeStart)))
 }
 
 // batchWrite performs batch write operations with size control (230MB-256MB per batch)
@@ -788,19 +851,18 @@ func (r *PerfRunner) printStat() {
 		writeTPS = float64(r.totalWriteOps) * float64(time.Second) / float64(r.totalWriteTime)
 	}
 
-	// Calculate interval update statistics
-	intervalUpdateKVs := r.totalUpdateKVs - r.lastUpdateKVs
-	intervalUpdateSize := r.totalUpdateSize - r.lastUpdateSize
-
-	// Convert size to MB for readability
-	updateSizeMB := float64(intervalUpdateSize) / (1024 * 1024)
+	// Calculate accumulated update statistics (thread-safe read)
+	r.updateMutex.Lock()
+	accumulatedSizeMB := float64(r.accumulatedUpdateSize) / (1024 * 1024)
+	accumulatedKVs := len(r.accumulatedUpdateKVs)
+	r.updateMutex.Unlock()
 
 	fmt.Printf(
 		"[%s] Perf In Progress - block height=%d\n"+
-			"  Read TPS: %.2f, Write TPS: %.2f, Update Batch: %d KVs, %.2f MB\n",
+			"  Read TPS: %.2f, Write TPS: %.2f, Accumulated Updates: %d KVs, %.2f MB (target: 256MB)\n",
 		time.Now().Format(time.RFC3339),
 		r.blockHeight,
-		readTPS, writeTPS, intervalUpdateKVs, updateSizeMB,
+		readTPS, writeTPS, accumulatedKVs, accumulatedSizeMB,
 	)
 
 	// Update last counters
@@ -837,22 +899,33 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 		writeTPS = float64(r.totalWriteOps) * float64(time.Second) / float64(r.totalWriteTime)
 	}
 
-	// Calculate total update batch statistics
+	// Calculate total update statistics (including both individual updates and batch writes)
 	totalUpdateSizeMB := float64(r.totalUpdateSize) / (1024 * 1024)
+
+	// Check for remaining accumulated data
+	r.updateMutex.Lock()
+	remainingAccumulatedMB := float64(r.accumulatedUpdateSize) / (1024 * 1024)
+	remainingKVs := len(r.accumulatedUpdateKVs)
+	r.updateMutex.Unlock()
 
 	fmt.Printf(
 		"=== Average Performance Metrics ===\n"+
 			"Elapsed: %v, Block Height: %d\n"+
 			"Read  - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
-			"Write - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
-			"Update- Avg Latency: %.2f μs, Total KVs: %d, Total Size: %.2f MB\n"+
-			"===================================\n",
+			"Write - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d (256MB batches)\n"+
+			"Update- Avg Latency: %.2f μs, Total KVs: %d, Total Processed: %.2f MB\n",
 		elapsed,
 		r.blockHeight,
 		avgReadLatency, readTPS, r.totalReadOps,
 		avgWriteLatency, writeTPS, r.totalWriteOps,
 		avgUpdateLatency, r.totalUpdateKVs, totalUpdateSizeMB,
 	)
+
+	if remainingKVs > 0 {
+		fmt.Printf("Remaining Accumulated Updates: %d KVs, %.2f MB (will be flushed on shutdown)\n",
+			remainingKVs, remainingAccumulatedMB)
+	}
+	fmt.Printf("===================================\n")
 }
 
 // printHashSummary prints hash calculation summary statistics
