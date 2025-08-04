@@ -32,12 +32,11 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/triedb"
+	"github.com/ethereum/go-ethereum/triedb/pathdb"
 	"github.com/urfave/cli/v2"
 )
 
@@ -54,6 +53,8 @@ type PerfConfig struct {
 	RuntimeDur  time.Duration
 	MetricsAddr string
 	MetricsPort int
+	CacheSize   int // Database cache size in MB
+	Handles     int // Number of file descriptor handles
 }
 
 type DataType int
@@ -89,6 +90,7 @@ type PerfRunner struct {
 	db       *pebble.Database
 	config   PerfConfig
 	taskChan chan *Task
+	ctx      *cli.Context // CLI context for database operations
 
 	// Statistics
 	blockHeight     uint64
@@ -195,6 +197,18 @@ func main() {
 						Value:       8545,
 						Destination: &config.MetricsPort,
 					},
+					&cli.IntFlag{
+						Name:        "cache",
+						Usage:       "Database cache size in MB",
+						Value:       4096,
+						Destination: &config.CacheSize,
+					},
+					&cli.IntFlag{
+						Name:        "handles",
+						Usage:       "Number of file descriptor handles",
+						Value:       32766,
+						Destination: &config.Handles,
+					},
 				},
 				Before: func(c *cli.Context) error {
 					// Validate ratios sum to 1.0
@@ -248,14 +262,14 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 		"storageSnaps", len(dataSet.StorageSnaps))
 
 	// Create benchmark database
-	benchDB, err := pebble.New(config.BenchDBPath, 1024, 512, "bench/", false)
+	benchDB, err := pebble.New(config.BenchDBPath, config.CacheSize, config.Handles, "chaindata", false)
 	if err != nil {
 		return fmt.Errorf("failed to create benchmark database: %v", err)
 	}
 	defer benchDB.Close()
 
 	// Create and start performance runner
-	runner := NewPerfRunner(dataSet, benchDB, *config)
+	runner := NewPerfRunner(dataSet, benchDB, *config, c)
 
 	ctx, cancel := context.WithTimeout(context.Background(), config.RuntimeDur)
 	defer cancel()
@@ -327,12 +341,13 @@ func loadDataSet(testCaseDir string) (*DataSet, error) {
 	return dataSet, nil
 }
 
-func NewPerfRunner(dataSet *DataSet, db *pebble.Database, config PerfConfig) *PerfRunner {
+func NewPerfRunner(dataSet *DataSet, db *pebble.Database, config PerfConfig, ctx *cli.Context) *PerfRunner {
 	return &PerfRunner{
 		dataSet:      dataSet,
 		db:           db,
 		config:       config,
 		taskChan:     make(chan *Task, 10),
+		ctx:          ctx,
 		lastStatTime: time.Now(),
 	}
 }
@@ -430,21 +445,21 @@ func (r *PerfRunner) runInternal(ctx context.Context) {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
+	// Hash calculation ticker - every 3 seconds
+	hashTicker := time.NewTicker(3 * time.Second)
+	defer hashTicker.Stop()
+
 	for {
 		select {
 		case task := <-r.taskChan:
 			if task == nil {
 				fmt.Println("Task channel closed, shutting down")
 				r.printAVGStat(startTime)
+				r.printHashSummary()
 				return
 			}
 			r.processTask(task)
 			r.blockHeight++
-
-			// Perform hash calculation every 10 batches
-			if r.blockHeight > 0 && r.blockHeight%10 == 0 {
-				r.calculateHashRoot()
-			}
 
 			// Print average stats every 100 batches
 			if r.blockHeight > 0 && r.blockHeight%100 == 0 {
@@ -454,9 +469,14 @@ func (r *PerfRunner) runInternal(ctx context.Context) {
 		case <-ticker.C:
 			r.printStat()
 
+		case <-hashTicker.C:
+			// Perform hash calculation every 3 seconds asynchronously
+			go r.calculateHashRoot()
+
 		case <-ctx.Done():
 			fmt.Println("Context cancelled, shutting down")
 			r.printAVGStat(startTime)
+			r.printHashSummary()
 			return
 		}
 	}
@@ -792,176 +812,113 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 	)
 }
 
+// printHashSummary prints hash calculation summary statistics
+func (r *PerfRunner) printHashSummary() {
+	if r.totalHashOps > 0 {
+		avgHashLatency := float64(r.totalHashTime.Microseconds()) / float64(r.totalHashOps)
+		fmt.Printf("=== Hash Calculation Summary ===\n")
+		fmt.Printf("Total Hash Operations: %d\n", r.totalHashOps)
+		fmt.Printf("Total Hash Time: %v\n", r.totalHashTime)
+		fmt.Printf("Average Hash Latency: %.2f μs\n", avgHashLatency)
+		fmt.Printf("===============================\n")
+	}
+}
+
 // calculateHashRoot performs trie hash calculation for performance measurement
 func (r *PerfRunner) calculateHashRoot() {
 	totalStart := time.Now()
 
-	// Create a complete chain database similar to what geth inspect-trie uses
-	// We need to open the database directory properly, not just wrap the pebble instance
+	// 直接使用已有的 pebbleDB，包装成 ethdb.Database
+	chainDB := rawdb.NewDatabase(r.db)
 
-	// Use the benchmark database directory path from config
-	// The benchDB path should be the directory containing the chaindata
-	benchDBPath := r.config.BenchDBPath
+	// 获取latest state root的逻辑
+	var (
+		blockNumber  uint64
+		trieRootHash common.Hash
+	)
 
-	// Try to open the database with proper freezer support like geth does
-	// This should include the ancient store and proper database initialization
-	var ethDB ethdb.Database
-	var err error
-
-	// Try to open as a complete database directory
-	if _, statErr := os.Stat(benchDBPath + "/chaindata"); statErr == nil {
-		// Database directory structure exists, open with freezer
-		log.Info("Opening benchmark database with full chaindata structure", "path", benchDBPath)
-
-		// Create a temporary minimal node config to open database
-		// This mimics what MakeChainDatabase does
-		cache := 512 // MB
-		handles := 256
-
-		// Try opening the database with different methods
-		db, openErr := pebble.New(benchDBPath+"/chaindata", cache, handles, "", true) // readonly
-		if openErr != nil {
-			log.Warn("Failed to open as pebble database", "err", openErr)
-			return
-		}
-		defer db.Close()
-
-		ethDB = rawdb.NewDatabase(db)
-
-	} else {
-		// Fallback to using the existing benchmark pebble database
-		log.Info("Using existing benchmark PebbleDB instance")
-		ethDB = rawdb.NewDatabase(r.db)
-	}
-
-	// Create triedb using the properly opened database
-	trieDB := triedb.NewDatabase(ethDB, nil)
-
-	// Try to get a valid state root from the database
-	// Follow the same approach as inspectTrie command for "latest"
-	stateRoot := types.EmptyRootHash
-	foundValidRoot := false
-
-	// Get the latest header hash first - this is the key step from inspectTrie
-	headerHash := rawdb.ReadHeadHeaderHash(ethDB)
-	log.Debug("Reading head header hash", "hash", headerHash.Hex())
-
+	headerHash := rawdb.ReadHeadHeaderHash(chainDB)
 	if headerHash != (common.Hash{}) {
-		// Get block number from header hash
-		if headerNum := rawdb.ReadHeaderNumber(ethDB, headerHash); headerNum != nil {
-			blockNumber := *headerNum
-			log.Debug("Found block number", "number", blockNumber)
+		if headerNum := rawdb.ReadHeaderNumber(chainDB, headerHash); headerNum != nil {
+			blockNumber = *headerNum
 
-			// Get canonical hash for this block number - critical step
-			headerBlockHash := rawdb.ReadCanonicalHash(ethDB, blockNumber)
-			log.Debug("Reading canonical hash", "blockNum", blockNumber, "hash", headerBlockHash.Hex())
-
-			if headerBlockHash != (common.Hash{}) {
-				// Read the actual header to get the state root
-				if blockHeader := rawdb.ReadHeader(ethDB, headerBlockHash, blockNumber); blockHeader != nil {
-					stateRoot = blockHeader.Root
-					if stateRoot != types.EmptyRootHash {
-						foundValidRoot = true
-						log.Info("Found latest state root",
-							"root", stateRoot.Hex(),
-							"block", blockNumber,
-							"header_hash", headerHash.Hex(),
-							"canonical_hash", headerBlockHash.Hex())
-					} else {
-						log.Warn("State root is empty hash", "block", blockNumber)
-					}
-				} else {
-					log.Warn("Failed to read block header", "hash", headerBlockHash.Hex(), "number", blockNumber)
+			if blockNumber != math.MaxUint64 {
+				headerBlockHash := rawdb.ReadCanonicalHash(chainDB, blockNumber)
+				if headerBlockHash == (common.Hash{}) {
+					log.Error("ReadHeadBlockHash empty hash")
+					return
 				}
-			} else {
-				log.Warn("No canonical hash found", "blockNumber", blockNumber)
+				blockHeader := rawdb.ReadHeader(chainDB, headerBlockHash, blockNumber)
+				if blockHeader != nil {
+					trieRootHash = blockHeader.Root
+				}
 			}
-		} else {
-			log.Warn("Failed to get header number", "hash", headerHash.Hex())
+
+			if trieRootHash == (common.Hash{}) {
+				log.Error("Empty root hash")
+				return
+			}
+
+			fmt.Printf("ReadBlockHeader, root: %v, blocknum: %v\n", trieRootHash, blockNumber)
 		}
 	} else {
-		log.Warn("No head header hash found in database")
-	}
-
-	// Create StateTrie with the state root from database
-	secureTrie, err := trie.NewStateTrie(trie.StateTrieID(stateRoot), trieDB)
-	if err != nil {
-		log.Warn("Failed to create state trie from benchmark DB", "err", err, "root", stateRoot.Hex())
+		log.Warn("No head header hash found")
 		return
 	}
 
-	// If we didn't find a valid state root, add some test data to make hash calculation meaningful
-	if !foundValidRoot {
-		log.Info("No valid state root found, adding test data for meaningful hash calculation")
-
-		// Add some realistic test data to simulate actual state trie operations
-		for i := 0; i < 1000; i++ {
-			// Generate account-like keys (20 bytes address)
-			key := make([]byte, 32)
-			value := make([]byte, 64) // Account data size
-
-			// Generate more realistic key patterns
-			mathrand.Read(key[:20]) // Address part
-			mathrand.Read(value)    // Account data
-
-			secureTrie.MustUpdate(key, value)
+	// 检测数据库scheme并创建对应的triedb config
+	dbScheme := rawdb.ReadStateScheme(chainDB)
+	var config *triedb.Config
+	if dbScheme == rawdb.PathScheme {
+		config = &triedb.Config{
+			PathDB: pathdb.ReadOnly,
+			Cache:  0,
 		}
-
-		log.Info("Added test data to trie", "entries", 1000)
+	} else if dbScheme == rawdb.HashScheme {
+		config = triedb.HashDefaults
 	}
 
-	// Measure Commit time with nanosecond precision
+	// 创建triedb和trie
+	trieDB := triedb.NewDatabase(chainDB, config)
+	defer trieDB.Close()
+
+	theTrie, err := trie.New(trie.TrieID(trieRootHash), trieDB)
+	if err != nil {
+		log.Warn("Failed to create trie", "err", err, "root", trieRootHash.Hex())
+		return
+	}
+
+	// 执行hash计算性能测试
 	commitStart := time.Now()
-	_, _ = secureTrie.Commit(false)
+	newRoot, nodes := theTrie.Commit(false)
 	commitDuration := time.Since(commitStart)
 
-	// Measure Hash calculation time with nanosecond precision
-	// Call Hash multiple times to get more accurate measurement
 	hashStart := time.Now()
-	rootHash := secureTrie.Hash()
+	computedHash := theTrie.Hash()
 	hashDuration := time.Since(hashStart)
-
-	// If hash is too fast, do multiple iterations for better measurement
-	if hashDuration.Nanoseconds() < 1000 { // Less than 1μs
-		iterations := 100
-		multiHashStart := time.Now()
-		for i := 0; i < iterations; i++ {
-			_ = secureTrie.Hash()
-		}
-		multiHashDuration := time.Since(multiHashStart)
-		hashDuration = multiHashDuration / time.Duration(iterations)
-		log.Debug("Used multiple iterations for hash measurement", "iterations", iterations, "avg_time_ns", hashDuration.Nanoseconds())
-	}
 
 	totalDuration := time.Since(totalStart)
 
-	// Calculate ratio safely
+	// 计算比值
 	var commitVsHashRatio float64
 	if hashDuration.Nanoseconds() > 0 {
 		commitVsHashRatio = float64(commitDuration.Nanoseconds()) / float64(hashDuration.Nanoseconds())
 	}
 
-	// Log comparison of different hash calculation methods with nanosecond precision
-	log.Info("Hash calculation comparison (using benchmark DB trie data)",
-		"original_state_root", stateRoot.Hex(),
-		"has_real_data", foundValidRoot,
+	// 记录结果
+	log.Info("Hash calculation with real blockchain data",
+		"original_root", trieRootHash.Hex(),
+		"computed_hash", computedHash.Hex(),
+		"new_root", newRoot.Hex(),
+		"block_number", blockNumber,
+		"db_scheme", dbScheme,
 		"commit_time_μs", commitDuration.Microseconds(),
-		"commit_time_ns", commitDuration.Nanoseconds(),
 		"hash_time_μs", hashDuration.Microseconds(),
-		"hash_time_ns", hashDuration.Nanoseconds(),
 		"total_time_μs", totalDuration.Microseconds(),
-		"computed_root_hash", rootHash.Hex(),
-		"commit_vs_hash_ratio", fmt.Sprintf("%.2f", commitVsHashRatio))
+		"commit_vs_hash_ratio", fmt.Sprintf("%.2f", commitVsHashRatio),
+		"nodes_updated", len(nodes.Nodes))
 
-	// Update statistics (use total time for overall measurement)
+	// 更新统计
 	atomic.AddInt64(&r.totalHashOps, 1)
 	atomic.AddInt64((*int64)(&r.totalHashTime), int64(totalDuration))
-
-	log.Debug("Hash calculation completed with benchmark DB",
-		"total_duration", totalDuration,
-		"commit_duration", commitDuration,
-		"hash_duration", hashDuration,
-		"original_root", stateRoot.Hex(),
-		"computed_hash", rootHash.Hex(),
-		"data_source", map[bool]string{true: "real_blockchain_data", false: "test_data"}[foundValidRoot])
 }
