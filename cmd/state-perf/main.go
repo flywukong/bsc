@@ -25,17 +25,18 @@ import (
 	mathrand "math/rand"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/trie"
+	"github.com/ethereum/go-ethereum/triedb"
 	"github.com/urfave/cli/v2"
 )
 
@@ -741,7 +742,7 @@ func (r *PerfRunner) printStat() {
 func (r *PerfRunner) printAVGStat(startTime time.Time) {
 	elapsed := time.Since(startTime)
 
-	var avgReadLatency, avgWriteLatency, avgUpdateLatency float64
+	var avgReadLatency, avgWriteLatency, avgUpdateLatency, avgHashLatency float64
 
 	if r.totalReadOps > 0 {
 		avgReadLatency = float64(r.totalReadTime.Microseconds()) / float64(r.totalReadOps)
@@ -751,6 +752,9 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 	}
 	if r.totalUpdateOps > 0 {
 		avgUpdateLatency = float64(r.totalUpdateTime.Microseconds()) / float64(r.totalUpdateOps)
+	}
+	if r.totalHashOps > 0 {
+		avgHashLatency = float64(r.totalHashTime.Microseconds()) / float64(r.totalHashOps)
 	}
 
 	// Calculate effective TPS (based on actual operation time)
@@ -781,44 +785,70 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 		avgReadLatency, readTPS, r.totalReadOps,
 		avgWriteLatency, writeTPS, r.totalWriteOps,
 		avgUpdateLatency, updateTPS, r.totalUpdateOps,
-		avgReadLatency, hashTPS, r.totalHashOps,
+		avgHashLatency, hashTPS, r.totalHashOps,
 	)
 }
 
 // calculateHashRoot performs trie hash calculation for performance measurement
 func (r *PerfRunner) calculateHashRoot() {
-	if r.trieDir == "" {
-		r.trieDir = filepath.Join(".", "test-dir")
+	totalStart := time.Now()
+
+	// Use the existing benchmark pebble database, wrap it with rawdb.NewDatabase
+	// to get the proper ethdb.Database interface
+	benchDB := r.db
+	ethDB := rawdb.NewDatabase(benchDB)
+
+	// Create triedb using the wrapped database with default config
+	trieDB := triedb.NewDatabase(ethDB, nil)
+
+	// Try to get a valid state root from the database
+	// First try to read the head block header to get the state root
+	stateRoot := types.EmptyRootHash
+	if headHash := rawdb.ReadHeadBlockHash(ethDB); headHash != (common.Hash{}) {
+		if headerNum := rawdb.ReadHeaderNumber(ethDB, headHash); headerNum != nil {
+			if header := rawdb.ReadHeader(ethDB, headHash, *headerNum); header != nil {
+				stateRoot = header.Root
+				log.Info("Using state root from head block", "root", stateRoot.Hex(), "block", header.Number)
+			}
+		}
 	}
 
-	// Ensure the directory exists
-	if err := os.MkdirAll(r.trieDir, 0755); err != nil {
-		log.Warn("Failed to create trie directory", "dir", r.trieDir, "err", err)
+	// Create StateTrie with the state root from database
+	secureTrie, err := trie.NewStateTrie(trie.StateTrieID(stateRoot), trieDB)
+	if err != nil {
+		log.Warn("Failed to create state trie from benchmark DB", "err", err, "root", stateRoot.Hex())
 		return
 	}
 
+	// Measure Commit time
+	commitStart := time.Now()
+	_, _ = secureTrie.Commit(false)
+	commitDuration := time.Since(commitStart)
+
+	// Measure Hash calculation time
 	hashStart := time.Now()
-
-	// Create a simple StateDB instance for hash calculation
-	disk := rawdb.NewMemoryDatabase()
-	stateDB, err := state.New(types.EmptyRootHash, state.NewDatabase(disk), nil)
-	if err != nil {
-		log.Warn("Failed to create state DB", "err", err)
-		return
-	}
-
-	// Commit to calculate hash
-	_, err = stateDB.Commit(0, true)
-	if err != nil {
-		log.Warn("Failed to commit state", "err", err)
-		return
-	}
-
+	rootHash := secureTrie.Hash()
 	hashDuration := time.Since(hashStart)
 
-	// Update statistics
-	atomic.AddInt64(&r.totalHashOps, 1)
-	atomic.AddInt64((*int64)(&r.totalHashTime), int64(hashDuration))
+	totalDuration := time.Since(totalStart)
 
-	log.Debug("Hash calculation completed", "duration", hashDuration)
+	// Log comparison of different hash calculation methods
+	log.Info("Hash calculation comparison (using benchmark DB trie data)",
+		"state_root", stateRoot.Hex(),
+		"commit_time_μs", commitDuration.Microseconds(),
+		"hash_time_μs", hashDuration.Microseconds(),
+		"total_time_μs", totalDuration.Microseconds(),
+		"computed_root_hash", rootHash.Hex(),
+		"commit_vs_hash_ratio", float64(commitDuration.Microseconds())/float64(hashDuration.Microseconds()))
+
+	// Update statistics (use total time for overall measurement)
+	atomic.AddInt64(&r.totalHashOps, 1)
+	atomic.AddInt64((*int64)(&r.totalHashTime), int64(totalDuration))
+
+	log.Debug("Hash calculation completed with benchmark DB",
+		"total_duration", totalDuration,
+		"commit_duration", commitDuration,
+		"hash_duration", hashDuration,
+		"state_root", stateRoot.Hex(),
+		"computed_hash", rootHash.Hex())
 }
