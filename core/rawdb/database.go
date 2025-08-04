@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/memorydb"
+	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/olekukonko/tablewriter"
 )
@@ -642,14 +644,38 @@ func DataTypeByKey(key []byte) DataType {
 // InspectDatabase traverses the entire database and checks the size
 // of all different categories of data.
 func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
+	// Initialize PebbleDB for sampling data with high-performance configuration
+	// cache: 3.52 GiB = 3686 MB, handles: 2048, memory table: ~300 MiB
+	testCaseDB, err := pebble.New("test-case", 3686, 2048, "testcase/", false)
+	if err != nil {
+		return fmt.Errorf("failed to create test-case pebbledb: %v", err)
+	}
+	defer func() {
+		if closeErr := testCaseDB.Close(); closeErr != nil {
+			log.Error("Failed to close test-case pebbledb", "err", closeErr)
+		}
+	}()
+
+	log.Info("Initialized test-case PebbleDB with high-performance configuration",
+		"cache", "3.52 GiB", "handles", 2048, "memory_table", "~300 MiB")
+
+	// Sampling counters for 3% data collection
+	var (
+		accountTriesTotal   int64
+		storageTriesTotal   int64
+		accountSnapsTotal   int64
+		storageSnapsTotal   int64
+		accountTriesSampled int64
+		storageTriesSampled int64
+		accountSnapsSampled int64
+		storageSnapsSampled int64
+	)
+
+	// Sampling rate: 3%
+	const samplingRate = 0.03
+
 	it := db.NewIterator(keyPrefix, keyStart)
 	defer it.Release()
-
-	var trieIter ethdb.Iterator
-	if db.HasSeparateStateStore() {
-		trieIter = db.GetStateStore().NewIterator(keyPrefix, nil)
-		defer trieIter.Release()
-	}
 
 	var (
 		count  int64
@@ -720,16 +746,52 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			stateLookups.Add(size)
 		case IsAccountTrieNode(key):
 			accountTries.Add(size)
+			accountTriesTotal++
+			// Sample 3% of account trie data
+			if rand.Float64() < samplingRate {
+				if err := testCaseDB.Put(key, it.Value()); err != nil {
+					log.Warn("Failed to write account trie data to test-case db", "err", err)
+				} else {
+					accountTriesSampled++
+				}
+			}
 		case IsStorageTrieNode(key):
 			storageTries.Add(size)
+			storageTriesTotal++
+			// Sample 3% of storage trie data
+			if rand.Float64() < samplingRate {
+				if err := testCaseDB.Put(key, it.Value()); err != nil {
+					log.Warn("Failed to write storage trie data to test-case db", "err", err)
+				} else {
+					storageTriesSampled++
+				}
+			}
 		case bytes.HasPrefix(key, CodePrefix) && len(key) == len(CodePrefix)+common.HashLength:
 			codes.Add(size)
 		case bytes.HasPrefix(key, txLookupPrefix) && len(key) == (len(txLookupPrefix)+common.HashLength):
 			txLookups.Add(size)
 		case bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength):
 			accountSnaps.Add(size)
+			accountSnapsTotal++
+			// Sample 3% of account snapshot data
+			if rand.Float64() < samplingRate {
+				if err := testCaseDB.Put(key, it.Value()); err != nil {
+					log.Warn("Failed to write account snapshot data to test-case db", "err", err)
+				} else {
+					accountSnapsSampled++
+				}
+			}
 		case bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength):
 			storageSnaps.Add(size)
+			storageSnapsTotal++
+			// Sample 3% of storage snapshot data
+			if rand.Float64() < samplingRate {
+				if err := testCaseDB.Put(key, it.Value()); err != nil {
+					log.Warn("Failed to write storage snapshot data to test-case db", "err", err)
+				} else {
+					storageSnapsSampled++
+				}
+			}
 		case bytes.HasPrefix(key, PreimagePrefix) && len(key) == (len(PreimagePrefix)+common.HashLength):
 			preimages.Add(size)
 		case bytes.HasPrefix(key, configPrefix) && len(key) == (len(configPrefix)+common.HashLength):
@@ -795,49 +857,14 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			logged = time.Now()
 		}
 	}
-	// inspect separate trie db
-	if trieIter != nil {
-		count = 0
-		logged = time.Now()
-		for trieIter.Next() {
-			var (
-				key   = trieIter.Key()
-				value = trieIter.Value()
-				size  = common.StorageSize(len(key) + len(value))
-			)
-			total += size
 
-			switch {
-			case IsLegacyTrieNode(key, value):
-				legacyTries.Add(size)
-			case bytes.HasPrefix(key, stateIDPrefix) && len(key) == len(stateIDPrefix)+common.HashLength:
-				stateLookups.Add(size)
-			case IsAccountTrieNode(key):
-				accountTries.Add(size)
-			case IsStorageTrieNode(key):
-				storageTries.Add(size)
-			default:
-				var accounted bool
-				for _, meta := range [][]byte{
-					fastTrieProgressKey, persistentStateIDKey, trieJournalKey, snapSyncStatusFlagKey} {
-					if bytes.Equal(key, meta) {
-						metadata.Add(size)
-						accounted = true
-						break
-					}
-				}
-				if !accounted {
-					unaccounted.Add(size)
-				}
-			}
-			count++
-			if count%1000 == 0 && time.Since(logged) > 8*time.Second {
-				log.Info("Inspecting separate state database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
-				logged = time.Now()
-			}
-		}
-		log.Info("Inspecting separate state database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
-	}
+	// Log sampling statistics
+	log.Info("Data sampling completed",
+		"accountTriesTotal", accountTriesTotal, "accountTriesSampled", accountTriesSampled,
+		"storageTriesTotal", storageTriesTotal, "storageTriesSampled", storageTriesSampled,
+		"accountSnapsTotal", accountSnapsTotal, "accountSnapsSampled", accountSnapsSampled,
+		"storageSnapsTotal", storageSnapsTotal, "storageSnapsSampled", storageSnapsSampled)
+
 	// Display the database statistic of key-value store.
 	stats := [][]string{
 		{"Key-Value store", "Headers", headers.Size(), headers.Count()},
@@ -882,27 +909,6 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		total += ancient.size()
 	}
 
-	// inspect ancient state in separate trie db if exist
-	if trieIter != nil {
-		stateAncients, err := inspectFreezers(db.GetStateStore())
-		if err != nil {
-			return err
-		}
-		for _, ancient := range stateAncients {
-			for _, table := range ancient.sizes {
-				if ancient.name == "chain" {
-					break
-				}
-				stats = append(stats, []string{
-					fmt.Sprintf("Ancient store (%s)", strings.Title(ancient.name)),
-					strings.Title(table.name),
-					table.size.String(),
-					fmt.Sprintf("%d", ancient.count()),
-				})
-			}
-			total += ancient.size()
-		}
-	}
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"Database", "Category", "Size", "Items"})
 	table.SetFooter([]string{"", "Total", total.String(), " "})
