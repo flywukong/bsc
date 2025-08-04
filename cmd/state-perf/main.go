@@ -110,6 +110,10 @@ type PerfRunner struct {
 	lastStatTime    time.Time
 	totalBatchCount int64 // Total number of batches processed
 
+	// Update batch statistics
+	totalUpdateKVs  int64 // Total number of KVs in update batches
+	totalUpdateSize int64 // Total size of update batches in bytes
+
 	// Hash calculation statistics
 	totalHashOps    int64
 	totalHashTime   time.Duration
@@ -121,6 +125,8 @@ type PerfRunner struct {
 	lastWriteOps   int64
 	lastUpdateOps  int64
 	lastBatchCount int64
+	lastUpdateKVs  int64 // Last update KV count for interval calculation
+	lastUpdateSize int64 // Last update size for interval calculation
 }
 
 func main() {
@@ -603,6 +609,12 @@ func (r *PerfRunner) processUpdatesParallel(updateKVs []KeyValue, wg *sync.WaitG
 		numThreads = 1
 	}
 
+	// Calculate total batch size for this update operation
+	totalBatchSize := int64(0)
+	for _, kv := range updateKVs {
+		totalBatchSize += int64(len(kv.Key) + len(kv.Value))
+	}
+
 	chunkSize := len(updateKVs) / numThreads
 	if chunkSize == 0 {
 		chunkSize = 1
@@ -636,6 +648,10 @@ func (r *PerfRunner) processUpdatesParallel(updateKVs []KeyValue, wg *sync.WaitG
 			atomic.AddInt64(&r.totalUpdateOps, localUpdateOps)
 		}(updateKVs[start:end])
 	}
+
+	// Update batch statistics
+	atomic.AddInt64(&r.totalUpdateKVs, int64(len(updateKVs)))
+	atomic.AddInt64(&r.totalUpdateSize, totalBatchSize)
 }
 
 // batchWrite performs batch write operations with size control (230MB-256MB per batch)
@@ -763,7 +779,7 @@ func min(a, b int) int {
 
 func (r *PerfRunner) printStat() {
 	// Calculate effective TPS (based on actual operation time)
-	var readTPS, writeTPS, updateTPS float64
+	var readTPS, writeTPS float64
 
 	if r.totalReadTime > 0 {
 		readTPS = float64(r.totalReadOps) * float64(time.Second) / float64(r.totalReadTime)
@@ -771,16 +787,20 @@ func (r *PerfRunner) printStat() {
 	if r.totalWriteTime > 0 {
 		writeTPS = float64(r.totalWriteOps) * float64(time.Second) / float64(r.totalWriteTime)
 	}
-	if r.totalUpdateTime > 0 {
-		updateTPS = float64(r.totalUpdateOps) * float64(time.Second) / float64(r.totalUpdateTime)
-	}
+
+	// Calculate interval update statistics
+	intervalUpdateKVs := r.totalUpdateKVs - r.lastUpdateKVs
+	intervalUpdateSize := r.totalUpdateSize - r.lastUpdateSize
+
+	// Convert size to MB for readability
+	updateSizeMB := float64(intervalUpdateSize) / (1024 * 1024)
 
 	fmt.Printf(
 		"[%s] Perf In Progress - block height=%d\n"+
-			"  Read TPS: %.2f, Write TPS: %.2f, Update TPS: %.2f\n",
+			"  Read TPS: %.2f, Write TPS: %.2f, Update Batch: %d KVs, %.2f MB\n",
 		time.Now().Format(time.RFC3339),
 		r.blockHeight,
-		readTPS, writeTPS, updateTPS,
+		readTPS, writeTPS, intervalUpdateKVs, updateSizeMB,
 	)
 
 	// Update last counters
@@ -788,6 +808,8 @@ func (r *PerfRunner) printStat() {
 	r.lastWriteOps = r.totalWriteOps
 	r.lastUpdateOps = r.totalUpdateOps
 	r.lastBatchCount = r.totalBatchCount
+	r.lastUpdateKVs = r.totalUpdateKVs
+	r.lastUpdateSize = r.totalUpdateSize
 	r.lastStatTime = time.Now()
 }
 
@@ -807,29 +829,29 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 	}
 
 	// Calculate effective TPS (based on actual operation time)
-	var readTPS, writeTPS, updateTPS float64
+	var readTPS, writeTPS float64
 	if r.totalReadTime > 0 {
 		readTPS = float64(r.totalReadOps) * float64(time.Second) / float64(r.totalReadTime)
 	}
 	if r.totalWriteTime > 0 {
 		writeTPS = float64(r.totalWriteOps) * float64(time.Second) / float64(r.totalWriteTime)
 	}
-	if r.totalUpdateTime > 0 {
-		updateTPS = float64(r.totalUpdateOps) * float64(time.Second) / float64(r.totalUpdateTime)
-	}
+
+	// Calculate total update batch statistics
+	totalUpdateSizeMB := float64(r.totalUpdateSize) / (1024 * 1024)
 
 	fmt.Printf(
 		"=== Average Performance Metrics ===\n"+
 			"Elapsed: %v, Block Height: %d\n"+
 			"Read  - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
 			"Write - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
-			"Update- Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
+			"Update- Avg Latency: %.2f μs, Total KVs: %d, Total Size: %.2f MB\n"+
 			"===================================\n",
 		elapsed,
 		r.blockHeight,
 		avgReadLatency, readTPS, r.totalReadOps,
 		avgWriteLatency, writeTPS, r.totalWriteOps,
-		avgUpdateLatency, updateTPS, r.totalUpdateOps,
+		avgUpdateLatency, r.totalUpdateKVs, totalUpdateSizeMB,
 	)
 }
 
@@ -872,14 +894,17 @@ func (r *PerfRunner) printHashSummary() {
 
 // calculateHashRoot performs trie hash calculation for performance measurement
 func (r *PerfRunner) calculateHashRoot() {
-	totalStart := time.Now()
-
 	// Initialize trie components only once
 	if r.trieDB == nil || r.theTrie == nil {
 		if err := r.initializeTrie(); err != nil {
 			log.Warn("Failed to initialize trie", "err", err)
 			return
 		}
+		// For the first call, don't count initialization time in hash statistics
+		// Just update the operation count
+		atomic.AddInt64(&r.totalHashOps, 1)
+		log.Info("Trie initialization completed for first hash calculation")
+		return
 	}
 
 	// Measure hash calculation before commit (to see if it's cached)
@@ -897,7 +922,8 @@ func (r *PerfRunner) calculateHashRoot() {
 	computedHash := r.theTrie.Hash()
 	hashAfterDuration := time.Since(hashAfterStart)
 
-	totalDuration := time.Since(totalStart)
+	// Total time for actual hash operations (excluding initialization)
+	actualHashTime := hashBeforeDuration + commitDuration + hashAfterDuration
 
 	// Calculate updated nodes count, prevent nil pointer dereference
 	var nodesUpdated int
@@ -916,13 +942,13 @@ func (r *PerfRunner) calculateHashRoot() {
 		"commit_time_ns", commitDuration.Nanoseconds(),
 		"hash_before_ns", hashBeforeDuration.Nanoseconds(),
 		"hash_after_ns", hashAfterDuration.Nanoseconds(),
-		"total_time_μs", totalDuration.Microseconds(),
+		"actual_hash_time_μs", actualHashTime.Microseconds(),
 		"nodes_updated", nodesUpdated,
 		"hash_values_equal", hashBefore == computedHash)
 
-	// Update statistics using the actual hash time we want to measure
+	// Update statistics using only the actual hash calculation time
 	atomic.AddInt64(&r.totalHashOps, 1)
-	atomic.AddInt64((*int64)(&r.totalHashTime), int64(totalDuration))
+	atomic.AddInt64((*int64)(&r.totalHashTime), int64(actualHashTime))
 	atomic.AddInt64((*int64)(&r.totalCommitTime), int64(commitDuration))
 }
 
