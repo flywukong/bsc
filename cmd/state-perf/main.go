@@ -25,12 +25,15 @@ import (
 	mathrand "math/rand"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/urfave/cli/v2"
@@ -95,6 +98,11 @@ type PerfRunner struct {
 	totalUpdateTime time.Duration
 	lastStatTime    time.Time
 	totalBatchCount int64 // Total number of batches processed
+
+	// Hash calculation statistics
+	totalHashOps  int64
+	totalHashTime time.Duration
+	trieDir       string // Directory for trie operations
 
 	// For interval TPS calculation
 	lastReadOps    int64
@@ -431,6 +439,11 @@ func (r *PerfRunner) runInternal(ctx context.Context) {
 			r.processTask(task)
 			r.blockHeight++
 
+			// Perform hash calculation every 10 batches
+			if r.blockHeight > 0 && r.blockHeight%10 == 0 {
+				r.calculateHashRoot()
+			}
+
 			// Print average stats every 100 batches
 			if r.blockHeight > 0 && r.blockHeight%100 == 0 {
 				r.printAVGStat(startTime)
@@ -450,28 +463,45 @@ func (r *PerfRunner) runInternal(ctx context.Context) {
 func (r *PerfRunner) processTask(task *Task) {
 	var wg sync.WaitGroup
 
-	// Process read operations with multi-threading
+	// Process read operations concurrently
 	if len(task.ReadKVs) > 0 {
-		readStart := time.Now()
-		r.processReadsParallel(task.ReadKVs, &wg)
-		wg.Wait()
-		atomic.AddInt64((*int64)(&r.totalReadTime), int64(time.Since(readStart)))
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			readStart := time.Now()
+			var readWG sync.WaitGroup
+			r.processReadsParallel(task.ReadKVs, &readWG)
+			readWG.Wait()
+			atomic.AddInt64((*int64)(&r.totalReadTime), int64(time.Since(readStart)))
+		}()
 	}
 
-	// Process update operations with multi-threading
+	// Process update operations concurrently
 	if len(task.UpdateKVs) > 0 {
-		updateStart := time.Now()
-		r.processUpdatesParallel(task.UpdateKVs, &wg)
-		wg.Wait()
-		atomic.AddInt64((*int64)(&r.totalUpdateTime), int64(time.Since(updateStart)))
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			updateStart := time.Now()
+			var updateWG sync.WaitGroup
+			r.processUpdatesParallel(task.UpdateKVs, &updateWG)
+			updateWG.Wait()
+			atomic.AddInt64((*int64)(&r.totalUpdateTime), int64(time.Since(updateStart)))
+		}()
 	}
 
-	// Process write operations (batch writes - single threaded)
-	writeStart := time.Now()
+	// Process write operations concurrently (but still single-threaded batch write)
 	if len(task.WriteKVs) > 0 {
-		r.batchWrite(task.WriteKVs)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			writeStart := time.Now()
+			r.batchWrite(task.WriteKVs)
+			atomic.AddInt64((*int64)(&r.totalWriteTime), int64(time.Since(writeStart)))
+		}()
 	}
-	atomic.AddInt64((*int64)(&r.totalWriteTime), int64(time.Since(writeStart)))
+
+	// Wait for all operations to complete
+	wg.Wait()
 }
 
 func (r *PerfRunner) processReadsParallel(readKVs []KeyValue, wg *sync.WaitGroup) {
@@ -676,27 +706,28 @@ func min(a, b int) int {
 }
 
 func (r *PerfRunner) printStat() {
-	delta := time.Since(r.lastStatTime)
+	// Calculate effective TPS (based on actual operation time)
+	var readTPS, writeTPS, updateTPS, hashTPS float64
 
-	// Calculate interval TPS
-	intervalReadOps := r.totalReadOps - r.lastReadOps
-	intervalWriteOps := r.totalWriteOps - r.lastWriteOps
-	intervalUpdateOps := r.totalUpdateOps - r.lastUpdateOps
-	intervalBatchCount := r.totalBatchCount - r.lastBatchCount
-
-	readTPS := float64(intervalReadOps) / delta.Seconds()
-	writeTPS := float64(intervalWriteOps) / delta.Seconds()
-	updateTPS := float64(intervalUpdateOps) / delta.Seconds()
+	if r.totalReadTime > 0 {
+		readTPS = float64(r.totalReadOps) * float64(time.Second) / float64(r.totalReadTime)
+	}
+	if r.totalWriteTime > 0 {
+		writeTPS = float64(r.totalWriteOps) * float64(time.Second) / float64(r.totalWriteTime)
+	}
+	if r.totalUpdateTime > 0 {
+		updateTPS = float64(r.totalUpdateOps) * float64(time.Second) / float64(r.totalUpdateTime)
+	}
+	if r.totalHashTime > 0 {
+		hashTPS = float64(r.totalHashOps) * float64(time.Second) / float64(r.totalHashTime)
+	}
 
 	fmt.Printf(
-		"[%s] Perf In Progress - block height=%d, batches=%d (interval: %d), Read TPS=%.2f, Write TPS=%.2f, Update TPS=%.2f\n",
+		"[%s] Perf In Progress - block height=%d\n"+
+			"  Read TPS: %.2f, Write TPS: %.2f, Update TPS: %.2f, Hash TPS: %.2f\n",
 		time.Now().Format(time.RFC3339),
 		r.blockHeight,
-		r.totalBatchCount,
-		intervalBatchCount,
-		readTPS,
-		writeTPS,
-		updateTPS,
+		readTPS, writeTPS, updateTPS, hashTPS,
 	)
 
 	// Update last counters
@@ -722,22 +753,72 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 		avgUpdateLatency = float64(r.totalUpdateTime.Microseconds()) / float64(r.totalUpdateOps)
 	}
 
-	totalReadTPS := float64(r.totalReadOps) / elapsed.Seconds()
-	totalWriteTPS := float64(r.totalWriteOps) / elapsed.Seconds()
-	totalUpdateTPS := float64(r.totalUpdateOps) / elapsed.Seconds()
+	// Calculate effective TPS (based on actual operation time)
+	var readTPS, writeTPS, updateTPS, hashTPS float64
+	if r.totalReadTime > 0 {
+		readTPS = float64(r.totalReadOps) * float64(time.Second) / float64(r.totalReadTime)
+	}
+	if r.totalWriteTime > 0 {
+		writeTPS = float64(r.totalWriteOps) * float64(time.Second) / float64(r.totalWriteTime)
+	}
+	if r.totalUpdateTime > 0 {
+		updateTPS = float64(r.totalUpdateOps) * float64(time.Second) / float64(r.totalUpdateTime)
+	}
+	if r.totalHashTime > 0 {
+		hashTPS = float64(r.totalHashOps) * float64(time.Second) / float64(r.totalHashTime)
+	}
 
 	fmt.Printf(
 		"=== Average Performance Metrics ===\n"+
-			"Elapsed: %v, Block Height: %d, Total Batches: %d\n"+
-			"Read  - Avg Latency: %.2f μs, Total TPS: %.2f, Total Ops: %d\n"+
-			"Write - Avg Latency: %.2f μs, Total TPS: %.2f, Total Ops: %d\n"+
-			"Update- Avg Latency: %.2f μs, Total TPS: %.2f, Total Ops: %d\n"+
+			"Elapsed: %v, Block Height: %d\n"+
+			"Read  - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
+			"Write - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
+			"Update- Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
+			"Hash  - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
 			"===================================\n",
 		elapsed,
 		r.blockHeight,
-		r.totalBatchCount,
-		avgReadLatency, totalReadTPS, r.totalReadOps,
-		avgWriteLatency, totalWriteTPS, r.totalWriteOps,
-		avgUpdateLatency, totalUpdateTPS, r.totalUpdateOps,
+		avgReadLatency, readTPS, r.totalReadOps,
+		avgWriteLatency, writeTPS, r.totalWriteOps,
+		avgUpdateLatency, updateTPS, r.totalUpdateOps,
+		avgReadLatency, hashTPS, r.totalHashOps,
 	)
+}
+
+// calculateHashRoot performs trie hash calculation for performance measurement
+func (r *PerfRunner) calculateHashRoot() {
+	if r.trieDir == "" {
+		r.trieDir = filepath.Join(".", "test-dir")
+	}
+
+	// Ensure the directory exists
+	if err := os.MkdirAll(r.trieDir, 0755); err != nil {
+		log.Warn("Failed to create trie directory", "dir", r.trieDir, "err", err)
+		return
+	}
+
+	hashStart := time.Now()
+
+	// Create a simple StateDB instance for hash calculation
+	disk := rawdb.NewMemoryDatabase()
+	stateDB, err := state.New(types.EmptyRootHash, state.NewDatabase(disk), nil)
+	if err != nil {
+		log.Warn("Failed to create state DB", "err", err)
+		return
+	}
+
+	// Commit to calculate hash
+	_, err = stateDB.Commit(0, true)
+	if err != nil {
+		log.Warn("Failed to commit state", "err", err)
+		return
+	}
+
+	hashDuration := time.Since(hashStart)
+
+	// Update statistics
+	atomic.AddInt64(&r.totalHashOps, 1)
+	atomic.AddInt64((*int64)(&r.totalHashTime), int64(hashDuration))
+
+	log.Debug("Hash calculation completed", "duration", hashDuration)
 }
