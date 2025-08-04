@@ -30,10 +30,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ethereum/go-ethereum/cmd/utils"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/triedb"
 	"github.com/ethereum/go-ethereum/triedb/pathdb"
@@ -731,7 +733,7 @@ func min(a, b int) int {
 
 func (r *PerfRunner) printStat() {
 	// Calculate effective TPS (based on actual operation time)
-	var readTPS, writeTPS, updateTPS, hashTPS float64
+	var readTPS, writeTPS, updateTPS float64
 
 	if r.totalReadTime > 0 {
 		readTPS = float64(r.totalReadOps) * float64(time.Second) / float64(r.totalReadTime)
@@ -742,16 +744,13 @@ func (r *PerfRunner) printStat() {
 	if r.totalUpdateTime > 0 {
 		updateTPS = float64(r.totalUpdateOps) * float64(time.Second) / float64(r.totalUpdateTime)
 	}
-	if r.totalHashTime > 0 {
-		hashTPS = float64(r.totalHashOps) * float64(time.Second) / float64(r.totalHashTime)
-	}
 
 	fmt.Printf(
 		"[%s] Perf In Progress - block height=%d\n"+
-			"  Read TPS: %.2f, Write TPS: %.2f, Update TPS: %.2f, Hash TPS: %.2f\n",
+			"  Read TPS: %.2f, Write TPS: %.2f, Update TPS: %.2f\n",
 		time.Now().Format(time.RFC3339),
 		r.blockHeight,
-		readTPS, writeTPS, updateTPS, hashTPS,
+		readTPS, writeTPS, updateTPS,
 	)
 
 	// Update last counters
@@ -765,7 +764,7 @@ func (r *PerfRunner) printStat() {
 func (r *PerfRunner) printAVGStat(startTime time.Time) {
 	elapsed := time.Since(startTime)
 
-	var avgReadLatency, avgWriteLatency, avgUpdateLatency, avgHashLatency float64
+	var avgReadLatency, avgWriteLatency, avgUpdateLatency float64
 
 	if r.totalReadOps > 0 {
 		avgReadLatency = float64(r.totalReadTime.Microseconds()) / float64(r.totalReadOps)
@@ -776,12 +775,9 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 	if r.totalUpdateOps > 0 {
 		avgUpdateLatency = float64(r.totalUpdateTime.Microseconds()) / float64(r.totalUpdateOps)
 	}
-	if r.totalHashOps > 0 {
-		avgHashLatency = float64(r.totalHashTime.Microseconds()) / float64(r.totalHashOps)
-	}
 
 	// Calculate effective TPS (based on actual operation time)
-	var readTPS, writeTPS, updateTPS, hashTPS float64
+	var readTPS, writeTPS, updateTPS float64
 	if r.totalReadTime > 0 {
 		readTPS = float64(r.totalReadOps) * float64(time.Second) / float64(r.totalReadTime)
 	}
@@ -791,9 +787,6 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 	if r.totalUpdateTime > 0 {
 		updateTPS = float64(r.totalUpdateOps) * float64(time.Second) / float64(r.totalUpdateTime)
 	}
-	if r.totalHashTime > 0 {
-		hashTPS = float64(r.totalHashOps) * float64(time.Second) / float64(r.totalHashTime)
-	}
 
 	fmt.Printf(
 		"=== Average Performance Metrics ===\n"+
@@ -801,14 +794,12 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 			"Read  - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
 			"Write - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
 			"Update- Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
-			"Hash  - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
 			"===================================\n",
 		elapsed,
 		r.blockHeight,
 		avgReadLatency, readTPS, r.totalReadOps,
 		avgWriteLatency, writeTPS, r.totalWriteOps,
 		avgUpdateLatency, updateTPS, r.totalUpdateOps,
-		avgHashLatency, hashTPS, r.totalHashOps,
 	)
 }
 
@@ -821,6 +812,10 @@ func (r *PerfRunner) printHashSummary() {
 		fmt.Printf("Total Hash Time: %v\n", r.totalHashTime)
 		fmt.Printf("Average Hash Latency: %.2f μs\n", avgHashLatency)
 		fmt.Printf("===============================\n")
+	} else {
+		fmt.Printf("=== Hash Calculation Summary ===\n")
+		fmt.Printf("No hash operations performed\n")
+		fmt.Printf("===============================\n")
 	}
 }
 
@@ -828,58 +823,66 @@ func (r *PerfRunner) printHashSummary() {
 func (r *PerfRunner) calculateHashRoot() {
 	totalStart := time.Now()
 
-	// 直接使用已有的 pebbleDB，包装成 ethdb.Database
-	chainDB := rawdb.NewDatabase(r.db)
+	// Use inspect-trie approach for database initialization
+	stack, err := makeConfigNode(r.ctx)
+	if err != nil {
+		log.Warn("Failed to create config node", "err", err)
+		return
+	}
+	defer stack.Close()
 
-	// 获取latest state root的逻辑
+	db := utils.MakeChainDatabase(r.ctx, stack, true, false)
+	defer db.Close()
+
 	var (
 		blockNumber  uint64
 		trieRootHash common.Hash
 	)
 
-	headerHash := rawdb.ReadHeadHeaderHash(chainDB)
+	// Get latest block header - same as inspect-trie logic
+	headerHash := rawdb.ReadHeadHeaderHash(db)
 	if headerHash != (common.Hash{}) {
-		if headerNum := rawdb.ReadHeaderNumber(chainDB, headerHash); headerNum != nil {
+		if headerNum := rawdb.ReadHeaderNumber(db, headerHash); headerNum != nil {
 			blockNumber = *headerNum
 
 			if blockNumber != math.MaxUint64 {
-				headerBlockHash := rawdb.ReadCanonicalHash(chainDB, blockNumber)
+				headerBlockHash := rawdb.ReadCanonicalHash(db, blockNumber)
 				if headerBlockHash == (common.Hash{}) {
 					log.Error("ReadHeadBlockHash empty hash")
 					return
 				}
-				blockHeader := rawdb.ReadHeader(chainDB, headerBlockHash, blockNumber)
+				blockHeader := rawdb.ReadHeader(db, headerBlockHash, blockNumber)
 				if blockHeader != nil {
 					trieRootHash = blockHeader.Root
 				}
 			}
-
-			if trieRootHash == (common.Hash{}) {
-				log.Error("Empty root hash")
-				return
-			}
-
-			fmt.Printf("ReadBlockHeader, root: %v, blocknum: %v\n", trieRootHash, blockNumber)
 		}
 	} else {
-		log.Warn("No head header hash found")
+		log.Warn("No head header hash found in database")
 		return
 	}
 
-	// 检测数据库scheme并创建对应的triedb config
-	dbScheme := rawdb.ReadStateScheme(chainDB)
+	if trieRootHash == (common.Hash{}) {
+		log.Error("Empty root hash")
+		return
+	}
+
+	fmt.Printf("ReadBlockHeader, root: %v, blocknum: %v\n", trieRootHash, blockNumber)
+
+	// Detect database scheme and create corresponding triedb config
+	dbScheme := rawdb.ReadStateScheme(db)
 	var config *triedb.Config
 	if dbScheme == rawdb.PathScheme {
 		config = &triedb.Config{
-			PathDB: pathdb.ReadOnly,
+			PathDB: utils.PathDBConfigAddJournalFilePath(stack, pathdb.ReadOnly),
 			Cache:  0,
 		}
 	} else if dbScheme == rawdb.HashScheme {
 		config = triedb.HashDefaults
 	}
 
-	// 创建triedb和trie
-	trieDB := triedb.NewDatabase(chainDB, config)
+	// Create triedb and trie
+	trieDB := triedb.NewDatabase(db, config)
 	defer trieDB.Close()
 
 	theTrie, err := trie.New(trie.TrieID(trieRootHash), trieDB)
@@ -921,4 +924,25 @@ func (r *PerfRunner) calculateHashRoot() {
 	// 更新统计
 	atomic.AddInt64(&r.totalHashOps, 1)
 	atomic.AddInt64((*int64)(&r.totalHashTime), int64(totalDuration))
+}
+
+// makeConfigNode creates a simplified node configuration for database access
+func makeConfigNode(ctx *cli.Context) (*node.Node, error) {
+	// Create default configuration
+	cfg := node.DefaultConfig
+	cfg.Name = "state-perf"
+	cfg.DataDir = "." // Use current directory as default
+
+	// Apply any CLI context flags to node config if available
+	if ctx != nil {
+		utils.SetNodeConfig(ctx, &cfg)
+	}
+
+	// Create the node
+	stack, err := node.New(&cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create protocol stack: %v", err)
+	}
+
+	return stack, nil
 }
