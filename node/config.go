@@ -399,7 +399,7 @@ func (c *Config) ResolvePath(path string) string {
 		}
 	}
 	fmt.Println("instance dir", c.instanceDir())
-	return filepath.Join(c.DataDir+"geth", path)
+	return filepath.Join(c.DataDir+"/geth", path)
 }
 
 func (c *Config) instanceDir() string {
