@@ -705,15 +705,18 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		log.Info("Async batch writer finished", "totalBatches", batchesProcessed)
 	}()
 
-	// Helper function to generate new key (modify last byte + 1)
+	// Helper function to generate new key (same length, version in last byte)
 	generateNewKey := func(originalKey []byte) []byte {
 		if len(originalKey) == 0 {
 			return originalKey
 		}
-		newKey := make([]byte, len(originalKey))
+		// Keep same key length, encode version in last byte
+		// For 1T->2T expansion, set last byte to version 1
+		// For future 2T->3T expansion, this could be changed to version 2, etc.
+		version := byte(1)
+		newKey := make([]byte, len(originalKey)) // Same length as original
 		copy(newKey, originalKey)
-		// Modify the last byte by adding 1 (with overflow wrap)
-		newKey[len(newKey)-1] = newKey[len(newKey)-1] + 1
+		newKey[len(newKey)-1] = version // Replace last byte with version identifier
 		return newKey
 	}
 
