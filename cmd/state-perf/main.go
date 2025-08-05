@@ -243,7 +243,7 @@ func main() {
 						Name:        "snapbatch",
 						Aliases:     []string{"srb"},
 						Usage:       "Number of snap KVs to read per batch operation",
-						Value:       1000,
+						Value:       600,
 						Destination: &config.SnapReadBatchSize,
 					},
 				},
@@ -621,10 +621,9 @@ func (r *PerfRunner) processTask(task *Task) {
 	}
 
 	// Process update operations sequentially - individual db.Put for each KV
+	// Note: time is now measured inside processIndividualUpdates for each db.Put
 	if len(task.UpdateKVs) > 0 {
-		updateStart := time.Now()
 		r.processIndividualUpdates(task.UpdateKVs)
-		atomic.AddInt64((*int64)(&r.totalUpdateTime), int64(time.Since(updateStart)))
 	}
 
 	// Accumulate write operations in memory for 256MB batch write
@@ -744,6 +743,7 @@ func (r *PerfRunner) processIndividualUpdates(updateKVs []KeyValue) {
 			defer wg.Done()
 			localUpdateOps := int64(0)
 			localUpdateSize := int64(0)
+			localUpdateTime := int64(0)
 
 			for _, kv := range kvs {
 				// Modify value slightly for update - just append a random byte
@@ -751,18 +751,24 @@ func (r *PerfRunner) processIndividualUpdates(updateKVs []KeyValue) {
 				copy(newValue, kv.Value)
 				newValue[len(kv.Value)] = byte(mathrand.Intn(256))
 
+				// Measure individual db.Put time
+				putStart := time.Now()
 				err := r.db.Put(kv.Key, newValue)
+				putDuration := time.Since(putStart)
+
 				if err != nil {
 					log.Warn("Failed to update key", "err", err)
 				} else {
 					localUpdateOps++
 					localUpdateSize += int64(len(kv.Key) + len(newValue))
+					localUpdateTime += int64(putDuration)
 				}
 			}
 
 			atomic.AddInt64(&r.totalUpdateOps, localUpdateOps)
 			atomic.AddInt64(&r.totalUpdateKVs, localUpdateOps)
 			atomic.AddInt64(&r.totalUpdateSize, localUpdateSize)
+			atomic.AddInt64((*int64)(&r.totalUpdateTime), localUpdateTime)
 		}(updateKVs[start:end])
 	}
 	wg.Wait()
@@ -817,8 +823,7 @@ func (r *PerfRunner) accumulateWrites(writeKVs []KeyValue) {
 	shouldTriggerWrite := currentSize >= minBatchSize
 	r.updateMutex.Unlock()
 
-	// Update statistics
-	atomic.AddInt64(&r.totalWriteOps, int64(len(writeKVs)))
+	// Note: totalWriteOps will be updated when batch is actually written in flushAccumulatedWrites
 
 	// Trigger batch write if we've accumulated enough data
 	if shouldTriggerWrite {
@@ -847,6 +852,7 @@ func (r *PerfRunner) flushAccumulatedWrites() {
 	// Record batch statistics
 	atomic.AddInt64(&r.totalBatchSize, batchSize)
 	atomic.AddInt64(&r.totalBatchWrites, 1)
+	atomic.AddInt64(&r.totalWriteOps, int64(len(kvs))) // Record actual written KVs
 
 	// Perform actual batch write
 	writeStart := time.Now()
@@ -862,10 +868,12 @@ func (r *PerfRunner) flushAccumulatedWrites() {
 	}
 
 	// Execute the batch write
-	if err := batch.Write(); err != nil {
+	err := batch.Write()
+	writeDuration := time.Since(writeStart) // Measure pure write time
+
+	if err != nil {
 		log.Error("Failed to write batch", "err", err, "kvCount", len(kvs), "sizeMB", float64(batchSize)/(1024*1024))
 	} else {
-		writeDuration := time.Since(writeStart)
 		sizeMB := float64(batchSize) / (1024 * 1024)
 		log.Info("Write batch completed successfully",
 			"kvCount", len(kvs),
@@ -874,8 +882,8 @@ func (r *PerfRunner) flushAccumulatedWrites() {
 			"throughputMB/s", sizeMB*1000/float64(writeDuration.Milliseconds()))
 	}
 
-	// Add to write time statistics (this is our actual write operation)
-	atomic.AddInt64((*int64)(&r.totalWriteTime), int64(time.Since(writeStart)))
+	// Add to write time statistics (pure write time, excluding logging)
+	atomic.AddInt64((*int64)(&r.totalWriteTime), int64(writeDuration))
 }
 
 // batchWrite function is removed since WriteKVs now use accumulateWrites logic
@@ -925,6 +933,17 @@ func min(a, b int) int {
 	return b
 }
 
+// formatLatency formats latency with appropriate unit (μs, ms, or s)
+func formatLatency(latencyMicroseconds float64) string {
+	if latencyMicroseconds >= 1000000 { // >= 1 second
+		return fmt.Sprintf("%.2f s", latencyMicroseconds/1000000)
+	} else if latencyMicroseconds >= 1000 { // >= 1 millisecond
+		return fmt.Sprintf("%.2f ms", latencyMicroseconds/1000)
+	} else {
+		return fmt.Sprintf("%.2f μs", latencyMicroseconds)
+	}
+}
+
 func (r *PerfRunner) printStat() {
 	// Calculate effective TPS (based on actual operation time)
 	var mixedReadTPS, snapReadTPS, updateTPS float64
@@ -972,12 +991,12 @@ func (r *PerfRunner) printStat() {
 	fmt.Printf(
 		"[%s] Perf In Progress - block height=%d\n"+
 			"  Mixed Read TPS: %.2f, Latency: %.2f μs | Snap Read TPS: %.2f, Latency: %.2f μs\n"+
-			"  Update TPS: %.2f | Write Batch: Latency: %.2f μs, Avg KVs: %.0f, Avg Size: %.1f MB, Count: %d\n"+
+			"  Update TPS: %.2f | Write Batch: Latency: %s, Avg KVs: %.0f, Avg Size: %.1f MB, Count: %d\n"+
 			"  Accumulated Updates: %d KVs, %.2f MB (target: 230-256MB)\n",
 		time.Now().Format(time.RFC3339),
 		r.blockHeight,
 		mixedReadTPS, mixedReadLatency, snapReadTPS, snapReadLatency,
-		updateTPS, writeLatency, avgKVsPerBatch, avgBatchSizeMB, r.totalBatchWrites,
+		updateTPS, formatLatency(writeLatency), avgKVsPerBatch, avgBatchSizeMB, r.totalBatchWrites,
 		accumulatedKVs, accumulatedSizeMB,
 	)
 
@@ -1048,13 +1067,13 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 			"Mixed Read  - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
 			"Snap Read   - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
 			"Update      - Avg Latency: %.2f μs, TPS: %.2f, Total KVs: %d, Total Processed: %.2f MB\n"+
-			"Write Batch - Avg Latency: %.2f μs, Batch Count: %d, Avg KVs: %.0f, Avg Size: %.1f MB\n",
+			"Write Batch - Avg Latency: %s, Batch Count: %d, Avg KVs: %.0f, Avg Size: %.1f MB\n",
 		elapsed,
 		r.blockHeight,
 		avgMixedReadLatency, mixedReadTPS, r.totalMixedReadOps,
 		avgSnapReadLatency, snapReadTPS, r.totalSnapReadOps,
 		avgUpdateLatency, updateTPS, r.totalUpdateKVs, totalUpdateSizeMB,
-		avgWriteLatency, r.totalBatchWrites, avgKVsPerBatch, avgBatchSizeMB,
+		formatLatency(avgWriteLatency), r.totalBatchWrites, avgKVsPerBatch, avgBatchSizeMB,
 	)
 
 	if remainingKVs > 0 {
