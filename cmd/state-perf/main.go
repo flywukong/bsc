@@ -310,7 +310,7 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 	address := net.JoinHostPort(c.String("metrics.addr"), fmt.Sprintf("%d", c.Int("metrics.port")))
 	log.Info("Enabling stand-alone metrics HTTP endpoint", "address", address)
 	exp.Setup(address)
-	
+
 	// Start process metrics collection
 	go metrics.CollectProcessMetrics(3 * time.Second)
 
@@ -545,12 +545,6 @@ func (r *PerfRunner) createTask() *Task {
 		})
 	}
 	task.MixedReadKVs = mixedKVs
-
-	// Debug info: show read split calculation
-	if readCount > 0 {
-		fmt.Printf("DEBUG: Read split - totalRead=%d, snapRead=%d, mixedRead=%d, snapBatchSize=%d\n",
-			readCount, snapReadCount, mixedReadCount, r.config.SnapReadBatchSize)
-	}
 
 	// Update KVs from all types
 	task.UpdateKVs = allKVs[readCount : readCount+updateCount]
