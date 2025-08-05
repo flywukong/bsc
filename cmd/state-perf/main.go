@@ -235,10 +235,10 @@ func main() {
 						Destination: &config.Handles,
 					},
 					&cli.IntFlag{
-						Name:        "snap-read-batch",
+						Name:        "snapbatch",
 						Aliases:     []string{"srb"},
 						Usage:       "Number of snap KVs to read per batch operation",
-						Value:       100,
+						Value:       1000,
 						Destination: &config.SnapReadBatchSize,
 					},
 				},
@@ -371,6 +371,21 @@ func loadDataSet(testCaseDir string) (*DataSet, error) {
 		return nil, fmt.Errorf("iterator error: %v", err)
 	}
 
+	// Log data set statistics
+	fmt.Printf("Data set loaded successfully:\n")
+	fmt.Printf("  Account Tries: %d\n", len(dataSet.AccountTries))
+	fmt.Printf("  Storage Tries: %d\n", len(dataSet.StorageTries))
+	fmt.Printf("  Account Snaps: %d\n", len(dataSet.AccountSnaps))
+	fmt.Printf("  Storage Snaps: %d\n", len(dataSet.StorageSnaps))
+
+	// Check if we have enough snap data for operations
+	totalSnapData := len(dataSet.AccountSnaps) + len(dataSet.StorageSnaps)
+	if totalSnapData == 0 {
+		fmt.Printf("WARNING: No snapshot data found in test-case database. Snap read operations will be skipped.\n")
+	} else {
+		fmt.Printf("Snapshot data available: %d total entries\n", totalSnapData)
+	}
+
 	return dataSet, nil
 }
 
@@ -489,6 +504,13 @@ func (r *PerfRunner) createTask() *Task {
 	snapKVs := make([]KeyValue, 0, actualSnapReadCount)
 	snapAccountCount := actualSnapReadCount / 2
 	snapStorageCount := actualSnapReadCount - snapAccountCount
+
+	// Debug info: show snap read calculation
+	if snapReadCount == 0 || len(r.dataSet.AccountSnaps) == 0 && len(r.dataSet.StorageSnaps) == 0 {
+		fmt.Printf("DEBUG: Snap read skipped - snapReadCount=%d, AccountSnaps=%d, StorageSnaps=%d, actualSnapReadCount=%d\n",
+			snapReadCount, len(r.dataSet.AccountSnaps), len(r.dataSet.StorageSnaps), actualSnapReadCount)
+	}
+
 	snapKVs = append(snapKVs, r.selectRandomKVs(r.dataSet.AccountSnaps, snapAccountCount)...)
 	snapKVs = append(snapKVs, r.selectRandomKVs(r.dataSet.StorageSnaps, snapStorageCount)...)
 	mathrand.Shuffle(len(snapKVs), func(i, j int) {
@@ -897,6 +919,7 @@ func min(a, b int) int {
 func (r *PerfRunner) printStat() {
 	// Calculate effective TPS (based on actual operation time)
 	var mixedReadTPS, snapReadTPS, writeTPS float64
+	var mixedReadLatency, snapReadLatency, writeLatency float64
 
 	if r.totalMixedReadTime > 0 {
 		mixedReadTPS = float64(r.totalMixedReadOps) * float64(time.Second) / float64(r.totalMixedReadTime)
@@ -908,6 +931,17 @@ func (r *PerfRunner) printStat() {
 		writeTPS = float64(r.totalWriteOps) * float64(time.Second) / float64(r.totalWriteTime)
 	}
 
+	// Calculate average latencies (in microseconds)
+	if r.totalMixedReadOps > 0 {
+		mixedReadLatency = float64(r.totalMixedReadTime.Microseconds()) / float64(r.totalMixedReadOps)
+	}
+	if r.totalSnapReadOps > 0 {
+		snapReadLatency = float64(r.totalSnapReadTime.Microseconds()) / float64(r.totalSnapReadOps)
+	}
+	if r.totalWriteOps > 0 {
+		writeLatency = float64(r.totalWriteTime.Microseconds()) / float64(r.totalWriteOps)
+	}
+
 	// Calculate accumulated update statistics (thread-safe read)
 	r.updateMutex.Lock()
 	accumulatedSizeMB := float64(r.accumulatedUpdateSize) / (1024 * 1024)
@@ -916,11 +950,11 @@ func (r *PerfRunner) printStat() {
 
 	fmt.Printf(
 		"[%s] Perf In Progress - block height=%d\n"+
-			"  Mixed Read TPS: %.2f, Snap Read TPS: %.2f, Write TPS: %.2f\n"+
+			"  Mixed Read TPS: %.2f, Latency: %.2f μs | Snap Read TPS: %.2f, Latency: %.2f μs | Write Batch TPS: %.2f, Latency: %.2f μs\n"+
 			"  Accumulated Updates: %d KVs, %.2f MB (target: 256MB)\n",
 		time.Now().Format(time.RFC3339),
 		r.blockHeight,
-		mixedReadTPS, snapReadTPS, writeTPS,
+		mixedReadTPS, mixedReadLatency, snapReadTPS, snapReadLatency, writeTPS, writeLatency,
 		accumulatedKVs, accumulatedSizeMB,
 	)
 
@@ -976,10 +1010,10 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 	fmt.Printf(
 		"=== Average Performance Metrics ===\n"+
 			"Elapsed: %v, Block Height: %d\n"+
-			"Mixed Read - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
-			"Snap Read  - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
-			"Write      - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d (256MB batches)\n"+
-			"Update     - Avg Latency: %.2f μs, Total KVs: %d, Total Processed: %.2f MB\n",
+			"Mixed Read  - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
+			"Snap Read   - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
+			"Write Batch - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d (256MB batches)\n"+
+			"Update      - Avg Latency: %.2f μs, Total KVs: %d, Total Processed: %.2f MB\n",
 		elapsed,
 		r.blockHeight,
 		avgMixedReadLatency, mixedReadTPS, r.totalMixedReadOps,
