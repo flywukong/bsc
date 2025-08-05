@@ -970,6 +970,8 @@ func (r *PerfRunner) printStat() {
 		writeLatency = float64(r.totalWriteTime.Microseconds()) / float64(r.totalBatchWrites)
 	}
 
+	updateLatency := float64(r.totalUpdateTime.Microseconds()) / float64(r.totalUpdateOps)
+
 	// Calculate batch statistics
 	var avgBatchSizeMB float64
 	if r.totalBatchWrites > 0 {
@@ -991,12 +993,12 @@ func (r *PerfRunner) printStat() {
 	fmt.Printf(
 		"[%s] Perf In Progress - block height=%d\n"+
 			"  Mixed Read TPS: %.2f, Latency: %.2f μs | Snap Read TPS: %.2f, Latency: %.2f μs\n"+
-			"  Update TPS: %.2f | Write Batch: Latency: %s, Avg KVs: %.0f, Avg Size: %.1f MB, Count: %d\n"+
+			"  Update TPS: %.2f, Latency: %.2f μs  | Write Batch: Latency: %s, Avg KVs: %.0f, Avg Size: %.1f MB, Count: %d\n"+
 			"  Accumulated Updates: %d KVs, %.2f MB (target: 230-256MB)\n",
 		time.Now().Format(time.RFC3339),
 		r.blockHeight,
 		mixedReadTPS, mixedReadLatency, snapReadTPS, snapReadLatency,
-		updateTPS, formatLatency(writeLatency), avgKVsPerBatch, avgBatchSizeMB, r.totalBatchWrites,
+		updateTPS, updateLatency, formatLatency(writeLatency), avgKVsPerBatch, avgBatchSizeMB, r.totalBatchWrites,
 		accumulatedKVs, accumulatedSizeMB,
 	)
 
