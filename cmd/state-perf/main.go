@@ -306,34 +306,8 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 		"updateRatio", config.UpdateRatio,
 		"runtime", config.RuntimeDur)
 
-	// Setup metrics server
-	address := net.JoinHostPort(config.MetricsAddr, fmt.Sprintf("%d", config.MetricsPort))
-	log.Info("Enabling stand-alone metrics HTTP endpoint", "address", address)
-	exp.Setup(address)
-
 	// Start process metrics collection
 	go metrics.CollectProcessMetrics(3 * time.Second)
-
-	// Debug: Test metrics functionality
-	fmt.Printf("DEBUG: Testing metrics - updating test metric...\n")
-	mixedReadLatencyMetric.Update(100 * time.Microsecond)
-	fmt.Printf("DEBUG: Test metric updated\n")
-
-	// Debug: Check metrics registry
-	fmt.Printf("DEBUG: Mixed read metric type: %T\n", mixedReadLatencyMetric)
-
-	// Wait a moment and check if test metric was recorded
-	time.Sleep(1 * time.Second)
-	if timer := metrics.DefaultRegistry.Get("stateperf/mixed/read/latency"); timer != nil {
-		if t, ok := timer.(metrics.Timer); ok {
-			snapshot := t.Snapshot()
-			fmt.Printf("DEBUG: Test metric count after update: %d\n", snapshot.Count())
-		} else {
-			fmt.Printf("DEBUG: Retrieved metric is not a Timer: %T\n", timer)
-		}
-	} else {
-		fmt.Printf("DEBUG: Could not retrieve test metric from registry\n")
-	}
 
 	// Load data-set from test-case directory
 	log.Info("Loading data-set from test-case directory", "path", config.TestCaseDir)
@@ -373,6 +347,11 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 		case <-ctx.Done():
 		}
 	}()
+
+	// Setup metrics server
+	address := net.JoinHostPort(config.MetricsAddr, fmt.Sprintf("%d", config.MetricsPort))
+	log.Info("Enabling stand-alone metrics HTTP endpoint", "address", address)
+	exp.Setup(address)
 
 	// Start performance test
 	log.Info("Starting performance test")
@@ -712,11 +691,6 @@ func (r *PerfRunner) processMixedReadsParallel(readKVs []KeyValue, wg *sync.Wait
 				_, err := r.db.Get(kv.Key)
 				duration := time.Since(start)
 				mixedReadLatencyMetric.Update(duration)
-
-				// Debug: log first few metric updates
-				if localReadOps < 3 {
-					fmt.Printf("DEBUG: Mixed read metric updated - duration: %v\n", duration)
-				}
 
 				if err != nil {
 					// Key might not exist, continue
