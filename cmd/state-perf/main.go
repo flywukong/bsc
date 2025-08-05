@@ -966,8 +966,8 @@ func (r *PerfRunner) printStat() {
 	if r.totalSnapReadOps > 0 {
 		snapReadLatency = float64(r.totalSnapReadTime.Microseconds()) / float64(r.totalSnapReadOps)
 	}
-	if r.totalWriteOps > 0 {
-		writeLatency = float64(r.totalWriteTime.Microseconds()) / float64(r.totalWriteOps)
+	if r.totalBatchWrites > 0 {
+		writeLatency = float64(r.totalWriteTime.Microseconds()) / float64(r.totalBatchWrites)
 	}
 
 	// Calculate batch statistics
@@ -1021,8 +1021,8 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 	if r.totalSnapReadOps > 0 {
 		avgSnapReadLatency = float64(r.totalSnapReadTime.Microseconds()) / float64(r.totalSnapReadOps)
 	}
-	if r.totalWriteOps > 0 {
-		avgWriteLatency = float64(r.totalWriteTime.Microseconds()) / float64(r.totalWriteOps)
+	if r.totalBatchWrites > 0 {
+		avgWriteLatency = float64(r.totalWriteTime.Microseconds()) / float64(r.totalBatchWrites)
 	}
 	if r.totalUpdateOps > 0 {
 		avgUpdateLatency = float64(r.totalUpdateTime.Microseconds()) / float64(r.totalUpdateOps)
@@ -1135,11 +1135,6 @@ func (r *PerfRunner) calculateHashRoot() {
 		return
 	}
 
-	// Measure hash calculation before commit (to see if it's cached)
-	hashBeforeStart := time.Now()
-	hashBefore := r.theTrie.Hash()
-	hashBeforeDuration := time.Since(hashBeforeStart)
-
 	// Execute commit operation
 	commitStart := time.Now()
 	newRoot, nodes := r.theTrie.Commit(false)
@@ -1150,8 +1145,8 @@ func (r *PerfRunner) calculateHashRoot() {
 	computedHash := r.theTrie.Hash()
 	hashAfterDuration := time.Since(hashAfterStart)
 
-	// Total time for actual hash operations (excluding initialization)
-	actualHashTime := hashBeforeDuration + commitDuration + hashAfterDuration
+	// Total time for actual hash operations (only hash after commit)
+	actualHashTime := hashAfterDuration
 
 	// Calculate updated nodes count, prevent nil pointer dereference
 	var nodesUpdated int
@@ -1161,18 +1156,14 @@ func (r *PerfRunner) calculateHashRoot() {
 
 	// Record results with detailed timing
 	log.Info("Hash calculation with real blockchain data",
-		"hash_before", hashBefore.Hex(),
 		"computed_hash", computedHash.Hex(),
 		"new_root", newRoot.Hex(),
 		"commit_time_μs", commitDuration.Microseconds(),
-		"hash_before_μs", hashBeforeDuration.Microseconds(),
 		"hash_after_μs", hashAfterDuration.Microseconds(),
 		"commit_time_ns", commitDuration.Nanoseconds(),
-		"hash_before_ns", hashBeforeDuration.Nanoseconds(),
 		"hash_after_ns", hashAfterDuration.Nanoseconds(),
 		"actual_hash_time_μs", actualHashTime.Microseconds(),
-		"nodes_updated", nodesUpdated,
-		"hash_values_equal", hashBefore == computedHash)
+		"nodes_updated", nodesUpdated)
 
 	// Update statistics using only the actual hash calculation time
 	atomic.AddInt64(&r.totalHashOps, 1)
