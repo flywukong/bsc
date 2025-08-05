@@ -307,7 +307,7 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 		"runtime", config.RuntimeDur)
 
 	// Setup metrics server
-	address := net.JoinHostPort(c.String("metrics.addr"), fmt.Sprintf("%d", c.Int("metrics.port")))
+	address := net.JoinHostPort(config.MetricsAddr, fmt.Sprintf("%d", config.MetricsPort))
 	log.Info("Enabling stand-alone metrics HTTP endpoint", "address", address)
 	exp.Setup(address)
 
