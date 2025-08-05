@@ -24,8 +24,6 @@ import (
 	"fmt"
 	"math"
 	mathrand "math/rand"
-	"net"
-	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"sync"
@@ -39,8 +37,6 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/metrics"
-	"github.com/ethereum/go-ethereum/metrics/exp"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/triedb"
@@ -49,23 +45,6 @@ import (
 )
 
 const version = "1.0.0"
-
-// Metrics variables for performance monitoring - only latency related
-var (
-	// Read operation latency metrics
-	mixedReadLatencyMetric = metrics.NewRegisteredTimer("stateperf/mixed/read/latency", nil)
-	snapReadLatencyMetric  = metrics.NewRegisteredTimer("stateperf/snap/read/latency", nil)
-
-	// Write operation latency metrics
-	writeBatchLatencyMetric = metrics.NewRegisteredTimer("stateperf/write/batch/latency", nil)
-
-	// Update operation latency metrics
-	updateLatencyMetric = metrics.NewRegisteredTimer("stateperf/update/latency", nil)
-
-	// Hash calculation latency metrics
-	hashLatencyMetric   = metrics.NewRegisteredTimer("stateperf/hash/latency", nil)
-	commitLatencyMetric = metrics.NewRegisteredTimer("stateperf/commit/latency", nil)
-)
 
 type PerfConfig struct {
 	TestCaseDir       string
@@ -318,9 +297,6 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 		"updateRatio", config.UpdateRatio,
 		"runtime", config.RuntimeDur)
 
-	// Start process metrics collection
-	go metrics.CollectProcessMetrics(3 * time.Second)
-
 	// Load data-set from test-case directory
 	log.Info("Loading data-set from test-case directory", "path", config.TestCaseDir)
 	dataSet, err := loadDataSet(config.TestCaseDir)
@@ -359,11 +335,6 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 		case <-ctx.Done():
 		}
 	}()
-
-	// Setup metrics server
-	address := net.JoinHostPort(config.MetricsAddr, fmt.Sprintf("%d", config.MetricsPort))
-	log.Info("Enabling stand-alone metrics HTTP endpoint", "address", address)
-	exp.Setup(address)
 
 	// Start performance test
 	log.Info("Starting performance test")
@@ -702,7 +673,6 @@ func (r *PerfRunner) processMixedReadsParallel(readKVs []KeyValue, wg *sync.Wait
 				start := time.Now()
 				_, err := r.db.Get(kv.Key)
 				duration := time.Since(start)
-				mixedReadLatencyMetric.Update(duration)
 
 				// Update min/max read times
 				updateMinMaxDuration(&r.minMixedReadTime, &r.maxMixedReadTime, duration)
@@ -749,7 +719,6 @@ func (r *PerfRunner) processSnapReadsParallel(readKVs []KeyValue, wg *sync.WaitG
 				start := time.Now()
 				_, err := r.db.Get(kv.Key)
 				duration := time.Since(start)
-				snapReadLatencyMetric.Update(duration)
 
 				// Update min/max snap read times
 				updateMinMaxDuration(&r.minSnapReadTime, &r.maxSnapReadTime, duration)
@@ -806,7 +775,6 @@ func (r *PerfRunner) processIndividualUpdates(updateKVs []KeyValue) {
 				putStart := time.Now()
 				err := r.db.Put(kv.Key, newValue)
 				putDuration := time.Since(putStart)
-				updateLatencyMetric.Update(putDuration)
 
 				// Update min/max update times
 				updateMinMaxDuration(&r.minUpdateTime, &r.maxUpdateTime, putDuration)
@@ -925,7 +893,6 @@ func (r *PerfRunner) flushAccumulatedWrites() {
 	// Execute the batch write
 	err := batch.Write()
 	writeDuration := time.Since(writeStart) // Measure pure write time
-	writeBatchLatencyMetric.Update(writeDuration)
 
 	// Update min/max write times
 	updateMinMaxDuration(&r.minWriteTime, &r.maxWriteTime, writeDuration)
@@ -1265,7 +1232,6 @@ func (r *PerfRunner) calculateHashRoot() {
 	commitStart := time.Now()
 	newRoot, nodes := r.theTrie.Commit(false)
 	commitDuration := time.Since(commitStart)
-	commitLatencyMetric.Update(commitDuration)
 
 	// Update min/max commit times
 	updateMinMaxDuration(&r.minCommitTime, &r.maxCommitTime, commitDuration)
@@ -1274,7 +1240,6 @@ func (r *PerfRunner) calculateHashRoot() {
 	hashAfterStart := time.Now()
 	computedHash := r.theTrie.Hash()
 	hashAfterDuration := time.Since(hashAfterStart)
-	hashLatencyMetric.Update(hashAfterDuration)
 
 	// Update min/max hash times
 	updateMinMaxDuration(&r.minHashTime, &r.maxHashTime, hashAfterDuration)
