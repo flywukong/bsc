@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"math"
 	mathrand "math/rand"
+	"net"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"sync"
@@ -37,6 +39,8 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
+	"github.com/ethereum/go-ethereum/metrics/exp"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/triedb"
@@ -45,6 +49,23 @@ import (
 )
 
 const version = "1.0.0"
+
+// Metrics variables for performance monitoring - only latency related
+var (
+	// Read operation latency metrics
+	mixedReadLatencyMetric = metrics.NewRegisteredTimer("stateperf/mixed/read/latency", nil)
+	snapReadLatencyMetric  = metrics.NewRegisteredTimer("stateperf/snap/read/latency", nil)
+
+	// Write operation latency metrics
+	writeBatchLatencyMetric = metrics.NewRegisteredTimer("stateperf/write/batch/latency", nil)
+
+	// Update operation latency metrics
+	updateLatencyMetric = metrics.NewRegisteredTimer("stateperf/update/latency", nil)
+
+	// Hash calculation latency metrics
+	hashLatencyMetric   = metrics.NewRegisteredTimer("stateperf/hash/latency", nil)
+	commitLatencyMetric = metrics.NewRegisteredTimer("stateperf/commit/latency", nil)
+)
 
 type PerfConfig struct {
 	TestCaseDir       string
@@ -285,6 +306,14 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 		"updateRatio", config.UpdateRatio,
 		"runtime", config.RuntimeDur)
 
+	// Setup metrics server
+	address := net.JoinHostPort(c.String("metrics.addr"), fmt.Sprintf("%d", c.Int("metrics.port")))
+	log.Info("Enabling stand-alone metrics HTTP endpoint", "address", address)
+	exp.Setup(address)
+	
+	// Start process metrics collection
+	go metrics.CollectProcessMetrics(3 * time.Second)
+
 	// Load data-set from test-case directory
 	log.Info("Loading data-set from test-case directory", "path", config.TestCaseDir)
 	dataSet, err := loadDataSet(config.TestCaseDir)
@@ -486,40 +515,42 @@ func (r *PerfRunner) createTask() *Task {
 	updateCount := int(float64(total) * r.config.UpdateRatio)
 	writeCount := total - readCount - updateCount
 
-	// Split read operations: half mixed (trie types), half snap types
-	mixedReadCount := readCount / 2
-	snapReadCount := readCount - mixedReadCount
+	// Split read operations: first allocate SnapReadBatchSize to snap reads, remaining to mixed reads
+	snapReadCount := min(readCount, r.config.SnapReadBatchSize)
+	mixedReadCount := readCount - snapReadCount
+
+	// Create snap reads from snap types (AccountSnaps + StorageSnaps)
+	snapKVs := make([]KeyValue, 0, snapReadCount)
+	if snapReadCount > 0 {
+		snapAccountCount := snapReadCount / 2
+		snapStorageCount := snapReadCount - snapAccountCount
+
+		snapKVs = append(snapKVs, r.selectRandomKVs(r.dataSet.AccountSnaps, snapAccountCount)...)
+		snapKVs = append(snapKVs, r.selectRandomKVs(r.dataSet.StorageSnaps, snapStorageCount)...)
+		mathrand.Shuffle(len(snapKVs), func(i, j int) {
+			snapKVs[i], snapKVs[j] = snapKVs[j], snapKVs[i]
+		})
+	}
+	task.SnapReadKVs = snapKVs
 
 	// Create mixed reads from trie types (AccountTries + StorageTries)
 	mixedKVs := make([]KeyValue, 0, mixedReadCount)
-	mixedAccountCount := mixedReadCount / 2
-	mixedStorageCount := mixedReadCount - mixedAccountCount
-	mixedKVs = append(mixedKVs, r.selectRandomKVs(r.dataSet.AccountTries, mixedAccountCount)...)
-	mixedKVs = append(mixedKVs, r.selectRandomKVs(r.dataSet.StorageTries, mixedStorageCount)...)
-	mathrand.Shuffle(len(mixedKVs), func(i, j int) {
-		mixedKVs[i], mixedKVs[j] = mixedKVs[j], mixedKVs[i]
-	})
+	if mixedReadCount > 0 {
+		mixedAccountCount := mixedReadCount / 2
+		mixedStorageCount := mixedReadCount - mixedAccountCount
+		mixedKVs = append(mixedKVs, r.selectRandomKVs(r.dataSet.AccountTries, mixedAccountCount)...)
+		mixedKVs = append(mixedKVs, r.selectRandomKVs(r.dataSet.StorageTries, mixedStorageCount)...)
+		mathrand.Shuffle(len(mixedKVs), func(i, j int) {
+			mixedKVs[i], mixedKVs[j] = mixedKVs[j], mixedKVs[i]
+		})
+	}
 	task.MixedReadKVs = mixedKVs
 
-	// Create snap reads from snap types (AccountSnaps + StorageSnaps)
-	// Use SnapReadBatchSize to control actual read count
-	actualSnapReadCount := min(snapReadCount, r.config.SnapReadBatchSize)
-	snapKVs := make([]KeyValue, 0, actualSnapReadCount)
-	snapAccountCount := actualSnapReadCount / 2
-	snapStorageCount := actualSnapReadCount - snapAccountCount
-
-	// Debug info: show snap read calculation
-	if snapReadCount == 0 || len(r.dataSet.AccountSnaps) == 0 && len(r.dataSet.StorageSnaps) == 0 {
-		fmt.Printf("DEBUG: Snap read skipped - snapReadCount=%d, AccountSnaps=%d, StorageSnaps=%d, actualSnapReadCount=%d\n",
-			snapReadCount, len(r.dataSet.AccountSnaps), len(r.dataSet.StorageSnaps), actualSnapReadCount)
+	// Debug info: show read split calculation
+	if readCount > 0 {
+		fmt.Printf("DEBUG: Read split - totalRead=%d, snapRead=%d, mixedRead=%d, snapBatchSize=%d\n",
+			readCount, snapReadCount, mixedReadCount, r.config.SnapReadBatchSize)
 	}
-
-	snapKVs = append(snapKVs, r.selectRandomKVs(r.dataSet.AccountSnaps, snapAccountCount)...)
-	snapKVs = append(snapKVs, r.selectRandomKVs(r.dataSet.StorageSnaps, snapStorageCount)...)
-	mathrand.Shuffle(len(snapKVs), func(i, j int) {
-		snapKVs[i], snapKVs[j] = snapKVs[j], snapKVs[i]
-	})
-	task.SnapReadKVs = snapKVs
 
 	// Update KVs from all types
 	task.UpdateKVs = allKVs[readCount : readCount+updateCount]
@@ -662,7 +693,10 @@ func (r *PerfRunner) processMixedReadsParallel(readKVs []KeyValue, wg *sync.Wait
 			localReadOps := int64(0)
 
 			for _, kv := range kvs {
+				start := time.Now()
 				_, err := r.db.Get(kv.Key)
+				mixedReadLatencyMetric.Update(time.Since(start))
+
 				if err != nil {
 					// Key might not exist, continue
 				}
@@ -702,7 +736,10 @@ func (r *PerfRunner) processSnapReadsParallel(readKVs []KeyValue, wg *sync.WaitG
 			localReadOps := int64(0)
 
 			for _, kv := range kvs {
+				start := time.Now()
 				_, err := r.db.Get(kv.Key)
+				snapReadLatencyMetric.Update(time.Since(start))
+
 				if err != nil {
 					// Key might not exist, continue
 				}
@@ -755,6 +792,7 @@ func (r *PerfRunner) processIndividualUpdates(updateKVs []KeyValue) {
 				putStart := time.Now()
 				err := r.db.Put(kv.Key, newValue)
 				putDuration := time.Since(putStart)
+				updateLatencyMetric.Update(putDuration)
 
 				if err != nil {
 					log.Warn("Failed to update key", "err", err)
@@ -870,6 +908,7 @@ func (r *PerfRunner) flushAccumulatedWrites() {
 	// Execute the batch write
 	err := batch.Write()
 	writeDuration := time.Since(writeStart) // Measure pure write time
+	writeBatchLatencyMetric.Update(writeDuration)
 
 	if err != nil {
 		log.Error("Failed to write batch", "err", err, "kvCount", len(kvs), "sizeMB", float64(batchSize)/(1024*1024))
@@ -989,6 +1028,8 @@ func (r *PerfRunner) printStat() {
 	if r.totalBatchWrites > 0 {
 		avgKVsPerBatch = float64(r.totalWriteOps) / float64(r.totalBatchWrites)
 	}
+
+	// No additional metrics updates needed - only latency timers are updated during operations
 
 	fmt.Printf(
 		"[%s] Perf In Progress - block height=%d\n"+
@@ -1140,11 +1181,13 @@ func (r *PerfRunner) calculateHashRoot() {
 	commitStart := time.Now()
 	newRoot, nodes := r.theTrie.Commit(false)
 	commitDuration := time.Since(commitStart)
+	commitLatencyMetric.Update(commitDuration)
 
 	// Measure hash calculation after commit
 	hashAfterStart := time.Now()
 	computedHash := r.theTrie.Hash()
 	hashAfterDuration := time.Since(hashAfterStart)
+	hashLatencyMetric.Update(hashAfterDuration)
 
 	// Total time for actual hash operations (only hash after commit)
 	actualHashTime := hashAfterDuration
