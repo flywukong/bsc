@@ -653,13 +653,13 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	}
 
 	var (
-		maxBatchSize   = 256 * 1024 * 1024 // 256MB batch size
+		maxBatchSize   = 512 * 1024 * 1024 // 256MB batch size
 		newKeysCreated int64
 		writeErrors    int64
 		currentBatch   = db.NewBatch()
 		currentSize    = 0
 		batchStartTime = time.Now()
-		batchChan      = make(chan *batchData, 10) // Buffer 10 batches
+		batchChan      = make(chan *batchData, 30) // Buffer 10 batches
 		wg             sync.WaitGroup
 	)
 
