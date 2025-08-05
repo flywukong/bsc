@@ -653,18 +653,18 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	}
 
 	var (
-		maxBatchSize   = 512 * 1024 * 1024 // 256MB batch size
+		maxBatchSize   = 512 * 1024 * 1024 // 512MB batch size
 		newKeysCreated int64
 		writeErrors    int64
 		currentBatch   = db.NewBatch()
 		currentSize    = 0
 		batchStartTime = time.Now()
-		batchChan      = make(chan *batchData, 30) // Buffer 10 batches
+		batchChan      = make(chan *batchData, 30) // Buffer 30 batches
 		wg             sync.WaitGroup
 	)
 
 	log.Info("Starting database expansion from 1T to 2T with async batch writing",
-		"maxBatchSize", "256MB", "batchBuffer", 10)
+		"maxBatchSize", "512MB", "batchBuffer", 30)
 
 	// Key expansion counters
 	var (
@@ -705,19 +705,32 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		log.Info("Async batch writer finished", "totalBatches", batchesProcessed)
 	}()
 
-	// Helper function to generate new key (same length, version in last byte)
+	// Helper function to generate new key
 	generateNewKey := func(originalKey []byte) []byte {
 		if len(originalKey) == 0 {
 			return originalKey
 		}
-		// Keep same key length, encode version in last byte
-		// For 1T->2T expansion, set last byte to version 1
-		// For future 2T->3T expansion, this could be changed to version 2, etc.
-		version := byte(1)
-		newKey := make([]byte, len(originalKey)) // Same length as original
-		copy(newKey, originalKey)
-		newKey[len(newKey)-1] = version // Replace last byte with version identifier
-		return newKey
+
+		if len(originalKey) >= 2 {
+			// 长度>=2字节：保持相同长度，修改最后2个字节作为版本标识
+			// For 1T->2T expansion, use "v1" (0x7631)
+			// For future 2T->3T expansion, this could be changed to "v2" (0x7632), etc.
+			newKey := make([]byte, len(originalKey))
+			copy(newKey, originalKey)
+
+			// 将最后2个字节设置为 "v1"
+			newKey[len(newKey)-2] = 'v' // 0x76
+			newKey[len(newKey)-1] = '1' // 0x31
+
+			return newKey
+		} else {
+			// 长度<2字节：在后面添加后缀
+			suffix := []byte("v1")
+			newKey := make([]byte, len(originalKey)+len(suffix))
+			copy(newKey, originalKey)
+			copy(newKey[len(originalKey):], suffix)
+			return newKey
+		}
 	}
 
 	// Helper function to shuffle value
@@ -835,22 +848,58 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		switch {
 		case bytes.HasPrefix(key, headerPrefix) && len(key) == (len(headerPrefix)+8+common.HashLength):
 			headers.Add(size)
+			// Expand headers
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case bytes.HasPrefix(key, blockBodyPrefix) && len(key) == (len(blockBodyPrefix)+8+common.HashLength):
 			bodies.Add(size)
+			// Expand block bodies
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case bytes.HasPrefix(key, blockReceiptsPrefix) && len(key) == (len(blockReceiptsPrefix)+8+common.HashLength):
 			receipts.Add(size)
+			// Expand receipts
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case IsLegacyTrieNode(key, it.Value()):
 			legacyTries.Add(size)
+			// Expand legacy trie nodes
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerTDSuffix):
 			tds.Add(size)
+			// Expand header TD data
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case bytes.HasPrefix(key, BlockBlobSidecarsPrefix):
 			blobSidecars.Add(size)
+			// Expand blob sidecars data
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerHashSuffix):
 			numHashPairings.Add(size)
+			// Expand header hash pairings
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case bytes.HasPrefix(key, headerNumberPrefix) && len(key) == (len(headerNumberPrefix)+common.HashLength):
 			hashNumPairings.Add(size)
+			// Expand hash number pairings
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case bytes.HasPrefix(key, stateIDPrefix) && len(key) == len(stateIDPrefix)+common.HashLength:
 			stateLookups.Add(size)
+			// Expand state lookups
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case IsAccountTrieNode(key):
 			accountTries.Add(size)
 			accountTriesTotal++
@@ -869,8 +918,16 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			storageTriesExpanded++
 		case bytes.HasPrefix(key, CodePrefix) && len(key) == len(CodePrefix)+common.HashLength:
 			codes.Add(size)
+			// Expand contract codes
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case bytes.HasPrefix(key, txLookupPrefix) && len(key) == (len(txLookupPrefix)+common.HashLength):
 			txLookups.Add(size)
+			// Expand transaction lookups
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength):
 			accountSnaps.Add(size)
 			accountSnapsTotal++
@@ -889,26 +946,62 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			storageSnapsExpanded++
 		case bytes.HasPrefix(key, PreimagePrefix) && len(key) == (len(PreimagePrefix)+common.HashLength):
 			preimages.Add(size)
+			// Expand preimages
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case bytes.HasPrefix(key, configPrefix) && len(key) == (len(configPrefix)+common.HashLength):
 			metadata.Add(size)
+			// Expand config data
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case bytes.HasPrefix(key, genesisPrefix) && len(key) == (len(genesisPrefix)+common.HashLength):
 			metadata.Add(size)
+			// Expand genesis data
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case bytes.HasPrefix(key, bloomBitsPrefix) && len(key) == (len(bloomBitsPrefix)+10+common.HashLength):
 			bloomBits.Add(size)
+			// Expand bloom bits
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case bytes.HasPrefix(key, BloomBitsIndexPrefix):
 			bloomBits.Add(size)
+			// Expand bloom bits index
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case bytes.HasPrefix(key, CliqueSnapshotPrefix) && len(key) == 7+common.HashLength:
 			cliqueSnaps.Add(size)
+			// Expand clique snapshots
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case bytes.HasPrefix(key, ParliaSnapshotPrefix) && len(key) == 7+common.HashLength:
 			parliaSnaps.Add(size)
+			// Expand parlia snapshots
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case bytes.HasPrefix(key, ChtTablePrefix) ||
 			bytes.HasPrefix(key, ChtIndexTablePrefix) ||
 			bytes.HasPrefix(key, ChtPrefix): // Canonical hash trie
 			chtTrieNodes.Add(size)
+			// Expand CHT trie nodes
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 		case bytes.HasPrefix(key, BloomTrieTablePrefix) ||
 			bytes.HasPrefix(key, BloomTrieIndexPrefix) ||
 			bytes.HasPrefix(key, BloomTriePrefix): // Bloomtrie sub
 			bloomTrieNodes.Add(size)
+			// Expand bloom trie nodes
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
 
 		// Verkle trie data is detected, determine the sub-category
 		case bytes.HasPrefix(key, VerklePrefix):
@@ -916,16 +1009,40 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			switch {
 			case IsAccountTrieNode(remain):
 				verkleTries.Add(size)
+				// Expand verkle tries
+				newKey := generateNewKey(key)
+				newValue := shuffleValue(it.Value())
+				addToBatch(newKey, newValue)
 			case bytes.HasPrefix(remain, stateIDPrefix) && len(remain) == len(stateIDPrefix)+common.HashLength:
 				verkleStateLookups.Add(size)
+				// Expand verkle state lookups
+				newKey := generateNewKey(key)
+				newValue := shuffleValue(it.Value())
+				addToBatch(newKey, newValue)
 			case bytes.Equal(remain, persistentStateIDKey):
 				metadata.Add(size)
+				// Expand metadata
+				newKey := generateNewKey(key)
+				newValue := shuffleValue(it.Value())
+				addToBatch(newKey, newValue)
 			case bytes.Equal(remain, trieJournalKey):
 				metadata.Add(size)
+				// Expand metadata
+				newKey := generateNewKey(key)
+				newValue := shuffleValue(it.Value())
+				addToBatch(newKey, newValue)
 			case bytes.Equal(remain, snapSyncStatusFlagKey):
 				metadata.Add(size)
+				// Expand metadata
+				newKey := generateNewKey(key)
+				newValue := shuffleValue(it.Value())
+				addToBatch(newKey, newValue)
 			default:
 				unaccounted.Add(size)
+				// Expand unaccounted verkle data
+				newKey := generateNewKey(key)
+				newValue := shuffleValue(it.Value())
+				addToBatch(newKey, newValue)
 			}
 		default:
 			var accounted bool
@@ -944,6 +1061,15 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			}
 			if !accounted {
 				unaccounted.Add(size)
+				// Expand unaccounted data too to ensure all data is duplicated
+				newKey := generateNewKey(key)
+				newValue := shuffleValue(it.Value())
+				addToBatch(newKey, newValue)
+			} else {
+				// Also expand accounted metadata to ensure complete duplication
+				newKey := generateNewKey(key)
+				newValue := shuffleValue(it.Value())
+				addToBatch(newKey, newValue)
 			}
 		}
 		count++
