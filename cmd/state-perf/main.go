@@ -636,9 +636,7 @@ func (r *PerfRunner) processTask(task *Task) {
 
 	// Accumulate write operations in memory for 256MB batch write
 	if len(task.WriteKVs) > 0 {
-		writeStart := time.Now()
 		r.accumulateWrites(task.WriteKVs)
-		atomic.AddInt64((*int64)(&r.totalWriteTime), int64(time.Since(writeStart)))
 	}
 
 }
