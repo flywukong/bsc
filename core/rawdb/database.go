@@ -20,16 +20,16 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/memorydb"
-	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/olekukonko/tablewriter"
 )
@@ -644,35 +644,139 @@ func DataTypeByKey(key []byte) DataType {
 // InspectDatabase traverses the entire database and checks the size
 // of all different categories of data.
 func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
-	// Initialize PebbleDB for sampling data with high-performance configuration
-	// cache: 3.52 GiB = 3686 MB, handles: 2048, memory table: ~300 MiB
-	testCaseDB, err := pebble.New("test-case", 3686, 2048, "testcase/", false)
-	if err != nil {
-		return fmt.Errorf("failed to create test-case pebbledb: %v", err)
+	// Data expansion logic: 1T -> 2T with async batch writing
+	type batchData struct {
+		batch     ethdb.Batch
+		size      int
+		keyCount  int64
+		timestamp time.Time
 	}
-	defer func() {
-		if closeErr := testCaseDB.Close(); closeErr != nil {
-			log.Error("Failed to close test-case pebbledb", "err", closeErr)
-		}
-	}()
 
-	log.Info("Initialized test-case PebbleDB with high-performance configuration",
-		"cache", "3.52 GiB", "handles", 2048, "memory_table", "~300 MiB")
-
-	// Sampling counters for 3% data collection
 	var (
-		accountTriesTotal   int64
-		storageTriesTotal   int64
-		accountSnapsTotal   int64
-		storageSnapsTotal   int64
-		accountTriesSampled int64
-		storageTriesSampled int64
-		accountSnapsSampled int64
-		storageSnapsSampled int64
+		maxBatchSize   = 256 * 1024 * 1024 // 256MB batch size
+		newKeysCreated int64
+		writeErrors    int64
+		currentBatch   = db.NewBatch()
+		currentSize    = 0
+		batchStartTime = time.Now()
+		batchChan      = make(chan *batchData, 10) // Buffer 10 batches
+		wg             sync.WaitGroup
 	)
 
-	// Sampling rate: 3%
-	const samplingRate = 0.03
+	log.Info("Starting database expansion from 1T to 2T with async batch writing",
+		"maxBatchSize", "256MB", "batchBuffer", 10)
+
+	// Key expansion counters
+	var (
+		accountTriesTotal    int64
+		storageTriesTotal    int64
+		accountSnapsTotal    int64
+		storageSnapsTotal    int64
+		accountTriesExpanded int64
+		storageTriesExpanded int64
+		accountSnapsExpanded int64
+		storageSnapsExpanded int64
+	)
+
+	// Start async batch writer goroutine
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		batchesProcessed := 0
+		for batchData := range batchChan {
+			start := time.Now()
+			if err := batchData.batch.Write(); err != nil {
+				atomic.AddInt64(&writeErrors, 1)
+				log.Error("Async batch write failed", "err", err, "size", batchData.size)
+			} else {
+				batchesProcessed++
+				writeDuration := time.Since(start)
+				throughput := float64(batchData.size) / writeDuration.Seconds() / (1024 * 1024) // MB/s
+
+				log.Info("Async batch written",
+					"batchIndex", batchesProcessed,
+					"size", common.StorageSize(batchData.size).String(),
+					"keyCount", batchData.keyCount,
+					"duration", writeDuration,
+					"throughput", fmt.Sprintf("%.2f MB/s", throughput),
+					"bufferTime", time.Since(batchData.timestamp))
+			}
+		}
+		log.Info("Async batch writer finished", "totalBatches", batchesProcessed)
+	}()
+
+	// Helper function to generate new key (modify last byte + 1)
+	generateNewKey := func(originalKey []byte) []byte {
+		if len(originalKey) == 0 {
+			return originalKey
+		}
+		newKey := make([]byte, len(originalKey))
+		copy(newKey, originalKey)
+		// Modify the last byte by adding 1 (with overflow wrap)
+		newKey[len(newKey)-1] = newKey[len(newKey)-1] + 1
+		return newKey
+	}
+
+	// Helper function to shuffle value
+	shuffleValue := func(originalValue []byte) []byte {
+		if len(originalValue) <= 1 {
+			return originalValue
+		}
+		newValue := make([]byte, len(originalValue))
+		copy(newValue, originalValue)
+
+		// Simple shuffle: swap bytes in a pattern
+		for i := 0; i < len(newValue)/2; i++ {
+			j := (i + len(newValue)/2) % len(newValue)
+			newValue[i], newValue[j] = newValue[j], newValue[i]
+		}
+
+		// XOR with a pattern to further randomize
+		for i := range newValue {
+			newValue[i] ^= byte(i % 255)
+		}
+
+		return newValue
+	}
+
+	// Helper function to add to batch and flush if needed (non-blocking)
+	addToBatch := func(key, value []byte) {
+		if err := currentBatch.Put(key, value); err != nil {
+			log.Warn("Failed to add to batch", "err", err)
+			atomic.AddInt64(&writeErrors, 1)
+			return
+		}
+
+		currentSize += len(key) + len(value)
+		atomic.AddInt64(&newKeysCreated, 1)
+
+		// Check if batch should be sent for async writing
+		if currentSize >= maxBatchSize {
+			// Send current batch to async writer
+			select {
+			case batchChan <- &batchData{
+				batch:     currentBatch,
+				size:      currentSize,
+				keyCount:  atomic.LoadInt64(&newKeysCreated),
+				timestamp: batchStartTime,
+			}:
+				// Successfully queued batch for async writing
+				log.Debug("Batch queued for async writing", "size", common.StorageSize(currentSize).String())
+			default:
+				// Channel is full, write synchronously to avoid blocking
+				log.Warn("Async batch channel full, writing synchronously")
+				if err := currentBatch.Write(); err != nil {
+					atomic.AddInt64(&writeErrors, 1)
+					log.Error("Synchronous batch write failed", "err", err)
+				}
+			}
+
+			// Create new batch
+			currentBatch = db.NewBatch()
+			currentSize = 0
+			batchStartTime = time.Now()
+		}
+	}
 
 	it := db.NewIterator(keyPrefix, keyStart)
 	defer it.Release()
@@ -747,25 +851,19 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		case IsAccountTrieNode(key):
 			accountTries.Add(size)
 			accountTriesTotal++
-			// Sample 3% of account trie data
-			if rand.Float64() < samplingRate {
-				if err := testCaseDB.Put(key, it.Value()); err != nil {
-					log.Warn("Failed to write account trie data to test-case db", "err", err)
-				} else {
-					accountTriesSampled++
-				}
-			}
+			// Expand account trie data: create new key-value pair
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
+			accountTriesExpanded++
 		case IsStorageTrieNode(key):
 			storageTries.Add(size)
 			storageTriesTotal++
-			// Sample 3% of storage trie data
-			if rand.Float64() < samplingRate {
-				if err := testCaseDB.Put(key, it.Value()); err != nil {
-					log.Warn("Failed to write storage trie data to test-case db", "err", err)
-				} else {
-					storageTriesSampled++
-				}
-			}
+			// Expand storage trie data: create new key-value pair
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
+			storageTriesExpanded++
 		case bytes.HasPrefix(key, CodePrefix) && len(key) == len(CodePrefix)+common.HashLength:
 			codes.Add(size)
 		case bytes.HasPrefix(key, txLookupPrefix) && len(key) == (len(txLookupPrefix)+common.HashLength):
@@ -773,25 +871,19 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		case bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength):
 			accountSnaps.Add(size)
 			accountSnapsTotal++
-			// Sample 3% of account snapshot data
-			if rand.Float64() < samplingRate {
-				if err := testCaseDB.Put(key, it.Value()); err != nil {
-					log.Warn("Failed to write account snapshot data to test-case db", "err", err)
-				} else {
-					accountSnapsSampled++
-				}
-			}
+			// Expand account snapshot data: create new key-value pair
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
+			accountSnapsExpanded++
 		case bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength):
 			storageSnaps.Add(size)
 			storageSnapsTotal++
-			// Sample 3% of storage snapshot data
-			if rand.Float64() < samplingRate {
-				if err := testCaseDB.Put(key, it.Value()); err != nil {
-					log.Warn("Failed to write storage snapshot data to test-case db", "err", err)
-				} else {
-					storageSnapsSampled++
-				}
-			}
+			// Expand storage snapshot data: create new key-value pair
+			newKey := generateNewKey(key)
+			newValue := shuffleValue(it.Value())
+			addToBatch(newKey, newValue)
+			storageSnapsExpanded++
 		case bytes.HasPrefix(key, PreimagePrefix) && len(key) == (len(PreimagePrefix)+common.HashLength):
 			preimages.Add(size)
 		case bytes.HasPrefix(key, configPrefix) && len(key) == (len(configPrefix)+common.HashLength):
@@ -858,12 +950,41 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		}
 	}
 
-	// Log sampling statistics
-	log.Info("Data sampling completed",
-		"accountTriesTotal", accountTriesTotal, "accountTriesSampled", accountTriesSampled,
-		"storageTriesTotal", storageTriesTotal, "storageTriesSampled", storageTriesSampled,
-		"accountSnapsTotal", accountSnapsTotal, "accountSnapsSampled", accountSnapsSampled,
-		"storageSnapsTotal", storageSnapsTotal, "storageSnapsSampled", storageSnapsSampled)
+	// Final flush: send remaining batch if it has data
+	if currentSize > 0 {
+		select {
+		case batchChan <- &batchData{
+			batch:     currentBatch,
+			size:      currentSize,
+			keyCount:  atomic.LoadInt64(&newKeysCreated),
+			timestamp: batchStartTime,
+		}:
+			log.Info("Final batch queued for async writing", "size", common.StorageSize(currentSize).String())
+		default:
+			// Channel is full, write synchronously
+			log.Info("Writing final batch synchronously")
+			if err := currentBatch.Write(); err != nil {
+				atomic.AddInt64(&writeErrors, 1)
+				log.Error("Final batch write failed", "err", err)
+			}
+		}
+	}
+
+	// Close channel to signal async writer to finish and wait for completion
+	close(batchChan)
+	log.Info("Waiting for async batch writer to complete...")
+	wg.Wait()
+
+	finalErrors := atomic.LoadInt64(&writeErrors)
+	finalKeysCreated := atomic.LoadInt64(&newKeysCreated)
+
+	// Log expansion statistics
+	log.Info("Database expansion completed (1T -> 2T)",
+		"totalNewKeysCreated", finalKeysCreated, "writeErrors", finalErrors,
+		"accountTriesTotal", accountTriesTotal, "accountTriesExpanded", accountTriesExpanded,
+		"storageTriesTotal", storageTriesTotal, "storageTriesExpanded", storageTriesExpanded,
+		"accountSnapsTotal", accountSnapsTotal, "accountSnapsExpanded", accountSnapsExpanded,
+		"storageSnapsTotal", storageSnapsTotal, "storageSnapsExpanded", storageSnapsExpanded)
 
 	// Display the database statistic of key-value store.
 	stats := [][]string{
@@ -891,6 +1012,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		{"Key-Value store", "Singleton metadata", metadata.Size(), metadata.Count()},
 		{"Light client", "CHT trie nodes", chtTrieNodes.Size(), chtTrieNodes.Count()},
 		{"Light client", "Bloom trie nodes", bloomTrieNodes.Size(), bloomTrieNodes.Count()},
+		{"Data Expansion", "New keys created (1T->2T)", "-", fmt.Sprintf("%d", finalKeysCreated)},
 	}
 	// Inspect all registered append-only file store then.
 	ancients, err := inspectFreezers(db)
