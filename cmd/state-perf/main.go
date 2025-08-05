@@ -314,6 +314,11 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 	// Start process metrics collection
 	go metrics.CollectProcessMetrics(3 * time.Second)
 
+	// Debug: Test metrics functionality
+	fmt.Printf("DEBUG: Testing metrics - updating test metric...\n")
+	mixedReadLatencyMetric.Update(100 * time.Microsecond)
+	fmt.Printf("DEBUG: Test metric updated\n")
+
 	// Load data-set from test-case directory
 	log.Info("Loading data-set from test-case directory", "path", config.TestCaseDir)
 	dataSet, err := loadDataSet(config.TestCaseDir)
@@ -689,7 +694,13 @@ func (r *PerfRunner) processMixedReadsParallel(readKVs []KeyValue, wg *sync.Wait
 			for _, kv := range kvs {
 				start := time.Now()
 				_, err := r.db.Get(kv.Key)
-				mixedReadLatencyMetric.Update(time.Since(start))
+				duration := time.Since(start)
+				mixedReadLatencyMetric.Update(duration)
+
+				// Debug: log first few metric updates
+				if localReadOps < 3 {
+					fmt.Printf("DEBUG: Mixed read metric updated - duration: %v\n", duration)
+				}
 
 				if err != nil {
 					// Key might not exist, continue
