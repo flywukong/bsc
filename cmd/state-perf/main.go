@@ -1047,7 +1047,6 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 	}
 
 	// Calculate total update statistics (including both individual updates and batch writes)
-	totalUpdateSizeMB := float64(r.totalUpdateSize) / (1024 * 1024)
 
 	// Check for remaining accumulated data
 	r.updateMutex.Lock()
@@ -1066,13 +1065,13 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 			"Elapsed: %v, Block Height: %d\n"+
 			"Mixed Read  - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
 			"Snap Read   - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
-			"Update      - Avg Latency: %.2f μs, TPS: %.2f, Total KVs: %d, Total Processed: %.2f MB\n"+
+			"Update      - Avg Latency: %.2f μs, TPS: %.2f, Total KVs: %d\n"+
 			"Write Batch - Avg Latency: %s, Batch Count: %d, Avg KVs: %.0f, Avg Size: %.1f MB\n",
 		elapsed,
 		r.blockHeight,
 		avgMixedReadLatency, mixedReadTPS, r.totalMixedReadOps,
 		avgSnapReadLatency, snapReadTPS, r.totalSnapReadOps,
-		avgUpdateLatency, updateTPS, r.totalUpdateKVs, totalUpdateSizeMB,
+		avgUpdateLatency, updateTPS, r.totalUpdateKVs,
 		formatLatency(avgWriteLatency), r.totalBatchWrites, avgKVsPerBatch, avgBatchSizeMB,
 	)
 
