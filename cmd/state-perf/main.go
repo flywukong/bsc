@@ -139,6 +139,10 @@ type PerfRunner struct {
 	totalSnapReadOps   int64
 	totalMixedReadTime time.Duration
 	totalSnapReadTime  time.Duration
+	minMixedReadTime   int64 // stored as nanoseconds for atomic operations
+	maxMixedReadTime   int64 // stored as nanoseconds for atomic operations
+	minSnapReadTime    int64 // stored as nanoseconds for atomic operations
+	maxSnapReadTime    int64 // stored as nanoseconds for atomic operations
 
 	// Update batch statistics - for 230-256MB accumulated batch write
 	totalUpdateKVs        int64      // Total number of KVs in update batches
@@ -146,16 +150,24 @@ type PerfRunner struct {
 	accumulatedUpdateKVs  []KeyValue // In-memory accumulation for 230-256MB batch
 	accumulatedUpdateSize int64      // Current accumulated size in bytes
 	updateMutex           sync.Mutex // Protect accumulated update data
+	minUpdateTime         int64      // stored as nanoseconds for atomic operations
+	maxUpdateTime         int64      // stored as nanoseconds for atomic operations
 
 	// Write batch statistics
 	totalBatchSize   int64 // Total size of all write batches
 	totalBatchWrites int64 // Total number of write batches executed
+	minWriteTime     int64 // stored as nanoseconds for atomic operations
+	maxWriteTime     int64 // stored as nanoseconds for atomic operations
 
 	// Hash calculation statistics
 	totalHashOps    int64
 	totalHashTime   time.Duration
 	totalCommitTime time.Duration // Total commit time for average calculation
 	trieDir         string        // Directory for trie operations
+	minHashTime     int64         // stored as nanoseconds for atomic operations
+	maxHashTime     int64         // stored as nanoseconds for atomic operations
+	minCommitTime   int64         // stored as nanoseconds for atomic operations
+	maxCommitTime   int64         // stored as nanoseconds for atomic operations
 
 	// For interval TPS calculation
 	lastReadOps    int64
@@ -692,6 +704,9 @@ func (r *PerfRunner) processMixedReadsParallel(readKVs []KeyValue, wg *sync.Wait
 				duration := time.Since(start)
 				mixedReadLatencyMetric.Update(duration)
 
+				// Update min/max read times
+				updateMinMaxDuration(&r.minMixedReadTime, &r.maxMixedReadTime, duration)
+
 				if err != nil {
 					// Key might not exist, continue
 				}
@@ -733,7 +748,11 @@ func (r *PerfRunner) processSnapReadsParallel(readKVs []KeyValue, wg *sync.WaitG
 			for _, kv := range kvs {
 				start := time.Now()
 				_, err := r.db.Get(kv.Key)
-				snapReadLatencyMetric.Update(time.Since(start))
+				duration := time.Since(start)
+				snapReadLatencyMetric.Update(duration)
+
+				// Update min/max snap read times
+				updateMinMaxDuration(&r.minSnapReadTime, &r.maxSnapReadTime, duration)
 
 				if err != nil {
 					// Key might not exist, continue
@@ -788,6 +807,9 @@ func (r *PerfRunner) processIndividualUpdates(updateKVs []KeyValue) {
 				err := r.db.Put(kv.Key, newValue)
 				putDuration := time.Since(putStart)
 				updateLatencyMetric.Update(putDuration)
+
+				// Update min/max update times
+				updateMinMaxDuration(&r.minUpdateTime, &r.maxUpdateTime, putDuration)
 
 				if err != nil {
 					log.Warn("Failed to update key", "err", err)
@@ -905,6 +927,9 @@ func (r *PerfRunner) flushAccumulatedWrites() {
 	writeDuration := time.Since(writeStart) // Measure pure write time
 	writeBatchLatencyMetric.Update(writeDuration)
 
+	// Update min/max write times
+	updateMinMaxDuration(&r.minWriteTime, &r.maxWriteTime, writeDuration)
+
 	if err != nil {
 		log.Error("Failed to write batch", "err", err, "kvCount", len(kvs), "sizeMB", float64(batchSize)/(1024*1024))
 	} else {
@@ -967,6 +992,35 @@ func min(a, b int) int {
 	return b
 }
 
+// updateMinMaxDuration safely updates min and max duration values using atomic operations
+func updateMinMaxDuration(currentMin, currentMax *int64, newDuration time.Duration) {
+	newValue := int64(newDuration)
+
+	// Update minimum (initialize to new value if currently 0, otherwise use minimum)
+	for {
+		currentMinValue := atomic.LoadInt64(currentMin)
+		if currentMinValue == 0 || newValue < currentMinValue {
+			if atomic.CompareAndSwapInt64(currentMin, currentMinValue, newValue) {
+				break
+			}
+		} else {
+			break
+		}
+	}
+
+	// Update maximum
+	for {
+		currentMaxValue := atomic.LoadInt64(currentMax)
+		if newValue > currentMaxValue {
+			if atomic.CompareAndSwapInt64(currentMax, currentMaxValue, newValue) {
+				break
+			}
+		} else {
+			break
+		}
+	}
+}
+
 // formatLatency formats latency with appropriate unit (μs, ms, or s)
 func formatLatency(latencyMicroseconds float64) string {
 	if latencyMicroseconds >= 1000000 { // >= 1 second
@@ -976,6 +1030,16 @@ func formatLatency(latencyMicroseconds float64) string {
 	} else {
 		return fmt.Sprintf("%.2f μs", latencyMicroseconds)
 	}
+}
+
+// formatDurationFromNanos formats duration from nanoseconds to appropriate unit
+func formatDurationFromNanos(nanos int64) string {
+	if nanos == 0 {
+		return "0 μs"
+	}
+	duration := time.Duration(nanos)
+	microseconds := float64(duration.Nanoseconds()) / 1000.0
+	return formatLatency(microseconds)
 }
 
 func (r *PerfRunner) printStat() {
@@ -1026,15 +1090,30 @@ func (r *PerfRunner) printStat() {
 
 	// No additional metrics updates needed - only latency timers are updated during operations
 
+	// Get min/max values for display (atomic loads)
+	mixedMinTime := atomic.LoadInt64(&r.minMixedReadTime)
+	mixedMaxTime := atomic.LoadInt64(&r.maxMixedReadTime)
+	snapMinTime := atomic.LoadInt64(&r.minSnapReadTime)
+	snapMaxTime := atomic.LoadInt64(&r.maxSnapReadTime)
+	updateMinTime := atomic.LoadInt64(&r.minUpdateTime)
+	updateMaxTime := atomic.LoadInt64(&r.maxUpdateTime)
+	writeMinTime := atomic.LoadInt64(&r.minWriteTime)
+	writeMaxTime := atomic.LoadInt64(&r.maxWriteTime)
+
 	fmt.Printf(
 		"[%s] Perf In Progress - block height=%d\n"+
-			"  Mixed Read TPS: %.2f, Latency: %.2f μs | Snap Read TPS: %.2f, Latency: %.2f μs\n"+
-			"  Update TPS: %.2f, Latency: %.2f μs  | Write Batch: Latency: %s, Avg KVs: %.0f, Avg Size: %.1f MB, Count: %d\n"+
+			"  Mixed Read TPS: %.2f, Latency: %.2f μs (min: %s, max: %s)\n"+
+			"  Snap Read TPS: %.2f, Latency: %.2f μs (min: %s, max: %s)\n"+
+			"  Update TPS: %.2f, Latency: %.2f μs (min: %s, max: %s)\n"+
+			"  Write Batch: Latency: %s (min: %s, max: %s), Avg KVs: %.0f, Avg Size: %.1f MB, Count: %d\n"+
 			"  Accumulated Updates: %d KVs, %.2f MB (target: 230-256MB)\n",
 		time.Now().Format(time.RFC3339),
 		r.blockHeight,
-		mixedReadTPS, mixedReadLatency, snapReadTPS, snapReadLatency,
-		updateTPS, updateLatency, formatLatency(writeLatency), avgKVsPerBatch, avgBatchSizeMB, r.totalBatchWrites,
+		mixedReadTPS, mixedReadLatency, formatDurationFromNanos(mixedMinTime), formatDurationFromNanos(mixedMaxTime),
+		snapReadTPS, snapReadLatency, formatDurationFromNanos(snapMinTime), formatDurationFromNanos(snapMaxTime),
+		updateTPS, updateLatency, formatDurationFromNanos(updateMinTime), formatDurationFromNanos(updateMaxTime),
+		formatLatency(writeLatency), formatDurationFromNanos(writeMinTime), formatDurationFromNanos(writeMaxTime),
+		avgKVsPerBatch, avgBatchSizeMB, r.totalBatchWrites,
 		accumulatedKVs, accumulatedSizeMB,
 	)
 
@@ -1098,19 +1177,29 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 		avgKVsPerBatch = float64(r.totalWriteOps) / float64(r.totalBatchWrites)
 	}
 
+	// Get final min/max values for display (atomic loads)
+	mixedMinTime := atomic.LoadInt64(&r.minMixedReadTime)
+	mixedMaxTime := atomic.LoadInt64(&r.maxMixedReadTime)
+	snapMinTime := atomic.LoadInt64(&r.minSnapReadTime)
+	snapMaxTime := atomic.LoadInt64(&r.maxSnapReadTime)
+	updateMinTime := atomic.LoadInt64(&r.minUpdateTime)
+	updateMaxTime := atomic.LoadInt64(&r.maxUpdateTime)
+	writeMinTime := atomic.LoadInt64(&r.minWriteTime)
+	writeMaxTime := atomic.LoadInt64(&r.maxWriteTime)
+
 	fmt.Printf(
 		"=== Average Performance Metrics ===\n"+
 			"Elapsed: %v, Block Height: %d\n"+
-			"Mixed Read  - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
-			"Snap Read   - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d\n"+
-			"Update      - Avg Latency: %.2f μs, TPS: %.2f, Total KVs: %d\n"+
-			"Write Batch - Avg Latency: %s, Batch Count: %d, Avg KVs: %.0f, Avg Size: %.1f MB\n",
+			"Mixed Read  - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d (min: %s, max: %s)\n"+
+			"Snap Read   - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d (min: %s, max: %s)\n"+
+			"Update      - Avg Latency: %.2f μs, TPS: %.2f, Total KVs: %d (min: %s, max: %s)\n"+
+			"Write Batch - Avg Latency: %s, Batch Count: %d, Avg KVs: %.0f, Avg Size: %.1f MB (min: %s, max: %s)\n",
 		elapsed,
 		r.blockHeight,
-		avgMixedReadLatency, mixedReadTPS, r.totalMixedReadOps,
-		avgSnapReadLatency, snapReadTPS, r.totalSnapReadOps,
-		avgUpdateLatency, updateTPS, r.totalUpdateKVs,
-		formatLatency(avgWriteLatency), r.totalBatchWrites, avgKVsPerBatch, avgBatchSizeMB,
+		avgMixedReadLatency, mixedReadTPS, r.totalMixedReadOps, formatDurationFromNanos(mixedMinTime), formatDurationFromNanos(mixedMaxTime),
+		avgSnapReadLatency, snapReadTPS, r.totalSnapReadOps, formatDurationFromNanos(snapMinTime), formatDurationFromNanos(snapMaxTime),
+		avgUpdateLatency, updateTPS, r.totalUpdateKVs, formatDurationFromNanos(updateMinTime), formatDurationFromNanos(updateMaxTime),
+		formatLatency(avgWriteLatency), r.totalBatchWrites, avgKVsPerBatch, avgBatchSizeMB, formatDurationFromNanos(writeMinTime), formatDurationFromNanos(writeMaxTime),
 	)
 
 	if remainingKVs > 0 {
@@ -1126,28 +1215,28 @@ func (r *PerfRunner) printHashSummary() {
 		avgHashLatency := float64(r.totalHashTime.Microseconds()) / float64(r.totalHashOps)
 		avgCommitLatency := float64(r.totalCommitTime.Microseconds()) / float64(r.totalHashOps)
 
+		// Get hash min/max values for display (atomic loads)
+		hashMinTime := atomic.LoadInt64(&r.minHashTime)
+		hashMaxTime := atomic.LoadInt64(&r.maxHashTime)
+		commitMinTime := atomic.LoadInt64(&r.minCommitTime)
+		commitMaxTime := atomic.LoadInt64(&r.maxCommitTime)
+
 		fmt.Printf("=== Hash Calculation Summary ===\n")
 		fmt.Printf("Total Hash Operations: %d\n", r.totalHashOps)
 		fmt.Printf("Total Hash Time: %v\n", r.totalHashTime)
 		fmt.Printf("Total Commit Time: %v\n", r.totalCommitTime)
 
-		// Format hash latency with appropriate units
-		if avgHashLatency >= 1000000 { // >= 1 second
-			fmt.Printf("Average Hash Latency: %.2f s\n", avgHashLatency/1000000)
-		} else if avgHashLatency >= 1000 { // >= 1 millisecond
-			fmt.Printf("Average Hash Latency: %.2f ms\n", avgHashLatency/1000)
-		} else {
-			fmt.Printf("Average Hash Latency: %.2f μs\n", avgHashLatency)
-		}
+		// Format hash latency with appropriate units and show min/max
+		fmt.Printf("Average Hash Latency: %s (min: %s, max: %s)\n",
+			formatLatency(avgHashLatency),
+			formatDurationFromNanos(hashMinTime),
+			formatDurationFromNanos(hashMaxTime))
 
-		// Format commit latency with appropriate units
-		if avgCommitLatency >= 1000000 { // >= 1 second
-			fmt.Printf("Average Commit Latency: %.2f s\n", avgCommitLatency/1000000)
-		} else if avgCommitLatency >= 1000 { // >= 1 millisecond
-			fmt.Printf("Average Commit Latency: %.2f ms\n", avgCommitLatency/1000)
-		} else {
-			fmt.Printf("Average Commit Latency: %.2f μs\n", avgCommitLatency)
-		}
+		// Format commit latency with appropriate units and show min/max
+		fmt.Printf("Average Commit Latency: %s (min: %s, max: %s)\n",
+			formatLatency(avgCommitLatency),
+			formatDurationFromNanos(commitMinTime),
+			formatDurationFromNanos(commitMaxTime))
 
 		fmt.Printf("===============================\n")
 	} else {
@@ -1178,11 +1267,17 @@ func (r *PerfRunner) calculateHashRoot() {
 	commitDuration := time.Since(commitStart)
 	commitLatencyMetric.Update(commitDuration)
 
+	// Update min/max commit times
+	updateMinMaxDuration(&r.minCommitTime, &r.maxCommitTime, commitDuration)
+
 	// Measure hash calculation after commit
 	hashAfterStart := time.Now()
 	computedHash := r.theTrie.Hash()
 	hashAfterDuration := time.Since(hashAfterStart)
 	hashLatencyMetric.Update(hashAfterDuration)
+
+	// Update min/max hash times
+	updateMinMaxDuration(&r.minHashTime, &r.maxHashTime, hashAfterDuration)
 
 	// Total time for actual hash operations (only hash after commit)
 	actualHashTime := hashAfterDuration
