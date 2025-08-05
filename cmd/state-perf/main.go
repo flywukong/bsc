@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"math"
 	mathrand "math/rand"
@@ -158,6 +159,14 @@ type PerfRunner struct {
 }
 
 func main() {
+	// 使用加密安全的随机数初始化随机种子
+	var seed int64
+	if err := binary.Read(rand.Reader, binary.BigEndian, &seed); err != nil {
+		// 如果加密随机数失败，使用时间作为后备
+		seed = time.Now().UnixNano()
+	}
+	mathrand.Seed(seed)
+
 	var config PerfConfig
 
 	app := &cli.App{
@@ -554,16 +563,54 @@ func (r *PerfRunner) createTask() *Task {
 }
 
 func (r *PerfRunner) selectRandomKVs(source []KeyValue, count int) []KeyValue {
-	if len(source) == 0 {
+	if len(source) == 0 || count <= 0 {
 		return nil
 	}
 
-	result := make([]KeyValue, 0, count)
-	for i := 0; i < count; i++ {
-		idx := mathrand.Intn(len(source))
-		result = append(result, source[idx])
+	// 如果要选择的数量大于等于源数据长度，直接返回所有数据的随机排列
+	if count >= len(source) {
+		result := make([]KeyValue, len(source))
+		copy(result, source)
+		// Fisher-Yates 洗牌算法
+		for i := len(result) - 1; i > 0; i-- {
+			j := mathrand.Intn(i + 1)
+			result[i], result[j] = result[j], result[i]
+		}
+		return result
 	}
-	return result
+
+	// 使用 reservoir sampling 算法进行无重复随机采样
+	// 这种方法确保每个元素被选中的概率相等，且无重复
+	if count < len(source)/2 {
+		// 当选择数量较少时，使用 map 记录已选择的索引
+		selected := make(map[int]bool, count)
+		result := make([]KeyValue, 0, count)
+
+		for len(result) < count {
+			idx := mathrand.Intn(len(source))
+			if !selected[idx] {
+				selected[idx] = true
+				result = append(result, source[idx])
+			}
+		}
+		return result
+	} else {
+		// 当选择数量较多时，使用 Fisher-Yates 洗牌算法的部分版本
+		// 复制源数据以避免修改原数据
+		temp := make([]KeyValue, len(source))
+		copy(temp, source)
+
+		// 只洗牌前 count 个元素
+		for i := 0; i < count; i++ {
+			j := mathrand.Intn(len(temp)-i) + i
+			temp[i], temp[j] = temp[j], temp[i]
+		}
+
+		// 返回前 count 个元素
+		result := make([]KeyValue, count)
+		copy(result, temp[:count])
+		return result
+	}
 }
 
 func (r *PerfRunner) runInternal(ctx context.Context) {
