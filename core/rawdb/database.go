@@ -644,93 +644,45 @@ func DataTypeByKey(key []byte) DataType {
 // InspectDatabase traverses the entire database and checks the size
 // of all different categories of data.
 func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
-	// Data expansion logic: 1T -> 2T with async batch writing
-	type batchData struct {
-		batch     ethdb.Batch
-		size      int
-		keyCount  int64
-		timestamp time.Time
+	// Data expansion logic: 1T -> 2T with concurrent batch writing
+	type kvPair struct {
+		key   []byte
+		value []byte
+		size  int
 	}
 
-	var (
-		maxBatchSize   = 512 * 1024 * 1024 // 512MB batch size
-		newKeysCreated int64
-		writeErrors    int64
-		currentBatch   = db.NewBatch()
-		currentSize    = 0
-		batchStartTime = time.Now()
-		batchChan      = make(chan *batchData, 30) // Buffer 30 batches
-		wg             sync.WaitGroup
+	const (
+		totalExpectedKeys = 18881610000
+		numWorkers        = 10
+		maxBatchSize      = 512 * 1024 * 1024 // 512MB batch size
 	)
 
-	log.Info("Starting database expansion from 1T to 2T with async batch writing",
-		"maxBatchSize", "512MB", "batchBuffer", 30)
-
-	// Key expansion counters
 	var (
-		accountTriesTotal    int64
-		storageTriesTotal    int64
-		accountSnapsTotal    int64
-		storageSnapsTotal    int64
-		accountTriesExpanded int64
-		storageTriesExpanded int64
-		accountSnapsExpanded int64
-		storageSnapsExpanded int64
+		newKeysCreated    int64
+		totalBytesWritten int64
+		writeErrors       int64
+		duplicateKeys     int64
+		lastProgress      int
+		wg                sync.WaitGroup
+		processedCount    int64
 	)
 
-	// Start async batch writer goroutine
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		batchesProcessed := 0
-		for batchData := range batchChan {
-			start := time.Now()
-			if err := batchData.batch.Write(); err != nil {
-				atomic.AddInt64(&writeErrors, 1)
-				log.Error("Async batch write failed", "err", err, "size", batchData.size)
-			} else {
-				batchesProcessed++
-				writeDuration := time.Since(start)
-				throughput := float64(batchData.size) / writeDuration.Seconds() / (1024 * 1024) // MB/s
+	// Channel for sending key-value pairs to workers
+	kvChan := make(chan kvPair, 1000)
 
-				log.Info("Async batch written",
-					"batchIndex", batchesProcessed,
-					"size", common.StorageSize(batchData.size).String(),
-					"keyCount", batchData.keyCount,
-					"duration", writeDuration,
-					"throughput", fmt.Sprintf("%.2f MB/s", throughput),
-					"bufferTime", time.Since(batchData.timestamp))
-			}
-		}
-		log.Info("Async batch writer finished", "totalBatches", batchesProcessed)
-	}()
+	log.Info("Starting database expansion from 1T to 2T with concurrent batch writing",
+		"workers", numWorkers, "maxBatchSize", "512MB", "expectedKeys", totalExpectedKeys)
 
 	// Helper function to generate new key
 	generateNewKey := func(originalKey []byte) []byte {
 		if len(originalKey) == 0 {
 			return originalKey
 		}
-
-		if len(originalKey) >= 2 {
-			// 长度>=2字节：保持相同长度，修改最后2个字节作为版本标识
-			// For 1T->2T expansion, use "v1" (0x7631)
-			// For future 2T->3T expansion, this could be changed to "v2" (0x7632), etc.
-			newKey := make([]byte, len(originalKey))
-			copy(newKey, originalKey)
-
-			// 将最后2个字节设置为 "v1"
-			newKey[len(newKey)-2] = 'v' // 0x76
-			newKey[len(newKey)-1] = '1' // 0x31
-
-			return newKey
-		} else {
-			// 长度<2字节：在后面添加后缀
-			suffix := []byte("v1")
-			newKey := make([]byte, len(originalKey)+len(suffix))
-			copy(newKey, originalKey)
-			copy(newKey[len(originalKey):], suffix)
-			return newKey
-		}
+		newKey := make([]byte, len(originalKey))
+		copy(newKey, originalKey)
+		// Modify the last byte by adding 1 (with overflow wrap)
+		newKey[len(newKey)-1] = newKey[len(newKey)-1] + 1
+		return newKey
 	}
 
 	// Helper function to shuffle value
@@ -755,420 +707,136 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		return newValue
 	}
 
-	// Helper function to add to batch and flush if needed (non-blocking)
-	addToBatch := func(key, value []byte) {
-		if err := currentBatch.Put(key, value); err != nil {
-			log.Warn("Failed to add to batch", "err", err)
-			atomic.AddInt64(&writeErrors, 1)
-			return
-		}
+	// Start worker goroutines
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			batch := db.NewBatch()
+			currentBatchSize := 0
+			batchStartTime := time.Now()
 
-		currentSize += len(key) + len(value)
-		atomic.AddInt64(&newKeysCreated, 1)
+			for kv := range kvChan {
+				newKey := generateNewKey(kv.key)
+				newValue := shuffleValue(kv.value)
 
-		// Check if batch should be sent for async writing
-		if currentSize >= maxBatchSize {
-			// Send current batch to async writer
-			select {
-			case batchChan <- &batchData{
-				batch:     currentBatch,
-				size:      currentSize,
-				keyCount:  atomic.LoadInt64(&newKeysCreated),
-				timestamp: batchStartTime,
-			}:
-				// Successfully queued batch for async writing
-				log.Debug("Batch queued for async writing", "size", common.StorageSize(currentSize).String())
-			default:
-				// Channel is full, write synchronously to avoid blocking
-				log.Warn("Async batch channel full, writing synchronously")
-				if err := currentBatch.Write(); err != nil {
+				// Check if new key is the same as original key
+				if bytes.Equal(newKey, kv.key) {
+					atomic.AddInt64(&duplicateKeys, 1)
+					keyLen := len(kv.key)
+					if keyLen > 16 {
+						keyLen = 16
+					}
+					log.Warn("New key is same as original key",
+						"key", fmt.Sprintf("%x", kv.key[:keyLen]))
+				}
+
+				if err := batch.Put(newKey, newValue); err != nil {
 					atomic.AddInt64(&writeErrors, 1)
-					log.Error("Synchronous batch write failed", "err", err)
+					log.Error("Failed to add to batch", "err", err, "worker", workerID)
+					continue
+				}
+
+				currentBatchSize += len(newKey) + len(newValue)
+				atomic.AddInt64(&newKeysCreated, 1)
+				atomic.AddInt64(&totalBytesWritten, int64(len(newKey)+len(newValue)))
+
+				// Check if batch should be written
+				if currentBatchSize >= maxBatchSize {
+					if err := batch.Write(); err != nil {
+						atomic.AddInt64(&writeErrors, 1)
+						log.Error("Batch write failed", "err", err, "worker", workerID, "size", currentBatchSize)
+					} else {
+						writeDuration := time.Since(batchStartTime)
+						throughput := float64(currentBatchSize) / writeDuration.Seconds() / (1024 * 1024) // MB/s
+						log.Debug("Batch written",
+							"worker", workerID,
+							"size", common.StorageSize(currentBatchSize).String(),
+							"duration", writeDuration,
+							"throughput", fmt.Sprintf("%.2f MB/s", throughput))
+					}
+
+					batch = db.NewBatch()
+					currentBatchSize = 0
+					batchStartTime = time.Now()
+				}
+
+				// Progress reporting every 10%
+				processed := atomic.LoadInt64(&processedCount)
+				progress := int(processed * 100 / totalExpectedKeys)
+				if progress >= lastProgress+10 && progress != lastProgress {
+					lastProgress = progress
+					totalBytes := atomic.LoadInt64(&totalBytesWritten)
+					log.Info("Data expansion progress",
+						"progress", fmt.Sprintf("%d%%", progress),
+						"processedKeys", processed,
+						"totalBytesWritten", common.StorageSize(totalBytes).String(),
+						"newKeysCreated", atomic.LoadInt64(&newKeysCreated),
+						"duplicateKeys", atomic.LoadInt64(&duplicateKeys))
 				}
 			}
 
-			// Create new batch
-			currentBatch = db.NewBatch()
-			currentSize = 0
-			batchStartTime = time.Now()
-		}
+			// Write remaining batch
+			if currentBatchSize > 0 {
+				if err := batch.Write(); err != nil {
+					atomic.AddInt64(&writeErrors, 1)
+					log.Error("Final batch write failed", "err", err, "worker", workerID)
+				} else {
+					log.Info("Final batch written", "worker", workerID, "size", common.StorageSize(currentBatchSize).String())
+				}
+			}
+		}(i)
 	}
 
+	// Scan database and send key-value pairs to workers
 	it := db.NewIterator(keyPrefix, keyStart)
 	defer it.Release()
 
-	var (
-		count  int64
-		start  = time.Now()
-		logged = time.Now()
+	start := time.Now()
+	logged := time.Now()
+	count := int64(0)
 
-		// Key-value store statistics
-		headers         stat
-		bodies          stat
-		receipts        stat
-		tds             stat
-		numHashPairings stat
-		blobSidecars    stat
-		hashNumPairings stat
-		legacyTries     stat
-		stateLookups    stat
-		accountTries    stat
-		storageTries    stat
-		codes           stat
-		txLookups       stat
-		accountSnaps    stat
-		storageSnaps    stat
-		preimages       stat
-		bloomBits       stat
-		cliqueSnaps     stat
-		parliaSnaps     stat
-
-		// Verkle statistics
-		verkleTries        stat
-		verkleStateLookups stat
-
-		// Les statistic
-		chtTrieNodes   stat
-		bloomTrieNodes stat
-
-		// Meta- and unaccounted data
-		metadata    stat
-		unaccounted stat
-
-		// Totals
-		total common.StorageSize
-	)
-	// Inspect key-value database first.
+	// Process all keys without switch case logic
 	for it.Next() {
-		var (
-			key  = it.Key()
-			size = common.StorageSize(len(key) + len(it.Value()))
-		)
-		total += size
-		switch {
-		case bytes.HasPrefix(key, headerPrefix) && len(key) == (len(headerPrefix)+8+common.HashLength):
-			headers.Add(size)
-			// Expand headers
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case bytes.HasPrefix(key, blockBodyPrefix) && len(key) == (len(blockBodyPrefix)+8+common.HashLength):
-			bodies.Add(size)
-			// Expand block bodies
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case bytes.HasPrefix(key, blockReceiptsPrefix) && len(key) == (len(blockReceiptsPrefix)+8+common.HashLength):
-			receipts.Add(size)
-			// Expand receipts
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case IsLegacyTrieNode(key, it.Value()):
-			legacyTries.Add(size)
-			// Expand legacy trie nodes
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerTDSuffix):
-			tds.Add(size)
-			// Expand header TD data
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case bytes.HasPrefix(key, BlockBlobSidecarsPrefix):
-			blobSidecars.Add(size)
-			// Expand blob sidecars data
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerHashSuffix):
-			numHashPairings.Add(size)
-			// Expand header hash pairings
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case bytes.HasPrefix(key, headerNumberPrefix) && len(key) == (len(headerNumberPrefix)+common.HashLength):
-			hashNumPairings.Add(size)
-			// Expand hash number pairings
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case bytes.HasPrefix(key, stateIDPrefix) && len(key) == len(stateIDPrefix)+common.HashLength:
-			stateLookups.Add(size)
-			// Expand state lookups
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case IsAccountTrieNode(key):
-			accountTries.Add(size)
-			accountTriesTotal++
-			// Expand account trie data: create new key-value pair
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-			accountTriesExpanded++
-		case IsStorageTrieNode(key):
-			storageTries.Add(size)
-			storageTriesTotal++
-			// Expand storage trie data: create new key-value pair
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-			storageTriesExpanded++
-		case bytes.HasPrefix(key, CodePrefix) && len(key) == len(CodePrefix)+common.HashLength:
-			codes.Add(size)
-			// Expand contract codes
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case bytes.HasPrefix(key, txLookupPrefix) && len(key) == (len(txLookupPrefix)+common.HashLength):
-			txLookups.Add(size)
-			// Expand transaction lookups
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength):
-			accountSnaps.Add(size)
-			accountSnapsTotal++
-			// Expand account snapshot data: create new key-value pair
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-			accountSnapsExpanded++
-		case bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength):
-			storageSnaps.Add(size)
-			storageSnapsTotal++
-			// Expand storage snapshot data: create new key-value pair
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-			storageSnapsExpanded++
-		case bytes.HasPrefix(key, PreimagePrefix) && len(key) == (len(PreimagePrefix)+common.HashLength):
-			preimages.Add(size)
-			// Expand preimages
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case bytes.HasPrefix(key, configPrefix) && len(key) == (len(configPrefix)+common.HashLength):
-			metadata.Add(size)
-			// Expand config data
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case bytes.HasPrefix(key, genesisPrefix) && len(key) == (len(genesisPrefix)+common.HashLength):
-			metadata.Add(size)
-			// Expand genesis data
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case bytes.HasPrefix(key, bloomBitsPrefix) && len(key) == (len(bloomBitsPrefix)+10+common.HashLength):
-			bloomBits.Add(size)
-			// Expand bloom bits
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case bytes.HasPrefix(key, BloomBitsIndexPrefix):
-			bloomBits.Add(size)
-			// Expand bloom bits index
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case bytes.HasPrefix(key, CliqueSnapshotPrefix) && len(key) == 7+common.HashLength:
-			cliqueSnaps.Add(size)
-			// Expand clique snapshots
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case bytes.HasPrefix(key, ParliaSnapshotPrefix) && len(key) == 7+common.HashLength:
-			parliaSnaps.Add(size)
-			// Expand parlia snapshots
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case bytes.HasPrefix(key, ChtTablePrefix) ||
-			bytes.HasPrefix(key, ChtIndexTablePrefix) ||
-			bytes.HasPrefix(key, ChtPrefix): // Canonical hash trie
-			chtTrieNodes.Add(size)
-			// Expand CHT trie nodes
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
-		case bytes.HasPrefix(key, BloomTrieTablePrefix) ||
-			bytes.HasPrefix(key, BloomTrieIndexPrefix) ||
-			bytes.HasPrefix(key, BloomTriePrefix): // Bloomtrie sub
-			bloomTrieNodes.Add(size)
-			// Expand bloom trie nodes
-			newKey := generateNewKey(key)
-			newValue := shuffleValue(it.Value())
-			addToBatch(newKey, newValue)
+		key := make([]byte, len(it.Key()))
+		value := make([]byte, len(it.Value()))
+		copy(key, it.Key())
+		copy(value, it.Value())
 
-		// Verkle trie data is detected, determine the sub-category
-		case bytes.HasPrefix(key, VerklePrefix):
-			remain := key[len(VerklePrefix):]
-			switch {
-			case IsAccountTrieNode(remain):
-				verkleTries.Add(size)
-				// Expand verkle tries
-				newKey := generateNewKey(key)
-				newValue := shuffleValue(it.Value())
-				addToBatch(newKey, newValue)
-			case bytes.HasPrefix(remain, stateIDPrefix) && len(remain) == len(stateIDPrefix)+common.HashLength:
-				verkleStateLookups.Add(size)
-				// Expand verkle state lookups
-				newKey := generateNewKey(key)
-				newValue := shuffleValue(it.Value())
-				addToBatch(newKey, newValue)
-			case bytes.Equal(remain, persistentStateIDKey):
-				metadata.Add(size)
-				// Expand metadata
-				newKey := generateNewKey(key)
-				newValue := shuffleValue(it.Value())
-				addToBatch(newKey, newValue)
-			case bytes.Equal(remain, trieJournalKey):
-				metadata.Add(size)
-				// Expand metadata
-				newKey := generateNewKey(key)
-				newValue := shuffleValue(it.Value())
-				addToBatch(newKey, newValue)
-			case bytes.Equal(remain, snapSyncStatusFlagKey):
-				metadata.Add(size)
-				// Expand metadata
-				newKey := generateNewKey(key)
-				newValue := shuffleValue(it.Value())
-				addToBatch(newKey, newValue)
-			default:
-				unaccounted.Add(size)
-				// Expand unaccounted verkle data
-				newKey := generateNewKey(key)
-				newValue := shuffleValue(it.Value())
-				addToBatch(newKey, newValue)
-			}
-		default:
-			var accounted bool
-			for _, meta := range [][]byte{
-				databaseVersionKey, headHeaderKey, headBlockKey, headFastBlockKey,
-				lastPivotKey, fastTrieProgressKey, snapshotDisabledKey, SnapshotRootKey, snapshotJournalKey,
-				snapshotGeneratorKey, snapshotRecoveryKey, txIndexTailKey, fastTxLookupLimitKey,
-				uncleanShutdownKey, badBlockKey, transitionStatusKey, skeletonSyncStatusKey,
-				persistentStateIDKey, trieJournalKey, snapshotSyncStatusKey, snapSyncStatusFlagKey,
-			} {
-				if bytes.Equal(key, meta) {
-					metadata.Add(size)
-					accounted = true
-					break
-				}
-			}
-			if !accounted {
-				unaccounted.Add(size)
-				// Expand unaccounted data too to ensure all data is duplicated
-				newKey := generateNewKey(key)
-				newValue := shuffleValue(it.Value())
-				addToBatch(newKey, newValue)
-			} else {
-				// Also expand accounted metadata to ensure complete duplication
-				newKey := generateNewKey(key)
-				newValue := shuffleValue(it.Value())
-				addToBatch(newKey, newValue)
-			}
+		kvChan <- kvPair{
+			key:   key,
+			value: value,
+			size:  len(key) + len(value),
 		}
+
+		atomic.AddInt64(&processedCount, 1)
 		count++
-		if count%1000 == 0 && time.Since(logged) > 8*time.Second {
-			log.Info("Inspecting database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
+
+		if count%10000 == 0 && time.Since(logged) > 5*time.Second {
+			log.Info("Scanning database", "processedKeys", count, "elapsed", common.PrettyDuration(time.Since(start)))
 			logged = time.Now()
 		}
 	}
 
-	// Final flush: send remaining batch if it has data
-	if currentSize > 0 {
-		select {
-		case batchChan <- &batchData{
-			batch:     currentBatch,
-			size:      currentSize,
-			keyCount:  atomic.LoadInt64(&newKeysCreated),
-			timestamp: batchStartTime,
-		}:
-			log.Info("Final batch queued for async writing", "size", common.StorageSize(currentSize).String())
-		default:
-			// Channel is full, write synchronously
-			log.Info("Writing final batch synchronously")
-			if err := currentBatch.Write(); err != nil {
-				atomic.AddInt64(&writeErrors, 1)
-				log.Error("Final batch write failed", "err", err)
-			}
-		}
-	}
-
-	// Close channel to signal async writer to finish and wait for completion
-	close(batchChan)
-	log.Info("Waiting for async batch writer to complete...")
+	// Close channel and wait for workers to finish
+	close(kvChan)
+	log.Info("Database scan completed, waiting for workers to finish...")
 	wg.Wait()
 
-	finalErrors := atomic.LoadInt64(&writeErrors)
+	// Final statistics
 	finalKeysCreated := atomic.LoadInt64(&newKeysCreated)
+	finalBytesWritten := atomic.LoadInt64(&totalBytesWritten)
+	finalErrors := atomic.LoadInt64(&writeErrors)
+	finalDuplicates := atomic.LoadInt64(&duplicateKeys)
 
-	// Log expansion statistics
 	log.Info("Database expansion completed (1T -> 2T)",
-		"totalNewKeysCreated", finalKeysCreated, "writeErrors", finalErrors,
-		"accountTriesTotal", accountTriesTotal, "accountTriesExpanded", accountTriesExpanded,
-		"storageTriesTotal", storageTriesTotal, "storageTriesExpanded", storageTriesExpanded,
-		"accountSnapsTotal", accountSnapsTotal, "accountSnapsExpanded", accountSnapsExpanded,
-		"storageSnapsTotal", storageSnapsTotal, "storageSnapsExpanded", storageSnapsExpanded)
+		"totalKeysProcessed", count,
+		"newKeysCreated", finalKeysCreated,
+		"totalBytesWritten", common.StorageSize(finalBytesWritten).String(),
+		"writeErrors", finalErrors,
+		"duplicateKeys", finalDuplicates,
+		"totalDuration", common.PrettyDuration(time.Since(start)))
 
-	// Display the database statistic of key-value store.
-	stats := [][]string{
-		{"Key-Value store", "Headers", headers.Size(), headers.Count()},
-		{"Key-Value store", "Bodies", bodies.Size(), bodies.Count()},
-		{"Key-Value store", "Receipt lists", receipts.Size(), receipts.Count()},
-		{"Key-Value store", "Difficulties", tds.Size(), tds.Count()},
-		{"Key-Value store", "BlobSidecars", blobSidecars.Size(), blobSidecars.Count()},
-		{"Key-Value store", "Block number->hash", numHashPairings.Size(), numHashPairings.Count()},
-		{"Key-Value store", "Block hash->number", hashNumPairings.Size(), hashNumPairings.Count()},
-		{"Key-Value store", "Transaction index", txLookups.Size(), txLookups.Count()},
-		{"Key-Value store", "Bloombit index", bloomBits.Size(), bloomBits.Count()},
-		{"Key-Value store", "Contract codes", codes.Size(), codes.Count()},
-		{"Key-Value store", "Hash trie nodes", legacyTries.Size(), legacyTries.Count()},
-		{"Key-Value store", "Path trie state lookups", stateLookups.Size(), stateLookups.Count()},
-		{"Key-Value store", "Path trie account nodes", accountTries.Size(), accountTries.Count()},
-		{"Key-Value store", "Path trie storage nodes", storageTries.Size(), storageTries.Count()},
-		{"Key-Value store", "Verkle trie nodes", verkleTries.Size(), verkleTries.Count()},
-		{"Key-Value store", "Verkle trie state lookups", verkleStateLookups.Size(), verkleStateLookups.Count()},
-		{"Key-Value store", "Trie preimages", preimages.Size(), preimages.Count()},
-		{"Key-Value store", "Account snapshot", accountSnaps.Size(), accountSnaps.Count()},
-		{"Key-Value store", "Storage snapshot", storageSnaps.Size(), storageSnaps.Count()},
-		{"Key-Value store", "Clique snapshots", cliqueSnaps.Size(), cliqueSnaps.Count()},
-		{"Key-Value store", "Parlia snapshots", parliaSnaps.Size(), parliaSnaps.Count()},
-		{"Key-Value store", "Singleton metadata", metadata.Size(), metadata.Count()},
-		{"Light client", "CHT trie nodes", chtTrieNodes.Size(), chtTrieNodes.Count()},
-		{"Light client", "Bloom trie nodes", bloomTrieNodes.Size(), bloomTrieNodes.Count()},
-		{"Data Expansion", "New keys created (1T->2T)", "-", fmt.Sprintf("%d", finalKeysCreated)},
-	}
-	// Inspect all registered append-only file store then.
-	ancients, err := inspectFreezers(db)
-	if err != nil {
-		return err
-	}
-	for _, ancient := range ancients {
-		for _, table := range ancient.sizes {
-			stats = append(stats, []string{
-				fmt.Sprintf("Ancient store (%s)", strings.Title(ancient.name)),
-				strings.Title(table.name),
-				table.size.String(),
-				fmt.Sprintf("%d", ancient.count()),
-			})
-		}
-		total += ancient.size()
-	}
-
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"Database", "Category", "Size", "Items"})
-	table.SetFooter([]string{"", "Total", total.String(), " "})
-	table.AppendBulk(stats)
-	table.Render()
-
-	if unaccounted.size > 0 {
-		log.Error("Database contains unaccounted data", "size", unaccounted.size, "count", unaccounted.count)
-	}
 	return nil
 }
 
