@@ -36,6 +36,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/trie"
@@ -356,19 +357,8 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 }
 
 func loadDataSet(testCaseDir string) (*DataSet, error) {
-	// Create a temporary node for opening the test-case database
-	cfg := &node.Config{
-		Name:    "temp-loader",
-		DataDir: testCaseDir,
-	}
-	tempStack, err := node.New(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temporary node: %v", err)
-	}
-	defer tempStack.Close()
-
-	// Open test-case database using OpenDatabaseWithFreezer
-	db, err := tempStack.OpenDatabaseWithFreezer("", 4096, 32766, "", "", true, false) // readonly
+	// Open test-case pebble database using simple pebble.New
+	db, err := pebble.New(testCaseDir, 4096, 32766, "", true) // readonly
 	if err != nil {
 		return nil, fmt.Errorf("failed to open test-case database: %v", err)
 	}
