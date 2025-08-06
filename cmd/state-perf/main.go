@@ -140,14 +140,11 @@ type PerfRunner struct {
 	maxWriteTime     int64 // stored as nanoseconds for atomic operations
 
 	// Hash calculation statistics
-	totalHashOps    int64
-	totalHashTime   time.Duration
-	totalCommitTime time.Duration // Total commit time for average calculation
-	trieDir         string        // Directory for trie operations
-	minHashTime     int64         // stored as nanoseconds for atomic operations
-	maxHashTime     int64         // stored as nanoseconds for atomic operations
-	minCommitTime   int64         // stored as nanoseconds for atomic operations
-	maxCommitTime   int64         // stored as nanoseconds for atomic operations
+	totalHashOps  int64
+	totalHashTime time.Duration
+	trieDir       string // Directory for trie operations
+	minHashTime   int64  // stored as nanoseconds for atomic operations
+	maxHashTime   int64  // stored as nanoseconds for atomic operations
 
 	// For interval TPS calculation
 	lastReadOps    int64
@@ -1225,30 +1222,20 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 func (r *PerfRunner) printHashSummary() {
 	if r.totalHashOps > 0 {
 		avgHashLatency := float64(r.totalHashTime.Microseconds()) / float64(r.totalHashOps)
-		avgCommitLatency := float64(r.totalCommitTime.Microseconds()) / float64(r.totalHashOps)
 
 		// Get hash min/max values for display (atomic loads)
 		hashMinTime := atomic.LoadInt64(&r.minHashTime)
 		hashMaxTime := atomic.LoadInt64(&r.maxHashTime)
-		commitMinTime := atomic.LoadInt64(&r.minCommitTime)
-		commitMaxTime := atomic.LoadInt64(&r.maxCommitTime)
 
 		fmt.Printf("=== Hash Calculation Summary ===\n")
 		fmt.Printf("Total Hash Operations: %d\n", r.totalHashOps)
 		fmt.Printf("Total Hash Time: %v\n", r.totalHashTime)
-		fmt.Printf("Total Commit Time: %v\n", r.totalCommitTime)
 
 		// Format hash latency with appropriate units and show min/max
 		fmt.Printf("Average Hash Latency: %s (min: %s, max: %s)\n",
 			formatLatency(avgHashLatency),
 			formatDurationFromNanos(hashMinTime),
 			formatDurationFromNanos(hashMaxTime))
-
-		// Format commit latency with appropriate units and show min/max
-		fmt.Printf("Average Commit Latency: %s (min: %s, max: %s)\n",
-			formatLatency(avgCommitLatency),
-			formatDurationFromNanos(commitMinTime),
-			formatDurationFromNanos(commitMaxTime))
 
 		fmt.Printf("===============================\n")
 	} else {
@@ -1273,46 +1260,23 @@ func (r *PerfRunner) calculateHashRoot() {
 		return
 	}
 
-	// Execute commit operation
-	commitStart := time.Now()
-	newRoot, nodes := r.theTrie.Commit(false)
-	commitDuration := time.Since(commitStart)
-
-	// Update min/max commit times
-	updateMinMaxDuration(&r.minCommitTime, &r.maxCommitTime, commitDuration)
-
-	// Measure hash calculation after commit
-	hashAfterStart := time.Now()
+	// Measure hash calculation
+	hashStart := time.Now()
 	computedHash := r.theTrie.Hash()
-	hashAfterDuration := time.Since(hashAfterStart)
+	hashDuration := time.Since(hashStart)
 
 	// Update min/max hash times
-	updateMinMaxDuration(&r.minHashTime, &r.maxHashTime, hashAfterDuration)
+	updateMinMaxDuration(&r.minHashTime, &r.maxHashTime, hashDuration)
 
-	// Total time for actual hash operations (only hash after commit)
-	actualHashTime := hashAfterDuration
-
-	// Calculate updated nodes count, prevent nil pointer dereference
-	var nodesUpdated int
-	if nodes != nil && nodes.Nodes != nil {
-		nodesUpdated = len(nodes.Nodes)
-	}
-
-	// Record results with detailed timing
+	// Record results with timing
 	log.Info("Hash calculation with real blockchain data",
 		"computed_hash", computedHash.Hex(),
-		"new_root", newRoot.Hex(),
-		"commit_time_μs", commitDuration.Microseconds(),
-		"hash_after_μs", hashAfterDuration.Microseconds(),
-		"commit_time_ns", commitDuration.Nanoseconds(),
-		"hash_after_ns", hashAfterDuration.Nanoseconds(),
-		"actual_hash_time_μs", actualHashTime.Microseconds(),
-		"nodes_updated", nodesUpdated)
+		"hash_time_μs", hashDuration.Microseconds(),
+		"hash_time_ns", hashDuration.Nanoseconds())
 
-	// Update statistics using only the actual hash calculation time
+	// Update statistics using the hash calculation time
 	atomic.AddInt64(&r.totalHashOps, 1)
-	atomic.AddInt64((*int64)(&r.totalHashTime), int64(actualHashTime))
-	atomic.AddInt64((*int64)(&r.totalCommitTime), int64(commitDuration))
+	atomic.AddInt64((*int64)(&r.totalHashTime), int64(hashDuration))
 }
 
 // initializeTrie initializes the trie components once
