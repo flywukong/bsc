@@ -679,7 +679,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			return originalKey
 		}
 
-		if len(originalKey) >= 2 {
+		if len(originalKey) >= 4 {
 			// 长度>=2字节：保持相同长度，修改最后2个字节作为版本标识
 			// For 1T->2T expansion, use "v1" (0x7631)
 			// For future 2T->3T expansion, this could be changed to "v2" (0x7632), etc.
@@ -693,7 +693,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			return newKey
 		} else {
 			// 长度<2字节：在后面添加后缀
-			suffix := []byte("v1")
+			suffix := []byte("1")
 			newKey := make([]byte, len(originalKey)+len(suffix))
 			copy(newKey, originalKey)
 			copy(newKey[len(originalKey):], suffix)
@@ -763,6 +763,9 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 						atomic.AddInt64(&writeErrors, 1)
 						log.Error("Batch write failed", "err", err, "worker", workerID, "size", currentBatchSize)
 					} else {
+						// Increment processedCount only after successful batch write
+						atomic.AddInt64(&processedCount, int64(batch.ValueSize()/1024)) // Approximate key count in this batch
+
 						writeDuration := time.Since(batchStartTime)
 						throughput := float64(currentBatchSize) / writeDuration.Seconds() / (1024 * 1024) // MB/s
 						log.Debug("Batch written",
@@ -770,25 +773,25 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 							"size", common.StorageSize(currentBatchSize).String(),
 							"duration", writeDuration,
 							"throughput", fmt.Sprintf("%.2f MB/s", throughput))
+
+						// Progress reporting every 10%
+						processed := atomic.LoadInt64(&processedCount)
+						progress := int(processed * 100 / totalExpectedKeys)
+						if progress >= lastProgress+10 && progress != lastProgress {
+							lastProgress = progress
+							totalBytes := atomic.LoadInt64(&totalBytesWritten)
+							log.Info("Data expansion progress",
+								"progress", fmt.Sprintf("%d%%", progress),
+								"processedKeys", processed,
+								"totalBytesWritten", common.StorageSize(totalBytes).String(),
+								"newKeysCreated", atomic.LoadInt64(&newKeysCreated),
+								"duplicateKeys", atomic.LoadInt64(&duplicateKeys))
+						}
 					}
 
 					batch = db.NewBatch()
 					currentBatchSize = 0
 					batchStartTime = time.Now()
-				}
-
-				// Progress reporting every 10%
-				processed := atomic.LoadInt64(&processedCount)
-				progress := int(processed * 100 / totalExpectedKeys)
-				if progress >= lastProgress+10 && progress != lastProgress {
-					lastProgress = progress
-					totalBytes := atomic.LoadInt64(&totalBytesWritten)
-					log.Info("Data expansion progress",
-						"progress", fmt.Sprintf("%d%%", progress),
-						"processedKeys", processed,
-						"totalBytesWritten", common.StorageSize(totalBytes).String(),
-						"newKeysCreated", atomic.LoadInt64(&newKeysCreated),
-						"duplicateKeys", atomic.LoadInt64(&duplicateKeys))
 				}
 			}
 
