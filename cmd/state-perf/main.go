@@ -36,7 +36,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/trie"
@@ -94,7 +93,7 @@ type Task struct {
 
 type PerfRunner struct {
 	dataSet  *DataSet
-	db       *pebble.Database
+	db       ethdb.Database // Benchmark database for read/write/update operations
 	config   PerfConfig
 	taskChan chan *Task
 	ctx      *cli.Context     // CLI context for database operations
@@ -316,15 +315,22 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 		"accountSnaps", len(dataSet.AccountSnaps),
 		"storageSnaps", len(dataSet.StorageSnaps))
 
-	// Create benchmark database
-	benchDB, err := pebble.New(config.BenchDBPath, config.CacheSize, config.Handles, "chaindata", false)
+	// Create node stack for database operations
+	stack, err := makeConfigNode(c, config.BenchDBPath)
+	if err != nil {
+		return fmt.Errorf("failed to create node stack: %v", err)
+	}
+	defer stack.Close()
+
+	// Create benchmark database using OpenDatabaseWithFreezer
+	benchDB, err := stack.OpenDatabaseWithFreezer("chaindata", config.CacheSize, config.Handles, "", "", false, false)
 	if err != nil {
 		return fmt.Errorf("failed to create benchmark database: %v", err)
 	}
 	defer benchDB.Close()
 
 	// Create and start performance runner
-	runner := NewPerfRunner(dataSet, benchDB, *config, c)
+	runner := NewPerfRunner(dataSet, benchDB, *config, c, stack)
 	defer runner.Close() // Ensure cleanup
 
 	ctx, cancel := context.WithTimeout(context.Background(), config.RuntimeDur)
@@ -350,8 +356,19 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 }
 
 func loadDataSet(testCaseDir string) (*DataSet, error) {
-	// Open test-case pebble database
-	db, err := pebble.New(testCaseDir, 4096, 32766, "", true) // readonly
+	// Create a temporary node for opening the test-case database
+	cfg := &node.Config{
+		Name:    "temp-loader",
+		DataDir: testCaseDir,
+	}
+	tempStack, err := node.New(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temporary node: %v", err)
+	}
+	defer tempStack.Close()
+
+	// Open test-case database using OpenDatabaseWithFreezer
+	db, err := tempStack.OpenDatabaseWithFreezer("", 4096, 32766, "", "", true, false) // readonly
 	if err != nil {
 		return nil, fmt.Errorf("failed to open test-case database: %v", err)
 	}
@@ -410,13 +427,7 @@ func loadDataSet(testCaseDir string) (*DataSet, error) {
 	return dataSet, nil
 }
 
-func NewPerfRunner(dataSet *DataSet, db *pebble.Database, config PerfConfig, ctx *cli.Context) *PerfRunner {
-	// Create a new node for chainDB
-	stack, err := makeConfigNode(ctx, config.BenchDBPath)
-	if err != nil {
-		log.Crit("Failed to create node for chainDB", "err", err)
-	}
-
+func NewPerfRunner(dataSet *DataSet, db ethdb.Database, config PerfConfig, ctx *cli.Context, stack *node.Node) *PerfRunner {
 	chainDB := utils.MakeChainDatabase(ctx, stack, true, false)
 
 	return &PerfRunner{
@@ -675,7 +686,7 @@ func (r *PerfRunner) processTask(task *Task) {
 	// Process update operations sequentially - individual db.Put for each KV
 	// Note: time is now measured inside processIndividualUpdates for each db.Put
 	if len(task.UpdateKVs) > 0 {
-		//r.processIndividualUpdates(task.UpdateKVs)
+		r.processIndividualUpdates(task.UpdateKVs)
 	}
 
 	// Accumulate write operations in memory for 256MB batch write
