@@ -1383,7 +1383,7 @@ func (r *PerfRunner) initializeTrie() error {
 func makeConfigNode(ctx *cli.Context, benchDBPath string) (*node.Node, error) {
 	// Create default configuration
 	cfg := node.DefaultConfig
-	cfg.Name = ""
+
 	cfg.DataDir = benchDBPath // Use bench-db path as data directory
 
 	// Apply any CLI context flags to node config if available
@@ -1392,8 +1392,10 @@ func makeConfigNode(ctx *cli.Context, benchDBPath string) (*node.Node, error) {
 		utils.SetNodeConfig(ctx, &cfg)
 		// Override DataDir with benchDBPath to ensure we use the correct path
 		cfg.DataDir = benchDBPath
+		// Force clear Name to prevent extra directory creation
 	}
 
+	log.Info("Creating node with config", "dataDir", cfg.DataDir, "name", cfg.Name)
 	// Create the node
 	stack, err := node.New(&cfg)
 	if err != nil {
