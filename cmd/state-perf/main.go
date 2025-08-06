@@ -675,7 +675,7 @@ func (r *PerfRunner) processTask(task *Task) {
 	// Process update operations sequentially - individual db.Put for each KV
 	// Note: time is now measured inside processIndividualUpdates for each db.Put
 	if len(task.UpdateKVs) > 0 {
-		r.processIndividualUpdates(task.UpdateKVs)
+		//r.processIndividualUpdates(task.UpdateKVs)
 	}
 
 	// Accumulate write operations in memory for 256MB batch write
