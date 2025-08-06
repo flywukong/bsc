@@ -418,7 +418,9 @@ func loadDataSet(testCaseDir string) (*DataSet, error) {
 }
 
 func NewPerfRunner(dataSet *DataSet, db ethdb.Database, config PerfConfig, ctx *cli.Context, stack *node.Node) *PerfRunner {
-	chainDB := utils.MakeChainDatabase(ctx, stack, true, false)
+	// Use the same database for both benchmark operations and chain operations
+	// to avoid lock conflicts
+	chainDB := db
 
 	return &PerfRunner{
 		dataSet:      dataSet,
