@@ -1381,24 +1381,21 @@ func (r *PerfRunner) initializeTrie() error {
 
 // makeConfigNode creates a simplified node configuration for database access
 func makeConfigNode(ctx *cli.Context, benchDBPath string) (*node.Node, error) {
-	// Create default configuration
-	cfg := node.DefaultConfig
-	cfg.Name = ""             // Clear name to prevent extra directory
-	cfg.DataDir = benchDBPath // Use bench-db path as data directory
-
-	// Apply any CLI context flags to node config if available
-	// This will properly handle other node flags
-	if ctx != nil {
-		utils.SetNodeConfig(ctx, &cfg)
-		// Override DataDir with benchDBPath to ensure we use the correct path
-		cfg.DataDir = benchDBPath
-		// Force clear Name again after SetNodeConfig to prevent extra directory creation
-		cfg.Name = ""
+	// Create a completely clean configuration to avoid any default interference
+	cfg := &node.Config{
+		Name:      "geth",      // Set to "geth" for standard geth node behavior
+		DataDir:   benchDBPath, // Use benchDBPath directly as data dir
+		P2P:       node.DefaultConfig.P2P,
+		HTTPPort:  node.DefaultConfig.HTTPPort,
+		HTTPHost:  node.DefaultConfig.HTTPHost,
+		WSPort:    node.DefaultConfig.WSPort,
+		WSHost:    node.DefaultConfig.WSHost,
+		LogConfig: node.DefaultConfig.LogConfig,
 	}
 
-	log.Info("Creating node with config", "dataDir", cfg.DataDir, "name", cfg.Name)
+	log.Info("Creating node with clean config", "dataDir", cfg.DataDir, "name", cfg.Name)
 	// Create the node
-	stack, err := node.New(&cfg)
+	stack, err := node.New(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create protocol stack: %v", err)
 	}
