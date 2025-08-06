@@ -18,6 +18,7 @@ package rawdb
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -675,28 +676,34 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 
 	// Helper function to generate new key
 	generateNewKey := func(originalKey []byte) []byte {
-		if len(originalKey) == 0 {
-			return originalKey
-		}
+		keyLen := len(originalKey)
 
-		if len(originalKey) >= 4 {
-			// 长度>=2字节：保持相同长度，修改最后2个字节作为版本标识
-			// For 1T->2T expansion, use "v1" (0x7631)
-			// For future 2T->3T expansion, this could be changed to "v2" (0x7632), etc.
-			newKey := make([]byte, len(originalKey))
-			copy(newKey, originalKey)
+		switch {
+		case keyLen == 0:
+			// 空 key，返回 1 字节 v1
+			return []byte{0x01}
 
-			// 将最后2个字节设置为 "v1"
-			newKey[len(newKey)-2] = 'v' // 0x76
-			newKey[len(newKey)-1] = '1' // 0x31
-
+		case keyLen == 1:
+			// 扩展 1 字节：变成 2 字节后可加版本
+			newKey := make([]byte, 2)
+			newKey[0] = originalKey[0]
+			newKey[1] = 0x01
 			return newKey
-		} else {
-			// 长度<2字节：在后面添加后缀
-			suffix := []byte("1")
-			newKey := make([]byte, len(originalKey)+len(suffix))
+
+		default:
+			// 正常 key：保留原始长度，覆盖最后两字节作为 version
+			newKey := make([]byte, keyLen)
 			copy(newKey, originalKey)
-			copy(newKey[len(originalKey):], suffix)
+
+			// 读取现有版本
+			currentVer := binary.BigEndian.Uint16(originalKey[keyLen-2:])
+			if currentVer == 0 || currentVer > 32767 {
+				// 非标准版本尾部，强制写入 v1
+				binary.BigEndian.PutUint16(newKey[keyLen-2:], 1)
+			} else {
+				// 正常版本 +1
+				binary.BigEndian.PutUint16(newKey[keyLen-2:], currentVer+1)
+			}
 			return newKey
 		}
 	}
@@ -743,8 +750,12 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 					if keyLen > 16 {
 						keyLen = 16
 					}
-					log.Warn("New key is same as original key",
-						"key", fmt.Sprintf("%x", kv.key[:keyLen]))
+					log.Error("CRITICAL: New key is same as original key",
+						"originalKey", fmt.Sprintf("%x", kv.key[:keyLen]),
+						"originalKeyLen", len(kv.key),
+						"lastTwoBytes", fmt.Sprintf("%x %x", kv.key[len(kv.key)-2], kv.key[len(kv.key)-1]),
+						"newKey", fmt.Sprintf("%x", newKey[:keyLen]),
+						"newKeyLen", len(newKey))
 				}
 
 				if err := batch.Put(newKey, newValue); err != nil {
