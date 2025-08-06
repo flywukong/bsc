@@ -398,8 +398,8 @@ func (c *Config) ResolvePath(path string) string {
 			return oldpath
 		}
 	}
-	fmt.Println("instance dir", c.instanceDir())
-	return filepath.Join(c.DataDir+"/geth", path)
+
+	return filepath.Join(c.instanceDir(), path)
 }
 
 func (c *Config) instanceDir() string {

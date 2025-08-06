@@ -678,11 +678,27 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		if len(originalKey) == 0 {
 			return originalKey
 		}
-		newKey := make([]byte, len(originalKey))
-		copy(newKey, originalKey)
-		// Modify the last byte by adding 1 (with overflow wrap)
-		newKey[len(newKey)-1] = newKey[len(newKey)-1] + 1
-		return newKey
+
+		if len(originalKey) >= 2 {
+			// 长度>=2字节：保持相同长度，修改最后2个字节作为版本标识
+			// For 1T->2T expansion, use "v1" (0x7631)
+			// For future 2T->3T expansion, this could be changed to "v2" (0x7632), etc.
+			newKey := make([]byte, len(originalKey))
+			copy(newKey, originalKey)
+
+			// 将最后2个字节设置为 "v1"
+			newKey[len(newKey)-2] = 'v' // 0x76
+			newKey[len(newKey)-1] = '1' // 0x31
+
+			return newKey
+		} else {
+			// 长度<2字节：在后面添加后缀
+			suffix := []byte("v1")
+			newKey := make([]byte, len(originalKey)+len(suffix))
+			copy(newKey, originalKey)
+			copy(newKey[len(originalKey):], suffix)
+			return newKey
+		}
 	}
 
 	// Helper function to shuffle value
