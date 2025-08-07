@@ -419,10 +419,10 @@ func loadDataSet(testCaseDir string) (*DataSet, error) {
 
 func NewPerfRunner(dataSet *DataSet, db ethdb.Database, config PerfConfig, ctx *cli.Context, stack *node.Node) *PerfRunner {
 	// Use the same database for both benchmark operations and chain operations
-	// to avoid lock conflicts
+	// to avoid lock conflicts since they would access the same database files anyway
 	chainDB := db
 
-	return &PerfRunner{
+	runner := &PerfRunner{
 		dataSet:      dataSet,
 		db:           db,
 		config:       config,
@@ -432,6 +432,13 @@ func NewPerfRunner(dataSet *DataSet, db ethdb.Database, config PerfConfig, ctx *
 		stack:        stack,
 		lastStatTime: time.Now(),
 	}
+
+	// Initialize trie during construction to detect issues early
+	if err := runner.initializeTrie(); err != nil {
+		log.Warn("Failed to initialize trie during construction", "err", err)
+	}
+
+	return runner
 }
 
 // Close cleans up PerfRunner resources
@@ -1250,16 +1257,9 @@ func (r *PerfRunner) printHashSummary() {
 
 // calculateHashRoot performs trie hash calculation for performance measurement
 func (r *PerfRunner) calculateHashRoot() {
-	// Initialize trie components only once
+	// Trie should already be initialized during construction
 	if r.trieDB == nil || r.theTrie == nil {
-		if err := r.initializeTrie(); err != nil {
-			log.Warn("Failed to initialize trie", "err", err)
-			return
-		}
-		// For the first call, don't count initialization time in hash statistics
-		// Just update the operation count
-		atomic.AddInt64(&r.totalHashOps, 1)
-		log.Info("Trie initialization completed for first hash calculation")
+		log.Warn("Trie not initialized, skipping hash calculation")
 		return
 	}
 
@@ -1326,7 +1326,7 @@ func (r *PerfRunner) initializeTrie() error {
 	var config *triedb.Config
 	if dbScheme == rawdb.PathScheme {
 		config = &triedb.Config{
-			PathDB: utils.PathDBConfigAddJournalFilePath(r.stack, pathdb.ReadOnly),
+			PathDB: utils.PathDBConfigAddJournalFilePath(r.stack, pathdb.Defaults),
 			Cache:  0,
 		}
 	} else if dbScheme == rawdb.HashScheme {
