@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -653,7 +654,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 
 	const (
 		totalExpectedKeys = 18881610000
-		numWorkers        = 10
+		numWorkers        = 15
 		maxBatchSize      = 512 * 1024 * 1024 // 512MB batch size
 	)
 
@@ -697,6 +698,9 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			if originalKey[keyLen-2] == 0x00 && originalKey[keyLen-1] == 0x01 {
 				newKey[keyLen-2] = 0x00
 				newKey[keyLen-1] = 0x02
+			} else if originalKey[keyLen-2] == 0x00 && originalKey[keyLen-1] == 0x02 {
+				newKey[keyLen-2] = 0x01
+				newKey[keyLen-1] = 0x03
 			} else {
 				newKey[keyLen-2] = 0x00
 				newKey[keyLen-1] = 0x01
@@ -710,18 +714,21 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		if len(originalValue) <= 1 {
 			return originalValue
 		}
+
 		newValue := make([]byte, len(originalValue))
 		copy(newValue, originalValue)
 
-		// Simple shuffle: swap bytes in a pattern
+		// Simple shuffle: swap bytes in a deterministic pattern
 		for i := 0; i < len(newValue)/2; i++ {
 			j := (i + len(newValue)/2) % len(newValue)
 			newValue[i], newValue[j] = newValue[j], newValue[i]
 		}
 
-		// XOR with a pattern to further randomize
+		// XOR with a random 1-byte key to add more entropy
+		var xorKey [1]byte
+		rand.Read(xorKey[:])
 		for i := range newValue {
-			newValue[i] ^= byte(i % 255)
+			newValue[i] ^= xorKey[0]
 		}
 
 		return newValue
