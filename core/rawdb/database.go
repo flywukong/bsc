@@ -690,11 +690,17 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			return newKey
 
 		default:
-			// Overwrite last 2 bytes with fixed version
 			newKey := make([]byte, keyLen)
 			copy(newKey, originalKey)
-			newKey[keyLen-2] = 0x00
-			newKey[keyLen-1] = 0x01
+
+			// 检查最后两字节
+			if originalKey[keyLen-2] == 0x00 && originalKey[keyLen-1] == 0x01 {
+				newKey[keyLen-2] = 0x00
+				newKey[keyLen-1] = 0x02
+			} else {
+				newKey[keyLen-2] = 0x00
+				newKey[keyLen-1] = 0x01
+			}
 			return newKey
 		}
 	}
