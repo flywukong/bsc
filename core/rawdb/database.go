@@ -751,7 +751,6 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 					log.Error("CRITICAL: New key is same as original key",
 						"originalKey", fmt.Sprintf("%x", kv.key[:keyLen]),
 						"originalKeyLen", len(kv.key),
-						"lastTwoBytes", fmt.Sprintf("%x %x", kv.key[len(kv.key)-2], kv.key[len(kv.key)-1]),
 						"newKey", fmt.Sprintf("%x", newKey[:keyLen]),
 						"newKeyLen", len(newKey))
 				}
