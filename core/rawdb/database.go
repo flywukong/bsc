@@ -18,7 +18,6 @@ package rawdb
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -680,30 +679,22 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 
 		switch {
 		case keyLen == 0:
-			// 空 key，返回 1 字节 v1
-			return []byte{0x01}
+			// Empty key → just return version
+			return []byte{0x00, 0x01}
 
 		case keyLen == 1:
-			// 扩展 1 字节：变成 2 字节后可加版本
+			// Extend by 1 byte to allow room for 2-byte version
 			newKey := make([]byte, 2)
 			newKey[0] = originalKey[0]
 			newKey[1] = 0x01
 			return newKey
 
 		default:
-			// 正常 key：保留原始长度，覆盖最后两字节作为 version
+			// Overwrite last 2 bytes with fixed version
 			newKey := make([]byte, keyLen)
 			copy(newKey, originalKey)
-
-			// 读取现有版本
-			currentVer := binary.BigEndian.Uint16(originalKey[keyLen-2:])
-			if currentVer == 0 || currentVer > 32767 {
-				// 非标准版本尾部，强制写入 v1
-				binary.BigEndian.PutUint16(newKey[keyLen-2:], 1)
-			} else {
-				// 正常版本 +1
-				binary.BigEndian.PutUint16(newKey[keyLen-2:], currentVer+1)
-			}
+			newKey[keyLen-2] = 0x00
+			newKey[keyLen-1] = 0x01
 			return newKey
 		}
 	}
