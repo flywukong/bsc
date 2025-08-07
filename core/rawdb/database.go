@@ -753,6 +753,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 						"originalKeyLen", len(kv.key),
 						"newKey", fmt.Sprintf("%x", newKey[:keyLen]),
 						"newKeyLen", len(newKey))
+					continue
 				}
 
 				if err := batch.Put(newKey, newValue); err != nil {
