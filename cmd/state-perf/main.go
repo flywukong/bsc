@@ -1326,7 +1326,7 @@ func (r *PerfRunner) initializeTrie() error {
 	var config *triedb.Config
 	if dbScheme == rawdb.PathScheme {
 		config = &triedb.Config{
-			PathDB: utils.PathDBConfigAddJournalFilePath(r.stack, pathdb.Defaults),
+			PathDB: utils.PathDBConfigAddJournalFilePath(r.stack, pathdb.ReadOnly),
 			Cache:  0,
 		}
 	} else if dbScheme == rawdb.HashScheme {
