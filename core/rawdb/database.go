@@ -676,37 +676,31 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 
 	// Helper function to generate new key
 	generateNewKey := func(originalKey []byte) []byte {
-		keyLen := len(originalKey)
-
-		switch {
-		case keyLen == 0:
-			// Empty key → just return version
-			return []byte{0x00, 0x01}
-
-		case keyLen == 1:
-			// Extend by 1 byte to allow room for 2-byte version
-			newKey := make([]byte, 2)
-			newKey[0] = originalKey[0]
-			newKey[1] = 0x01
-			return newKey
-
-		default:
-			newKey := make([]byte, keyLen)
-			copy(newKey, originalKey)
-
-			// 检查最后两字节
-			if originalKey[keyLen-2] == 0x00 && originalKey[keyLen-1] == 0x01 {
-				newKey[keyLen-2] = 0x00
-				newKey[keyLen-1] = 0x02
-			} else if originalKey[keyLen-2] == 0x00 && originalKey[keyLen-1] == 0x02 {
-				newKey[keyLen-2] = 0x01
-				newKey[keyLen-1] = 0x03
-			} else {
-				newKey[keyLen-2] = 0x00
-				newKey[keyLen-1] = 0x01
-			}
-			return newKey
+		if len(originalKey) <= 2 {
+			return originalKey
 		}
+
+		newKey := make([]byte, len(originalKey))
+		copy(newKey, originalKey)
+
+		mid := len(originalKey) - 2
+		for i := 0; i < mid/2; i++ {
+			j := (i + mid/2) % mid
+			newKey[i], newKey[j] = newKey[j], newKey[i]
+		}
+
+		var xorKey [1]byte
+		rand.Read(xorKey[:])
+		for i := 0; i < mid; i++ {
+			newKey[i] ^= xorKey[0]
+		}
+
+		// 保留末尾两字节版本号不变
+		newKey[len(originalKey)-2] = originalKey[len(originalKey)-2]
+		newKey[len(originalKey)-1] = originalKey[len(originalKey)-1]
+
+		return newKey
+
 	}
 
 	// Helper function to shuffle value
