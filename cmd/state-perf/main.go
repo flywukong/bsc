@@ -687,18 +687,14 @@ func (r *PerfRunner) runInternal(ctx context.Context) {
 			} else {
 				// Warmup: only perform reads (mixed + snaps), skip writes/updates
 				if len(task.MixedReadKVs) > 0 {
-					readStart := time.Now()
 					var readWG sync.WaitGroup
 					r.processMixedReadsParallel(task.MixedReadKVs, &readWG)
 					readWG.Wait()
-					atomic.AddInt64((*int64)(&r.totalMixedReadTime), int64(time.Since(readStart)))
 				}
 				if len(task.SnapReadKVs) > 0 {
-					readStart := time.Now()
 					var readWG sync.WaitGroup
 					r.processSnapReadsParallel(task.SnapReadKVs, &readWG)
 					readWG.Wait()
-					atomic.AddInt64((*int64)(&r.totalSnapReadTime), int64(time.Since(readStart)))
 				}
 				// Note: don't accumulate writes or do updates in warmup
 			}
