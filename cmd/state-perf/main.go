@@ -121,10 +121,13 @@ type PerfRunner struct {
 	totalSnapReadOps   int64
 	totalMixedReadTime time.Duration
 	totalSnapReadTime  time.Duration
-	minMixedReadTime   int64 // stored as nanoseconds for atomic operations
-	maxMixedReadTime   int64 // stored as nanoseconds for atomic operations
-	minSnapReadTime    int64 // stored as nanoseconds for atomic operations
-	maxSnapReadTime    int64 // stored as nanoseconds for atomic operations
+	// Histograms for percentiles (microsecond buckets rounded to powers of two)
+	mixedLatencyHist [64]int64
+	snapLatencyHist  [64]int64
+	minMixedReadTime int64 // stored as nanoseconds for atomic operations
+	maxMixedReadTime int64 // stored as nanoseconds for atomic operations
+	minSnapReadTime  int64 // stored as nanoseconds for atomic operations
+	maxSnapReadTime  int64 // stored as nanoseconds for atomic operations
 
 	// Update batch statistics - for 230-256MB accumulated batch write
 	totalUpdateKVs        int64      // Total number of KVs in update batches
@@ -722,20 +725,16 @@ func (r *PerfRunner) processTask(task *Task) {
 
 	// Process mixed read operations sequentially
 	if len(task.MixedReadKVs) > 0 {
-		readStart := time.Now()
 		var readWG sync.WaitGroup
 		r.processMixedReadsParallel(task.MixedReadKVs, &readWG)
 		readWG.Wait()
-		atomic.AddInt64((*int64)(&r.totalMixedReadTime), int64(time.Since(readStart)))
 	}
 
 	// Process snap read operations sequentially
 	if len(task.SnapReadKVs) > 0 {
-		readStart := time.Now()
 		var readWG sync.WaitGroup
 		r.processSnapReadsParallel(task.SnapReadKVs, &readWG)
 		readWG.Wait()
-		atomic.AddInt64((*int64)(&r.totalSnapReadTime), int64(time.Since(readStart)))
 	}
 
 	// Process update operations sequentially - individual db.Put for each KV
@@ -776,6 +775,7 @@ func (r *PerfRunner) processMixedReadsParallel(readKVs []KeyValue, wg *sync.Wait
 		go func(kvs []KeyValue) {
 			defer wg.Done()
 			localReadOps := int64(0)
+			localOpTime := int64(0)
 
 			for _, kv := range kvs {
 				start := time.Now()
@@ -784,15 +784,31 @@ func (r *PerfRunner) processMixedReadsParallel(readKVs []KeyValue, wg *sync.Wait
 
 				// Update min/max read times
 				updateMinMaxDuration(&r.minMixedReadTime, &r.maxMixedReadTime, duration)
+				// Update histogram (bucket by power-of-two microseconds)
+				us := duration.Microseconds()
+				if us < 0 {
+					us = 0
+				}
+				var b int
+				if us == 0 {
+					b = 0
+				} else {
+					for t := us; t > 0 && b < 63; t >>= 1 {
+						b++
+					}
+				}
+				atomic.AddInt64(&r.mixedLatencyHist[b], 1)
 
 				if err != nil {
 					// Key might not exist, continue
 				}
 				localReadOps++
+				localOpTime += int64(duration)
 			}
 
 			atomic.AddInt64(&r.totalMixedReadOps, localReadOps)
 			atomic.AddInt64(&r.totalReadOps, localReadOps) // Keep total counter for compatibility
+			atomic.AddInt64((*int64)(&r.totalMixedReadTime), localOpTime)
 		}(readKVs[start:end])
 	}
 }
@@ -822,6 +838,7 @@ func (r *PerfRunner) processSnapReadsParallel(readKVs []KeyValue, wg *sync.WaitG
 		go func(kvs []KeyValue) {
 			defer wg.Done()
 			localReadOps := int64(0)
+			localOpTime := int64(0)
 
 			for _, kv := range kvs {
 				start := time.Now()
@@ -830,15 +847,31 @@ func (r *PerfRunner) processSnapReadsParallel(readKVs []KeyValue, wg *sync.WaitG
 
 				// Update min/max snap read times
 				updateMinMaxDuration(&r.minSnapReadTime, &r.maxSnapReadTime, duration)
+				// Update histogram
+				us := duration.Microseconds()
+				if us < 0 {
+					us = 0
+				}
+				var b int
+				if us == 0 {
+					b = 0
+				} else {
+					for t := us; t > 0 && b < 63; t >>= 1 {
+						b++
+					}
+				}
+				atomic.AddInt64(&r.snapLatencyHist[b], 1)
 
 				if err != nil {
 					// Key might not exist, continue
 				}
 				localReadOps++
+				localOpTime += int64(duration)
 			}
 
 			atomic.AddInt64(&r.totalSnapReadOps, localReadOps)
 			atomic.AddInt64(&r.totalReadOps, localReadOps) // Keep total counter for compatibility
+			atomic.AddInt64((*int64)(&r.totalSnapReadTime), localOpTime)
 		}(readKVs[start:end])
 	}
 }
@@ -1262,17 +1295,20 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 	writeMinTime := atomic.LoadInt64(&r.minWriteTime)
 	writeMaxTime := atomic.LoadInt64(&r.maxWriteTime)
 
+	mP50, mP95, mP99 := r.percentiles(r.mixedLatencyHist, r.totalMixedReadOps)
+	sP50, sP95, sP99 := r.percentiles(r.snapLatencyHist, r.totalSnapReadOps)
+
 	fmt.Printf(
 		"=== Average Performance Metrics ===\n"+
 			"Elapsed: %v, Block Height: %d\n"+
-			"Mixed Read  - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d (min: %s, max: %s)\n"+
-			"Snap Read   - Avg Latency: %.2f μs, TPS: %.2f, Total Ops: %d (min: %s, max: %s)\n"+
-			"Update      - Avg Latency: %.2f μs, TPS: %.2f, Total KVs: %d (min: %s, max: %s)\n"+
-			"Write Batch - Avg Latency: %s, Batch Count: %d, Avg KVs: %.0f, Avg Size: %.1f MB (min: %s, max: %s)\n",
+			"Mixed Read  - Avg: %.2f μs, P50: %s, P95: %s, P99: %s, TPS: %.2f, Total: %d (min: %s, max: %s)\n"+
+			"Snap Read   - Avg: %.2f μs, P50: %s, P95: %s, P99: %s, TPS: %.2f, Total: %d (min: %s, max: %s)\n"+
+			"Update      - Avg: %.2f μs, TPS: %.2f, Total KVs: %d (min: %s, max: %s)\n"+
+			"Write Batch - Avg: %s, Count: %d, Avg KVs: %.0f, Avg Size: %.1f MB (min: %s, max: %s)\n",
 		elapsed,
 		r.blockHeight,
-		avgMixedReadLatency, mixedReadTPS, r.totalMixedReadOps, formatDurationFromNanos(mixedMinTime), formatDurationFromNanos(mixedMaxTime),
-		avgSnapReadLatency, snapReadTPS, r.totalSnapReadOps, formatDurationFromNanos(snapMinTime), formatDurationFromNanos(snapMaxTime),
+		avgMixedReadLatency, mP50, mP95, mP99, mixedReadTPS, r.totalMixedReadOps, formatDurationFromNanos(mixedMinTime), formatDurationFromNanos(mixedMaxTime),
+		avgSnapReadLatency, sP50, sP95, sP99, snapReadTPS, r.totalSnapReadOps, formatDurationFromNanos(snapMinTime), formatDurationFromNanos(snapMaxTime),
 		avgUpdateLatency, updateTPS, r.totalUpdateKVs, formatDurationFromNanos(updateMinTime), formatDurationFromNanos(updateMaxTime),
 		formatLatency(avgWriteLatency), r.totalBatchWrites, avgKVsPerBatch, avgBatchSizeMB, formatDurationFromNanos(writeMinTime), formatDurationFromNanos(writeMaxTime),
 	)
@@ -1282,6 +1318,42 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 			remainingKVs, remainingAccumulatedMB)
 	}
 	fmt.Printf("===================================\n")
+}
+
+// percentiles computes P50/P95/P99 from a histogram where bucket i represents durations ~ [2^{i-1}, 2^i) microseconds.
+func (r *PerfRunner) percentiles(hist [64]int64, total int64) (string, string, string) {
+	if total <= 0 {
+		return "n/a", "n/a", "n/a"
+	}
+	// cumulative search
+	p50Target := (total*50 + 99) / 100
+	p95Target := (total*95 + 99) / 100
+	p99Target := (total*99 + 99) / 100
+	var cum int64
+	p50Idx, p95Idx, p99Idx := 0, 0, 0
+	for i := 0; i < len(hist); i++ {
+		cum += atomic.LoadInt64(&hist[i])
+		if p50Idx == 0 && cum >= p50Target {
+			p50Idx = i
+		}
+		if p95Idx == 0 && cum >= p95Target {
+			p95Idx = i
+		}
+		if p99Idx == 0 && cum >= p99Target {
+			p99Idx = i
+			break
+		}
+	}
+	// Convert bucket index to representative duration (~upper bound) in microseconds
+	toDur := func(idx int) string {
+		if idx <= 0 {
+			return "0 μs"
+		}
+		// upper bound ~ 2^idx μs
+		us := int64(1) << idx
+		return fmt.Sprintf("%d μs", us)
+	}
+	return toDur(p50Idx), toDur(p95Idx), toDur(p99Idx)
 }
 
 // resetCounters clears all measuring counters, used after warmup finishes.
