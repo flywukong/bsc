@@ -1341,7 +1341,8 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 	fmt.Printf("===================================\n")
 }
 
-// percentiles computes P50/P95/P99 from a histogram where bucket i represents durations ~ [2^{i-1}, 2^i) microseconds.
+// percentiles computes P50/P95/P99 from a linear histogram where bucket i represents duration i microseconds.
+// Buckets are linear: bucket[0] for 0us, bucket[1] for 1us, ..., bucket[5000] for 5000us, bucket[5001] for >5000us.
 func (r *PerfRunner) percentiles(hist []int64, total int64) (string, string, string) {
 	if total <= 0 {
 		return "n/a", "n/a", "n/a"
@@ -1365,14 +1366,15 @@ func (r *PerfRunner) percentiles(hist []int64, total int64) (string, string, str
 			break
 		}
 	}
-	// Convert bucket index to representative duration (~upper bound) in microseconds
+	// Convert bucket index to representative duration (upper bound) in microseconds
 	toDur := func(idx int) string {
 		if idx <= 0 {
 			return "0 μs"
 		}
-		// upper bound ~ 2^idx μs
-		us := int64(idx)
-		return fmt.Sprintf("%d μs", us)
+		if idx >= latencyHistUSMax+1 { // Overflow bucket
+			return ">5000 μs"
+		}
+		return fmt.Sprintf("%d μs", idx)
 	}
 	return toDur(p50Idx), toDur(p95Idx), toDur(p99Idx)
 }
