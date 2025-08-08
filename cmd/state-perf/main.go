@@ -47,6 +47,9 @@ import (
 
 const version = "1.0.0"
 
+// Percentile histogram config: linear buckets in microseconds
+const latencyHistUSMax = 5000 // 0..5000us in 1us steps, >5000us in overflow
+
 type PerfConfig struct {
 	TestCaseDir       string
 	BenchDBPath       string
@@ -121,9 +124,9 @@ type PerfRunner struct {
 	totalSnapReadOps   int64
 	totalMixedReadTime time.Duration
 	totalSnapReadTime  time.Duration
-	// Histograms for percentiles (microsecond buckets rounded to powers of two)
-	mixedLatencyHist [64]int64
-	snapLatencyHist  [64]int64
+	// Histograms for percentiles (linear microsecond buckets up to threshold)
+	mixedLatencyHist [latencyHistUSMax + 2]int64 // 0..max, overflow at last index
+	snapLatencyHist  [latencyHistUSMax + 2]int64
 	minMixedReadTime int64 // stored as nanoseconds for atomic operations
 	maxMixedReadTime int64 // stored as nanoseconds for atomic operations
 	minSnapReadTime  int64 // stored as nanoseconds for atomic operations
@@ -137,6 +140,7 @@ type PerfRunner struct {
 	updateMutex           sync.Mutex // Protect accumulated update data
 	minUpdateTime         int64      // stored as nanoseconds for atomic operations
 	maxUpdateTime         int64      // stored as nanoseconds for atomic operations
+	updateLatencyHist     [latencyHistUSMax + 2]int64
 
 	// Write batch statistics
 	totalBatchSize   int64 // Total size of all write batches
@@ -797,18 +801,14 @@ func (r *PerfRunner) processMixedReadsParallel(readKVs []KeyValue, wg *sync.Wait
 
 				// Update min/max read times
 				updateMinMaxDuration(&r.minMixedReadTime, &r.maxMixedReadTime, duration)
-				// Update histogram (bucket by power-of-two microseconds)
+				// Update histogram (linear microsecond buckets)
 				us := duration.Microseconds()
 				if us < 0 {
 					us = 0
 				}
-				var b int
-				if us == 0 {
-					b = 0
-				} else {
-					for t := us; t > 0 && b < 63; t >>= 1 {
-						b++
-					}
+				b := us
+				if b > latencyHistUSMax {
+					b = latencyHistUSMax + 1
 				}
 				atomic.AddInt64(&r.mixedLatencyHist[b], 1)
 
@@ -860,18 +860,14 @@ func (r *PerfRunner) processSnapReadsParallel(readKVs []KeyValue, wg *sync.WaitG
 
 				// Update min/max snap read times
 				updateMinMaxDuration(&r.minSnapReadTime, &r.maxSnapReadTime, duration)
-				// Update histogram
+				// Update histogram (linear)
 				us := duration.Microseconds()
 				if us < 0 {
 					us = 0
 				}
-				var b int
-				if us == 0 {
-					b = 0
-				} else {
-					for t := us; t > 0 && b < 63; t >>= 1 {
-						b++
-					}
+				b := us
+				if b > latencyHistUSMax {
+					b = latencyHistUSMax + 1
 				}
 				atomic.AddInt64(&r.snapLatencyHist[b], 1)
 
@@ -932,6 +928,16 @@ func (r *PerfRunner) processIndividualUpdates(updateKVs []KeyValue) {
 
 				// Update min/max update times
 				updateMinMaxDuration(&r.minUpdateTime, &r.maxUpdateTime, putDuration)
+				// Update update latency histogram (linear microsecond buckets)
+				us := putDuration.Microseconds()
+				if us < 0 {
+					us = 0
+				}
+				b := us
+				if b > latencyHistUSMax {
+					b = latencyHistUSMax + 1
+				}
+				atomic.AddInt64(&r.updateLatencyHist[b], 1)
 
 				if err != nil {
 					log.Warn("Failed to update key", "err", err)
@@ -1308,21 +1314,23 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 	writeMinTime := atomic.LoadInt64(&r.minWriteTime)
 	writeMaxTime := atomic.LoadInt64(&r.maxWriteTime)
 
-	mP50, mP95, mP99 := r.percentiles(r.mixedLatencyHist, r.totalMixedReadOps)
-	sP50, sP95, sP99 := r.percentiles(r.snapLatencyHist, r.totalSnapReadOps)
+	mP50, mP95, mP99 := r.percentiles(r.mixedLatencyHist[:], r.totalMixedReadOps)
+	sP50, sP95, sP99 := r.percentiles(r.snapLatencyHist[:], r.totalSnapReadOps)
+
+	uP50, uP95, uP99 := r.percentiles(r.updateLatencyHist[:], r.totalUpdateOps)
 
 	fmt.Printf(
 		"=== Average Performance Metrics ===\n"+
 			"Elapsed: %v, Block Height: %d\n"+
 			"Mixed Read  - Avg: %.2f μs, P50: %s, P95: %s, P99: %s, TPS: %.2f, Total: %d (min: %s, max: %s)\n"+
 			"Snap Read   - Avg: %.2f μs, P50: %s, P95: %s, P99: %s, TPS: %.2f, Total: %d (min: %s, max: %s)\n"+
-			"Update      - Avg: %.2f μs, TPS: %.2f, Total KVs: %d (min: %s, max: %s)\n"+
+			"Update      - Avg: %.2f μs, P50: %s, P95: %s, P99: %s, TPS: %.2f, Total KVs: %d (min: %s, max: %s)\n"+
 			"Write Batch - Avg: %s, Count: %d, Avg KVs: %.0f, Avg Size: %.1f MB (min: %s, max: %s)\n",
 		elapsed,
 		r.blockHeight,
 		avgMixedReadLatency, mP50, mP95, mP99, mixedReadTPS, r.totalMixedReadOps, formatDurationFromNanos(mixedMinTime), formatDurationFromNanos(mixedMaxTime),
 		avgSnapReadLatency, sP50, sP95, sP99, snapReadTPS, r.totalSnapReadOps, formatDurationFromNanos(snapMinTime), formatDurationFromNanos(snapMaxTime),
-		avgUpdateLatency, updateTPS, r.totalUpdateKVs, formatDurationFromNanos(updateMinTime), formatDurationFromNanos(updateMaxTime),
+		avgUpdateLatency, uP50, uP95, uP99, updateTPS, r.totalUpdateKVs, formatDurationFromNanos(updateMinTime), formatDurationFromNanos(updateMaxTime),
 		formatLatency(avgWriteLatency), r.totalBatchWrites, avgKVsPerBatch, avgBatchSizeMB, formatDurationFromNanos(writeMinTime), formatDurationFromNanos(writeMaxTime),
 	)
 
@@ -1334,7 +1342,7 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 }
 
 // percentiles computes P50/P95/P99 from a histogram where bucket i represents durations ~ [2^{i-1}, 2^i) microseconds.
-func (r *PerfRunner) percentiles(hist [64]int64, total int64) (string, string, string) {
+func (r *PerfRunner) percentiles(hist []int64, total int64) (string, string, string) {
 	if total <= 0 {
 		return "n/a", "n/a", "n/a"
 	}
@@ -1363,7 +1371,7 @@ func (r *PerfRunner) percentiles(hist [64]int64, total int64) (string, string, s
 			return "0 μs"
 		}
 		// upper bound ~ 2^idx μs
-		us := int64(1) << idx
+		us := int64(idx)
 		return fmt.Sprintf("%d μs", us)
 	}
 	return toDur(p50Idx), toDur(p95Idx), toDur(p99Idx)
