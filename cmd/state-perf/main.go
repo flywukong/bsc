@@ -56,6 +56,7 @@ type PerfConfig struct {
 	UpdateRatio       float64
 	NumThreads        int
 	RuntimeDur        time.Duration
+	WarmupDur         time.Duration // Warmup duration before measuring
 	MetricsAddr       string
 	MetricsPort       int
 	CacheSize         int // Database cache size in MB
@@ -195,6 +196,12 @@ func main() {
 						Usage:       "Batch size for task generation",
 						Value:       5000,
 						Destination: &config.BatchSize,
+					},
+					&cli.DurationFlag{
+						Name:        "warmup",
+						Usage:       "Warmup duration before measuring (e.g. 10m, 5m, 30s)",
+						Value:       10 * time.Minute,
+						Destination: &config.WarmupDur,
 					},
 					&cli.Float64Flag{
 						Name:        "read-ratio",
@@ -497,7 +504,7 @@ func (r *PerfRunner) createTask() *Task {
 	quarterBatch := int(r.config.BatchSize) / 4
 	allKVs := make([]KeyValue, 0, r.config.BatchSize)
 
-	// Add 1/4 from each data type
+	// Add 1/4 from each data type (reverted to even distribution)
 	allKVs = append(allKVs, r.selectRandomKVs(r.dataSet.AccountTries, quarterBatch)...)
 	allKVs = append(allKVs, r.selectRandomKVs(r.dataSet.StorageTries, quarterBatch)...)
 	allKVs = append(allKVs, r.selectRandomKVs(r.dataSet.AccountSnaps, quarterBatch)...)
@@ -521,8 +528,12 @@ func (r *PerfRunner) createTask() *Task {
 	// Create snap reads from snap types (AccountSnaps + StorageSnaps)
 	snapKVs := make([]KeyValue, 0, snapReadCount)
 	if snapReadCount > 0 {
-		snapAccountCount := snapReadCount / 2
-		snapStorageCount := snapReadCount - snapAccountCount
+		// Allocate 80% to StorageSnaps, 20% to AccountSnaps
+		snapStorageCount := int(float64(snapReadCount) * 0.8)
+		if snapStorageCount > snapReadCount {
+			snapStorageCount = snapReadCount
+		}
+		snapAccountCount := snapReadCount - snapStorageCount
 
 		snapKVs = append(snapKVs, r.selectRandomKVs(r.dataSet.AccountSnaps, snapAccountCount)...)
 		snapKVs = append(snapKVs, r.selectRandomKVs(r.dataSet.StorageSnaps, snapStorageCount)...)
@@ -535,8 +546,12 @@ func (r *PerfRunner) createTask() *Task {
 	// Create mixed reads from trie types (AccountTries + StorageTries)
 	mixedKVs := make([]KeyValue, 0, mixedReadCount)
 	if mixedReadCount > 0 {
-		mixedAccountCount := mixedReadCount / 2
-		mixedStorageCount := mixedReadCount - mixedAccountCount
+		// Allocate 70% to StorageTries, 30% to AccountTries
+		mixedStorageCount := int(float64(mixedReadCount) * 0.7)
+		if mixedStorageCount > mixedReadCount {
+			mixedStorageCount = mixedReadCount
+		}
+		mixedAccountCount := mixedReadCount - mixedStorageCount
 		mixedKVs = append(mixedKVs, r.selectRandomKVs(r.dataSet.AccountTries, mixedAccountCount)...)
 		mixedKVs = append(mixedKVs, r.selectRandomKVs(r.dataSet.StorageTries, mixedStorageCount)...)
 		mathrand.Shuffle(len(mixedKVs), func(i, j int) {
@@ -622,6 +637,13 @@ func (r *PerfRunner) selectRandomKVs(source []KeyValue, count int) []KeyValue {
 
 func (r *PerfRunner) runInternal(ctx context.Context) {
 	startTime := time.Now()
+	warmupUntil := time.Time{}
+	measuring := true
+	if r.config.WarmupDur > 0 {
+		warmupUntil = startTime.Add(r.config.WarmupDur)
+		measuring = false
+		log.Info("Warmup started", "duration", r.config.WarmupDur)
+	}
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
@@ -638,7 +660,26 @@ func (r *PerfRunner) runInternal(ctx context.Context) {
 				r.printHashSummary()
 				return
 			}
-			r.processTask(task)
+			if measuring {
+				r.processTask(task)
+			} else {
+				// Warmup: only perform reads (mixed + snaps), skip writes/updates
+				if len(task.MixedReadKVs) > 0 {
+					readStart := time.Now()
+					var readWG sync.WaitGroup
+					r.processMixedReadsParallel(task.MixedReadKVs, &readWG)
+					readWG.Wait()
+					atomic.AddInt64((*int64)(&r.totalMixedReadTime), int64(time.Since(readStart)))
+				}
+				if len(task.SnapReadKVs) > 0 {
+					readStart := time.Now()
+					var readWG sync.WaitGroup
+					r.processSnapReadsParallel(task.SnapReadKVs, &readWG)
+					readWG.Wait()
+					atomic.AddInt64((*int64)(&r.totalSnapReadTime), int64(time.Since(readStart)))
+				}
+				// Note: don't accumulate writes or do updates in warmup
+			}
 			r.blockHeight++
 
 			// Print average stats every 100 batches
@@ -647,11 +688,24 @@ func (r *PerfRunner) runInternal(ctx context.Context) {
 			}
 
 		case <-ticker.C:
-			r.printStat()
+			if !measuring && !warmupUntil.IsZero() && time.Now().After(warmupUntil) {
+				// Transition from warmup to measuring: reset counters
+				r.resetCounters()
+				measuring = true
+				log.Info("Warmup finished; start measuring")
+			}
+			if measuring {
+				r.printStat()
+			} else {
+				// During warmup, still print lightweight heartbeat
+				fmt.Printf("[%s] Warmup in progress - block height=%d\n", time.Now().Format(time.RFC3339), r.blockHeight)
+			}
 
 		case <-hashTicker.C:
-			// Perform hash calculation every 3 seconds asynchronously
-			go r.calculateHashRoot()
+			// Perform hash calculation only during measuring phase
+			if measuring {
+				go r.calculateHashRoot()
+			}
 
 		case <-ctx.Done():
 			fmt.Println("Context cancelled, shutting down")
@@ -1226,6 +1280,41 @@ func (r *PerfRunner) printAVGStat(startTime time.Time) {
 			remainingKVs, remainingAccumulatedMB)
 	}
 	fmt.Printf("===================================\n")
+}
+
+// resetCounters clears all measuring counters, used after warmup finishes.
+func (r *PerfRunner) resetCounters() {
+	// Operation counts
+	atomic.StoreInt64(&r.totalMixedReadOps, 0)
+	atomic.StoreInt64(&r.totalSnapReadOps, 0)
+	atomic.StoreInt64(&r.totalUpdateOps, 0)
+	atomic.StoreInt64(&r.totalWriteOps, 0)
+	atomic.StoreInt64(&r.totalBatchWrites, 0)
+	atomic.StoreInt64(&r.totalBatchSize, 0)
+
+	// Timers
+	r.totalMixedReadTime = 0
+	r.totalSnapReadTime = 0
+	r.totalUpdateTime = 0
+	r.totalWriteTime = 0
+
+	// Min/Max
+	atomic.StoreInt64(&r.minMixedReadTime, 0)
+	atomic.StoreInt64(&r.maxMixedReadTime, 0)
+	atomic.StoreInt64(&r.minSnapReadTime, 0)
+	atomic.StoreInt64(&r.maxSnapReadTime, 0)
+	atomic.StoreInt64(&r.minUpdateTime, 0)
+	atomic.StoreInt64(&r.maxUpdateTime, 0)
+	atomic.StoreInt64(&r.minWriteTime, 0)
+	atomic.StoreInt64(&r.maxWriteTime, 0)
+
+	// Interval baselines
+	r.lastReadOps = 0
+	r.lastWriteOps = 0
+	r.lastUpdateOps = 0
+	r.lastBatchCount = 0
+	r.lastUpdateKVs = 0
+	r.lastUpdateSize = 0
 }
 
 // printHashSummary prints hash calculation summary statistics
