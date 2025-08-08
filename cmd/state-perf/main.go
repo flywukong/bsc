@@ -538,13 +538,40 @@ func (r *PerfRunner) createTask() *Task {
 	}
 	task.SnapReadKVs = snapKVs
 
-	// Mixed reads: 80% storage trie, 20% account trie (as requested)
+	// Mixed reads: ensure 40% StorageTries; the remaining 60% evenly split among AccountTries, StorageSnaps, AccountSnaps
 	mixedKVs := make([]KeyValue, 0, mixedReadCount)
 	if mixedReadCount > 0 {
-		mixedStorageCount := int(float64(mixedReadCount) * 0.8)
-		mixedAccountCount := mixedReadCount - mixedStorageCount
-		mixedKVs = append(mixedKVs, r.selectRandomKVs(r.dataSet.AccountTries, mixedAccountCount)...)
-		mixedKVs = append(mixedKVs, r.selectRandomKVs(r.dataSet.StorageTries, mixedStorageCount)...)
+		stCount := int(float64(mixedReadCount) * 0.4)
+		rem := mixedReadCount - stCount
+		per := rem / 3
+		extra := rem - per*3
+		atCount := per
+		ssCount := per
+		asCount := per
+		if extra > 0 {
+			atCount += 1
+			extra--
+		}
+		if extra > 0 {
+			ssCount += 1
+			extra--
+		}
+		if extra > 0 {
+			asCount += 1
+		}
+
+		if atCount > 0 {
+			mixedKVs = append(mixedKVs, r.selectRandomKVs(r.dataSet.AccountTries, atCount)...)
+		}
+		if stCount > 0 {
+			mixedKVs = append(mixedKVs, r.selectRandomKVs(r.dataSet.StorageTries, stCount)...)
+		}
+		if ssCount > 0 {
+			mixedKVs = append(mixedKVs, r.selectRandomKVs(r.dataSet.StorageSnaps, ssCount)...)
+		}
+		if asCount > 0 {
+			mixedKVs = append(mixedKVs, r.selectRandomKVs(r.dataSet.AccountSnaps, asCount)...)
+		}
 		mathrand.Shuffle(len(mixedKVs), func(i, j int) { mixedKVs[i], mixedKVs[j] = mixedKVs[j], mixedKVs[i] })
 	}
 	task.MixedReadKVs = mixedKVs
@@ -605,39 +632,25 @@ func (r *PerfRunner) selectRandomKVs(source []KeyValue, count int) []KeyValue {
 		}
 		return result
 	}
-
-	// 使用 reservoir sampling 算法进行无重复随机采样
-	// 这种方法确保每个元素被选中的概率相等，且无重复
-	if count < len(source)/2 {
-		// 当选择数量较少时，使用 map 记录已选择的索引
-		selected := make(map[int]bool, count)
-		result := make([]KeyValue, 0, count)
-
-		for len(result) < count {
-			idx := mathrand.Intn(len(source))
-			if !selected[idx] {
-				selected[idx] = true
-				result = append(result, source[idx])
-			}
+	// Floyd 算法：从 [0, n) 中无重复地等概率抽取 count 个索引，时间 O(count)，空间 O(count)
+	n := len(source)
+	picked := make(map[int]struct{}, count)
+	for j := n - count; j < n; j++ { // j 递增，范围逐步放大
+		t := mathrand.Intn(j + 1)   // [0, j]
+		if _, ok := picked[t]; ok { // 若冲突，则选择 j
+			picked[j] = struct{}{}
+		} else {
+			picked[t] = struct{}{}
 		}
-		return result
-	} else {
-		// 当选择数量较多时，使用 Fisher-Yates 洗牌算法的部分版本
-		// 复制源数据以避免修改原数据
-		temp := make([]KeyValue, len(source))
-		copy(temp, source)
-
-		// 只洗牌前 count 个元素
-		for i := 0; i < count; i++ {
-			j := mathrand.Intn(len(temp)-i) + i
-			temp[i], temp[j] = temp[j], temp[i]
-		}
-
-		// 返回前 count 个元素
-		result := make([]KeyValue, count)
-		copy(result, temp[:count])
-		return result
 	}
+	// 收集结果
+	result := make([]KeyValue, 0, count)
+	for idx := range picked {
+		result = append(result, source[idx])
+	}
+	// 打乱输出顺序，避免索引集合遍历顺序带来的偏序
+	mathrand.Shuffle(len(result), func(i, j int) { result[i], result[j] = result[j], result[i] })
+	return result
 }
 
 func (r *PerfRunner) runInternal(ctx context.Context) {
@@ -1400,49 +1413,46 @@ func (r *PerfRunner) printHashSummary() {
 		hashMinTime := atomic.LoadInt64(&r.minHashTime)
 		hashMaxTime := atomic.LoadInt64(&r.maxHashTime)
 
-		fmt.Printf("=== Hash Calculation Summary ===\n")
+		fmt.Printf("=== Trie Commit Summary ===\n")
 		fmt.Printf("Total Hash Operations: %d\n", r.totalHashOps)
 		fmt.Printf("Total Hash Time: %v\n", r.totalHashTime)
 
 		// Format hash latency with appropriate units and show min/max
-		fmt.Printf("Average Hash Latency: %s (min: %s, max: %s)\n",
+		fmt.Printf("Average Commit Latency: %s (min: %s, max: %s)\n",
 			formatLatency(avgHashLatency),
 			formatDurationFromNanos(hashMinTime),
 			formatDurationFromNanos(hashMaxTime))
 
 		fmt.Printf("===============================\n")
 	} else {
-		fmt.Printf("=== Hash Calculation Summary ===\n")
-		fmt.Printf("No hash operations performed\n")
+		fmt.Printf("=== Trie Commit Summary ===\n")
+		fmt.Printf("No trie commit operations performed\n")
 		fmt.Printf("===============================\n")
 	}
 }
 
-// calculateHashRoot performs trie hash calculation for performance measurement
+// calculateHashRoot now measures trie commit latency periodically (commit-only, no hash)
 func (r *PerfRunner) calculateHashRoot() {
 	// Trie should already be initialized during construction
 	if r.trieDB == nil || r.theTrie == nil {
-		log.Warn("Trie not initialized, skipping hash calculation")
+		log.Warn("Trie not initialized, skipping trie commit measurement")
 		return
 	}
 
-	// Measure hash calculation
-	hashStart := time.Now()
-	computedHash := r.theTrie.Hash()
-	hashDuration := time.Since(hashStart)
+	// Commit measurement
+	commitStart := time.Now()
+	newRoot, _ := r.theTrie.Commit(false)
+	commitDuration := time.Since(commitStart)
 
-	// Update min/max hash times
-	updateMinMaxDuration(&r.minHashTime, &r.maxHashTime, hashDuration)
-
-	// Record results with timing
-	log.Info("Hash calculation with real blockchain data",
-		"computed_hash", computedHash.Hex(),
-		"hash_time_μs", hashDuration.Microseconds(),
-		"hash_time_ns", hashDuration.Nanoseconds())
-
-	// Update statistics using the hash calculation time
+	// Track as "hash" stats slots to reuse summary output
+	updateMinMaxDuration(&r.minHashTime, &r.maxHashTime, commitDuration)
 	atomic.AddInt64(&r.totalHashOps, 1)
-	atomic.AddInt64((*int64)(&r.totalHashTime), int64(hashDuration))
+	atomic.AddInt64((*int64)(&r.totalHashTime), int64(commitDuration))
+
+	log.Info("Trie commit measured",
+		"new_root", newRoot.Hex(),
+		"commit_time_μs", commitDuration.Microseconds(),
+		"commit_time_ns", commitDuration.Nanoseconds())
 }
 
 // initializeTrie initializes the trie components once
