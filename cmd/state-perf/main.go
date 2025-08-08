@@ -57,6 +57,7 @@ type PerfConfig struct {
 	NumThreads        int
 	RuntimeDur        time.Duration
 	WarmupDur         time.Duration // Warmup duration before measuring
+	Seed              int64         // Random seed (0 for random)
 	MetricsAddr       string
 	MetricsPort       int
 	CacheSize         int // Database cache size in MB
@@ -197,6 +198,12 @@ func main() {
 						Value:       5000,
 						Destination: &config.BatchSize,
 					},
+					&cli.Int64Flag{
+						Name:        "seed",
+						Usage:       "Random seed (0 for random)",
+						Value:       0,
+						Destination: &config.Seed,
+					},
 					&cli.DurationFlag{
 						Name:        "warmup",
 						Usage:       "Warmup duration before measuring (e.g. 10m, 5m, 30s)",
@@ -321,7 +328,9 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 		"accountTries", len(dataSet.AccountTries),
 		"storageTries", len(dataSet.StorageTries),
 		"accountSnaps", len(dataSet.AccountSnaps),
-		"storageSnaps", len(dataSet.StorageSnaps))
+		"storageSnaps", len(dataSet.StorageSnaps),
+		"total",
+		len(dataSet.AccountTries)+len(dataSet.StorageTries)+len(dataSet.AccountSnaps)+len(dataSet.StorageSnaps))
 
 	// Create node stack for database operations
 	stack, err := makeConfigNode(c, config.BenchDBPath)
@@ -482,6 +491,12 @@ func (r *PerfRunner) Run(ctx context.Context) {
 func (r *PerfRunner) generateTasks(ctx context.Context) {
 	defer close(r.taskChan)
 
+	// Use per-run RNG with optional fixed seed
+	if r.config.Seed != 0 {
+		mathrand.Seed(r.config.Seed)
+		log.Info("Using fixed random seed", "seed", r.config.Seed)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -500,68 +515,55 @@ func (r *PerfRunner) generateTasks(ctx context.Context) {
 func (r *PerfRunner) createTask() *Task {
 	task := &Task{}
 
-	// Calculate total read count based on ratio
-	quarterBatch := int(r.config.BatchSize) / 4
-	allKVs := make([]KeyValue, 0, r.config.BatchSize)
-
-	// Add 1/4 from each data type (reverted to even distribution)
-	allKVs = append(allKVs, r.selectRandomKVs(r.dataSet.AccountTries, quarterBatch)...)
-	allKVs = append(allKVs, r.selectRandomKVs(r.dataSet.StorageTries, quarterBatch)...)
-	allKVs = append(allKVs, r.selectRandomKVs(r.dataSet.AccountSnaps, quarterBatch)...)
-	allKVs = append(allKVs, r.selectRandomKVs(r.dataSet.StorageSnaps, quarterBatch)...)
-
-	// Shuffle the combined KVs
-	mathrand.Shuffle(len(allKVs), func(i, j int) {
-		allKVs[i], allKVs[j] = allKVs[j], allKVs[i]
-	})
-
-	// Distribute according to configured ratios
-	total := len(allKVs)
+	// Calculate counts by ratios for each operation type (uniform sampling across full datasets)
+	total := int(r.config.BatchSize)
 	readCount := int(float64(total) * r.config.ReadRatio)
 	updateCount := int(float64(total) * r.config.UpdateRatio)
 	writeCount := total - readCount - updateCount
 
-	// Split read operations: first allocate SnapReadBatchSize to snap reads, remaining to mixed reads
+	// Snap reads: 80% storage, 20% account (as requested)
 	snapReadCount := min(readCount, r.config.SnapReadBatchSize)
 	mixedReadCount := readCount - snapReadCount
 
-	// Create snap reads from snap types (AccountSnaps + StorageSnaps)
+	snapAccountCount := int(float64(snapReadCount) * 0.2)
+	snapStorageCount := snapReadCount - snapAccountCount
 	snapKVs := make([]KeyValue, 0, snapReadCount)
 	if snapReadCount > 0 {
-		// Allocate 80% to StorageSnaps, 20% to AccountSnaps
-		snapStorageCount := int(float64(snapReadCount) * 0.8)
-		if snapStorageCount > snapReadCount {
-			snapStorageCount = snapReadCount
-		}
-		snapAccountCount := snapReadCount - snapStorageCount
-
 		snapKVs = append(snapKVs, r.selectRandomKVs(r.dataSet.AccountSnaps, snapAccountCount)...)
 		snapKVs = append(snapKVs, r.selectRandomKVs(r.dataSet.StorageSnaps, snapStorageCount)...)
-		mathrand.Shuffle(len(snapKVs), func(i, j int) {
-			snapKVs[i], snapKVs[j] = snapKVs[j], snapKVs[i]
-		})
+		mathrand.Shuffle(len(snapKVs), func(i, j int) { snapKVs[i], snapKVs[j] = snapKVs[j], snapKVs[i] })
 	}
 	task.SnapReadKVs = snapKVs
 
-	// Create mixed reads from trie types (AccountTries + StorageTries)
+	// Mixed reads: 80% storage trie, 20% account trie (as requested)
 	mixedKVs := make([]KeyValue, 0, mixedReadCount)
 	if mixedReadCount > 0 {
-		// Allocate 70% to StorageTries, 30% to AccountTries
-		mixedStorageCount := int(float64(mixedReadCount) * 0.7)
-		if mixedStorageCount > mixedReadCount {
-			mixedStorageCount = mixedReadCount
-		}
+		mixedStorageCount := int(float64(mixedReadCount) * 0.8)
 		mixedAccountCount := mixedReadCount - mixedStorageCount
 		mixedKVs = append(mixedKVs, r.selectRandomKVs(r.dataSet.AccountTries, mixedAccountCount)...)
 		mixedKVs = append(mixedKVs, r.selectRandomKVs(r.dataSet.StorageTries, mixedStorageCount)...)
-		mathrand.Shuffle(len(mixedKVs), func(i, j int) {
-			mixedKVs[i], mixedKVs[j] = mixedKVs[j], mixedKVs[i]
-		})
+		mathrand.Shuffle(len(mixedKVs), func(i, j int) { mixedKVs[i], mixedKVs[j] = mixedKVs[j], mixedKVs[i] })
 	}
 	task.MixedReadKVs = mixedKVs
 
+	// Updates: sample uniformly from all types according to updateCount
+	// Combine all datasets and uniformly sample updateCount items
+	if updateCount > 0 {
+		// Construct a temporary pool lazily by sampling per source to avoid huge concat
+		// Split updates evenly across four sources
+		per := updateCount / 4
+		rem := updateCount - per*4
+		up := make([]KeyValue, 0, updateCount)
+		up = append(up, r.selectRandomKVs(r.dataSet.AccountTries, per)...)
+		up = append(up, r.selectRandomKVs(r.dataSet.StorageTries, per)...)
+		up = append(up, r.selectRandomKVs(r.dataSet.AccountSnaps, per)...)
+		up = append(up, r.selectRandomKVs(r.dataSet.StorageSnaps, per+rem)...)
+		mathrand.Shuffle(len(up), func(i, j int) { up[i], up[j] = up[j], up[i] })
+		task.UpdateKVs = up
+	}
+
 	// Update KVs from all types
-	task.UpdateKVs = allKVs[readCount : readCount+updateCount]
+	// (task.UpdateKVs already populated above)
 
 	// For WriteKVs, only use trie types (AccountTries and StorageTries)
 	trieKVs := make([]KeyValue, 0, writeCount)
