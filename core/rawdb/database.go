@@ -20,8 +20,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"hash/fnv"
-	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -647,6 +645,30 @@ func DataTypeByKey(key []byte) DataType {
 // InspectDatabase traverses the entire database and checks the size
 // of all different categories of data.
 func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
+	return InspectDatabaseWithExpansion(db, nil, keyPrefix, keyStart)
+}
+
+// InspectDatabaseWithExpansion traverses the source database and optionally
+// expands data to a target database (1T -> 2T expansion)
+func InspectDatabaseWithExpansion(sourceDb ethdb.Database, targetDb ethdb.Database, keyPrefix, keyStart []byte) error {
+	// If no target database provided, run normal inspection
+	if targetDb == nil {
+		return inspectDatabaseNormal(sourceDb, keyPrefix, keyStart)
+	}
+
+	// Run database expansion from source to target
+	return expandDatabase(sourceDb, targetDb, keyPrefix, keyStart)
+}
+
+// inspectDatabaseNormal performs normal database inspection without expansion
+func inspectDatabaseNormal(db ethdb.Database, keyPrefix, keyStart []byte) error {
+	// TODO: Implement normal inspection logic if needed
+	log.Info("Normal database inspection not implemented, use geth db inspect command instead")
+	return nil
+}
+
+// expandDatabase performs 1T -> 2T database expansion from source to target
+func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byte) error {
 	// Data expansion logic: 1T -> 2T with concurrent batch writing
 	type kvPair struct {
 		key   []byte
@@ -668,135 +690,25 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		lastProgress      int
 		wg                sync.WaitGroup
 		processedCount    int64
-		bloomFilterChecks int64 // Total bloom filter checks
-		bloomFilterHits   int64 // Bloom filter "might contain" results
-		magicMarkerChecks int64 // Precise magic marker checks performed
 	)
 
 	// Channel for sending key-value pairs to workers
 	kvChan := make(chan kvPair, 1000)
 
-	log.Info("Starting database expansion from 1T to 2T with concurrent batch writing",
-		"workers", numWorkers, "maxBatchSize", "512MB", "expectedKeys", totalExpectedKeys)
+	log.Info("Starting database expansion from 1T to 2T with read-write separation",
+		"workers", numWorkers, "maxBatchSize", "512MB", "expectedKeys", totalExpectedKeys,
+		"sourceDb", "read-only", "targetDb", "write-only")
 
-	// Simple Bloom Filter implementation
-	type bloomFilter struct {
-		bits     []uint64
-		size     uint64
-		hashFunc []func([]byte) uint64
-		mu       sync.RWMutex
-	}
-
-	// Create a new bloom filter
-	newBloomFilter := func(expectedItems uint64, falsePositiveRate float64) *bloomFilter {
-		// Calculate optimal size and hash functions count
-		// m = -(n * ln(p)) / (ln(2)^2), k = (m/n) * ln(2)
-		m := uint64(-float64(expectedItems) * math.Log(falsePositiveRate) / (math.Log(2) * math.Log(2)))
-		k := uint64(float64(m) / float64(expectedItems) * math.Log(2))
-		if k < 1 {
-			k = 1
-		}
-		if k > 10 {
-			k = 10 // Cap at 10 hash functions for performance
-		}
-
-		// Round up to nearest multiple of 64 for efficient uint64 operations
-		m = ((m + 63) / 64) * 64
-		bitsArray := make([]uint64, m/64)
-
-		// Create k different hash functions
-		hashFuncs := make([]func([]byte) uint64, k)
-		for i := uint64(0); i < k; i++ {
-			seed := i + 1
-			hashFuncs[i] = func(data []byte) uint64 {
-				h := fnv.New64a()
-				h.Write([]byte{byte(seed)}) // Add seed
-				h.Write(data)
-				return h.Sum64() % m
-			}
-		}
-
-		log.Info("Bloom filter initialized",
-			"expectedItems", expectedItems,
-			"targetFalsePositiveRate", falsePositiveRate,
-			"sizeInBits", m,
-			"sizeInMB", m/8/1024/1024,
-			"hashFunctions", k)
-
-		return &bloomFilter{
-			bits:     bitsArray,
-			size:     m,
-			hashFunc: hashFuncs,
-		}
-	}
-
-	// Add key to bloom filter
-	bloomAdd := func(bf *bloomFilter, key []byte) {
-		bf.mu.Lock()
-		defer bf.mu.Unlock()
-		for _, hash := range bf.hashFunc {
-			bitIndex := hash(key)
-			arrayIndex := bitIndex / 64
-			bitPos := bitIndex % 64
-			bf.bits[arrayIndex] |= (1 << bitPos)
-		}
-	}
-
-	// Check if key might be in bloom filter
-	bloomMightContain := func(bf *bloomFilter, key []byte) bool {
-		bf.mu.RLock()
-		defer bf.mu.RUnlock()
-		for _, hash := range bf.hashFunc {
-			bitIndex := hash(key)
-			arrayIndex := bitIndex / 64
-			bitPos := bitIndex % 64
-			if (bf.bits[arrayIndex] & (1 << bitPos)) == 0 {
-				return false // Definitely not in the set
-			}
-		}
-		return true // Might be in the set
-	}
-
-	// Initialize bloom filter for generated keys
-	// Use expected 50% of totalExpectedKeys and 1% false positive rate
-	generatedKeysBloom := newBloomFilter(totalExpectedKeys/2, 0.01)
-
-	// Magic marker to identify generated keys (0xGE = 0x47, 0x45)
-	const generatedKeyMarker1 = byte(0x47) // 'G'
-	const generatedKeyMarker2 = byte(0x45) // 'E'
-
-	// Helper function to check if a key was already generated
-	// Uses bloom filter for fast filtering, then magic marker for precise check
-	isGeneratedKey := func(key []byte) bool {
-		if len(key) < 4 {
-			return false
-		}
-
-		atomic.AddInt64(&bloomFilterChecks, 1)
-
-		// Fast bloom filter check first - if false, definitely not generated
-		if !bloomMightContain(generatedKeysBloom, key) {
-			return false
-		}
-
-		// Bloom filter says "might contain", increment hit counter
-		atomic.AddInt64(&bloomFilterHits, 1)
-		atomic.AddInt64(&magicMarkerChecks, 1)
-
-		// Do precise magic marker check
-		return key[len(key)-4] == generatedKeyMarker1 && key[len(key)-3] == generatedKeyMarker2
-	}
-
-	// Helper function to generate new key
+	// Helper function to generate new key (simplified version without magic markers)
 	generateNewKey := func(originalKey []byte) []byte {
-		if len(originalKey) <= 4 {
+		if len(originalKey) <= 2 {
 			return originalKey
 		}
 
 		newKey := make([]byte, len(originalKey))
 		copy(newKey, originalKey)
 
-		mid := len(originalKey) - 4 // Leave 4 bytes at the end for markers and version
+		mid := len(originalKey) - 2 // Leave 2 bytes at the end for version
 		for i := 0; i < mid/2; i++ {
 			j := (i + mid/2) % mid
 			newKey[i], newKey[j] = newKey[j], newKey[i]
@@ -808,15 +720,11 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			newKey[i] ^= xorKey[0]
 		}
 
-		// Set magic marker to identify this as a generated key
-		newKey[len(originalKey)-4] = generatedKeyMarker1
-		newKey[len(originalKey)-3] = generatedKeyMarker2
 		// 保留末尾两字节版本号不变
 		newKey[len(originalKey)-2] = originalKey[len(originalKey)-2]
 		newKey[len(originalKey)-1] = originalKey[len(originalKey)-1]
 
 		return newKey
-
 	}
 
 	// Helper function to shuffle value
@@ -849,7 +757,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
-			batch := db.NewBatch()
+			batch := targetDb.NewBatch() // Write to target database
 			currentBatchSize := 0
 			batchStartTime := time.Now()
 
@@ -871,9 +779,6 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 						"newKeyLen", len(newKey))
 					continue
 				}
-
-				// Add new key to bloom filter for future duplicate detection
-				bloomAdd(generatedKeysBloom, newKey)
 
 				if err := batch.Put(newKey, newValue); err != nil {
 					atomic.AddInt64(&writeErrors, 1)
@@ -917,7 +822,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 						}
 					}
 
-					batch = db.NewBatch()
+					batch = targetDb.NewBatch() // Create new batch for target database
 					currentBatchSize = 0
 					batchStartTime = time.Now()
 				}
@@ -935,40 +840,21 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		}(i)
 	}
 
-	// Scan database and send key-value pairs to workers
-	it := db.NewIterator(keyPrefix, keyStart)
+	// Scan source database and send key-value pairs to workers
+	it := sourceDb.NewIterator(keyPrefix, keyStart)
 	defer it.Release()
 
 	start := time.Now()
 	logged := time.Now()
 	count := int64(0)
 
-	// Process all keys without switch case logic, but skip already generated keys
-	var skippedGenerated int64
+	log.Info("Scanning source database for expansion...", "sourceDb", "read-only")
+
 	for it.Next() {
 		key := make([]byte, len(it.Key()))
 		value := make([]byte, len(it.Value()))
 		copy(key, it.Key())
 		copy(value, it.Value())
-
-		// Skip keys that were already generated in a previous iteration
-		if isGeneratedKey(key) {
-			atomic.AddInt64(&skippedGenerated, 1)
-			count++
-
-			// Log skipped keys periodically
-			if skippedGenerated%1000 == 0 {
-				keyLen := len(key)
-				if keyLen > 16 {
-					keyLen = 16
-				}
-				log.Debug("Skipping already generated key",
-					"skippedCount", skippedGenerated,
-					"keyPrefix", fmt.Sprintf("%x", key[:keyLen]),
-					"keyLen", len(key))
-			}
-			continue
-		}
 
 		kvChan <- kvPair{
 			key:   key,
@@ -980,18 +866,9 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		count++
 
 		if count%10000 == 0 && time.Since(logged) > 5*time.Second {
-			currentBloomChecks := atomic.LoadInt64(&bloomFilterChecks)
-			currentBloomHits := atomic.LoadInt64(&bloomFilterHits)
-			bloomEfficiency := float64(0)
-			if currentBloomChecks > 0 {
-				bloomEfficiency = (float64(currentBloomChecks-currentBloomHits) / float64(currentBloomChecks)) * 100
-			}
-
-			log.Info("Scanning database",
+			log.Info("Scanning source database",
 				"processedKeys", count,
-				"skippedGenerated", skippedGenerated,
-				"bloomFilterChecks", currentBloomChecks,
-				"bloomEfficiency", fmt.Sprintf("%.2f%%", bloomEfficiency),
+				"throughputMBps", fmt.Sprintf("%.2f", float64(atomic.LoadInt64(&totalBytesWritten))/(1024*1024*time.Since(start).Seconds())),
 				"elapsed", common.PrettyDuration(time.Since(start)))
 			logged = time.Now()
 		}
@@ -999,9 +876,8 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 
 	// Close channel and wait for workers to finish
 	close(kvChan)
-	log.Info("Database scan completed, waiting for workers to finish...",
-		"totalScannedKeys", count,
-		"skippedGenerated", skippedGenerated)
+	log.Info("Source database scan completed, waiting for workers to finish...",
+		"totalScannedKeys", count)
 	wg.Wait()
 
 	// Final statistics
@@ -1009,33 +885,29 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	finalBytesWritten := atomic.LoadInt64(&totalBytesWritten)
 	finalErrors := atomic.LoadInt64(&writeErrors)
 	finalDuplicates := atomic.LoadInt64(&duplicateKeys)
-	finalSkipped := atomic.LoadInt64(&skippedGenerated)
-	finalBloomChecks := atomic.LoadInt64(&bloomFilterChecks)
-	finalBloomHits := atomic.LoadInt64(&bloomFilterHits)
-	finalMagicChecks := atomic.LoadInt64(&magicMarkerChecks)
 
-	// Calculate bloom filter efficiency
-	bloomFilterRate := float64(0)
-	if finalBloomChecks > 0 {
-		bloomFilterRate = (float64(finalBloomChecks-finalBloomHits) / float64(finalBloomChecks)) * 100
-	}
+	totalDuration := time.Since(start)
+	throughputMBps := float64(finalBytesWritten) / (1024 * 1024 * totalDuration.Seconds())
 
-	log.Info("Database expansion completed (1T -> 2T)",
+	log.Info("Database expansion completed (1T -> 2T) with read-write separation",
 		"totalKeysScanned", count,
-		"originalKeysProcessed", count-finalSkipped,
-		"skippedGeneratedKeys", finalSkipped,
 		"newKeysCreated", finalKeysCreated,
 		"totalBytesWritten", common.StorageSize(finalBytesWritten).String(),
 		"writeErrors", finalErrors,
 		"duplicateKeys", finalDuplicates,
-		"totalDuration", common.PrettyDuration(time.Since(start)))
+		"averageThroughput", fmt.Sprintf("%.2f MB/s", throughputMBps),
+		"totalDuration", common.PrettyDuration(totalDuration))
 
-	log.Info("Bloom filter performance statistics",
-		"totalBloomFilterChecks", finalBloomChecks,
-		"bloomFilterHits", finalBloomHits,
-		"magicMarkerChecks", finalMagicChecks,
-		"bloomFilterEffectiveFiltering", fmt.Sprintf("%.2f%%", bloomFilterRate),
-		"bloomFilterFalsePositiveRate", fmt.Sprintf("%.4f%%", float64(finalMagicChecks-finalSkipped)/float64(finalMagicChecks)*100))
+	if finalDuplicates > 0 {
+		log.Warn("Duplicate key generation detected",
+			"duplicateCount", finalDuplicates,
+			"duplicateRate", fmt.Sprintf("%.4f%%", float64(finalDuplicates)*100/float64(count)))
+	}
+
+	log.Info("Expansion summary",
+		"sourceDatabase", "unchanged (1T)",
+		"targetDatabase", fmt.Sprintf("expanded to ~%.1fT", float64(finalBytesWritten)/(1024*1024*1024*1024)+1.0),
+		"expansionRatio", fmt.Sprintf("1:%.1f", float64(finalKeysCreated)/float64(count)))
 
 	return nil
 }

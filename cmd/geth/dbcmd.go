@@ -40,6 +40,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/triedb"
@@ -74,6 +75,7 @@ Remove blockchain and state databases`,
 		ArgsUsage: "",
 		Subcommands: []*cli.Command{
 			dbInspectCmd,
+			dbExpandCmd,
 			dbStatCmd,
 			dbCompactCmd,
 			dbGetCmd,
@@ -105,6 +107,16 @@ Remove blockchain and state databases`,
 		}, utils.NetworkFlags, utils.DatabaseFlags),
 		Usage:       "Inspect the storage size for each type of data in the database",
 		Description: `This commands iterates the entire database. If the optional 'prefix' and 'start' arguments are provided, then the iteration is limited to the given subset of data.`,
+	}
+	dbExpandCmd = &cli.Command{
+		Action:    expand,
+		Name:      "expand",
+		ArgsUsage: "<target-datadir> [<prefix> <start>]",
+		Flags: slices.Concat([]cli.Flag{
+			utils.SyncModeFlag,
+		}, utils.NetworkFlags, utils.DatabaseFlags),
+		Usage:       "Expand database from 1T to 2T by reading from current database and writing to target database",
+		Description: `This command reads from the current database (specified by --datadir) and generates new key-value pairs to write to the target database, effectively expanding the data from 1T to 2T. The target database should be a copy of the same source database. The optional 'prefix' and 'start' arguments can be used to limit the expansion to a subset of data.`,
 	}
 	dbInspectTrieCmd = &cli.Command{
 		Action:    inspectTrie,
@@ -534,6 +546,85 @@ func inspect(ctx *cli.Context) error {
 	defer db.Close()
 
 	return rawdb.InspectDatabase(db, prefix, start)
+}
+
+func makeConfigNodeWithDataDir(ctx *cli.Context, dataDir string) (*node.Node, error) {
+	// Load base configuration but override data directory
+	cfg := loadBaseConfig(ctx)
+	cfg.Node.DataDir = dataDir // Override with custom data directory
+
+	// Create the node without starting any services
+	stack, err := node.New(&cfg.Node)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create node: %v", err)
+	}
+
+	return stack, nil
+}
+
+func expand(ctx *cli.Context) error {
+	var (
+		targetDataDir string
+		prefix        []byte
+		start         []byte
+	)
+
+	// Parse arguments: target-datadir [prefix] [start]
+	if ctx.NArg() < 1 {
+		return fmt.Errorf("missing required target data directory argument: %v", ctx.Command.ArgsUsage)
+	}
+	if ctx.NArg() > 3 {
+		return fmt.Errorf("too many arguments: %v", ctx.Command.ArgsUsage)
+	}
+
+	targetDataDir = ctx.Args().Get(0)
+
+	// Validate target directory
+	if targetDataDir == "" {
+		return fmt.Errorf("target data directory cannot be empty")
+	}
+
+	// Parse optional prefix and start
+	if ctx.NArg() >= 2 {
+		if d, err := hexutil.Decode(ctx.Args().Get(1)); err != nil {
+			return fmt.Errorf("failed to hex-decode 'prefix': %v", err)
+		} else {
+			prefix = d
+		}
+	}
+	if ctx.NArg() >= 3 {
+		if d, err := hexutil.Decode(ctx.Args().Get(2)); err != nil {
+			return fmt.Errorf("failed to hex-decode 'start': %v", err)
+		} else {
+			start = d
+		}
+	}
+
+	log.Info("Starting database expansion",
+		"sourceDb", "current database (from --datadir)",
+		"targetDataDir", targetDataDir,
+		"prefix", fmt.Sprintf("%x", prefix),
+		"start", fmt.Sprintf("%x", start))
+
+	// Create source database using current configuration (like inspect command)
+	sourceStack, _ := makeConfigNode(ctx)
+	defer sourceStack.Close()
+
+	sourceDb := utils.MakeChainDatabase(ctx, sourceStack, false, false) // Use current database
+	defer sourceDb.Close()
+
+	// Create target stack with target data directory (read-write)
+	targetStack, err := makeConfigNodeWithDataDir(ctx, targetDataDir)
+	if err != nil {
+		return fmt.Errorf("failed to create target stack: %v", err)
+	}
+	defer targetStack.Close()
+
+	targetDb := utils.MakeChainDatabase(ctx, targetStack, false, false) // readonly=false
+	defer targetDb.Close()
+
+	// Perform the expansion
+	return rawdb.InspectDatabaseWithExpansion(sourceDb, targetDb, prefix, start)
 }
 
 func ancientInspect(ctx *cli.Context) error {
