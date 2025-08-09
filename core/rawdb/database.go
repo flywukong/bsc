@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"hash/fnv"
+	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -666,6 +668,9 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		lastProgress      int
 		wg                sync.WaitGroup
 		processedCount    int64
+		bloomFilterChecks int64 // Total bloom filter checks
+		bloomFilterHits   int64 // Bloom filter "might contain" results
+		magicMarkerChecks int64 // Precise magic marker checks performed
 	)
 
 	// Channel for sending key-value pairs to workers
@@ -674,16 +679,111 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	log.Info("Starting database expansion from 1T to 2T with concurrent batch writing",
 		"workers", numWorkers, "maxBatchSize", "512MB", "expectedKeys", totalExpectedKeys)
 
+	// Simple Bloom Filter implementation
+	type bloomFilter struct {
+		bits     []uint64
+		size     uint64
+		hashFunc []func([]byte) uint64
+		mu       sync.RWMutex
+	}
+
+	// Create a new bloom filter
+	newBloomFilter := func(expectedItems uint64, falsePositiveRate float64) *bloomFilter {
+		// Calculate optimal size and hash functions count
+		// m = -(n * ln(p)) / (ln(2)^2), k = (m/n) * ln(2)
+		m := uint64(-float64(expectedItems) * math.Log(falsePositiveRate) / (math.Log(2) * math.Log(2)))
+		k := uint64(float64(m) / float64(expectedItems) * math.Log(2))
+		if k < 1 {
+			k = 1
+		}
+		if k > 10 {
+			k = 10 // Cap at 10 hash functions for performance
+		}
+
+		// Round up to nearest multiple of 64 for efficient uint64 operations
+		m = ((m + 63) / 64) * 64
+		bitsArray := make([]uint64, m/64)
+
+		// Create k different hash functions
+		hashFuncs := make([]func([]byte) uint64, k)
+		for i := uint64(0); i < k; i++ {
+			seed := i + 1
+			hashFuncs[i] = func(data []byte) uint64 {
+				h := fnv.New64a()
+				h.Write([]byte{byte(seed)}) // Add seed
+				h.Write(data)
+				return h.Sum64() % m
+			}
+		}
+
+		log.Info("Bloom filter initialized",
+			"expectedItems", expectedItems,
+			"targetFalsePositiveRate", falsePositiveRate,
+			"sizeInBits", m,
+			"sizeInMB", m/8/1024/1024,
+			"hashFunctions", k)
+
+		return &bloomFilter{
+			bits:     bitsArray,
+			size:     m,
+			hashFunc: hashFuncs,
+		}
+	}
+
+	// Add key to bloom filter
+	bloomAdd := func(bf *bloomFilter, key []byte) {
+		bf.mu.Lock()
+		defer bf.mu.Unlock()
+		for _, hash := range bf.hashFunc {
+			bitIndex := hash(key)
+			arrayIndex := bitIndex / 64
+			bitPos := bitIndex % 64
+			bf.bits[arrayIndex] |= (1 << bitPos)
+		}
+	}
+
+	// Check if key might be in bloom filter
+	bloomMightContain := func(bf *bloomFilter, key []byte) bool {
+		bf.mu.RLock()
+		defer bf.mu.RUnlock()
+		for _, hash := range bf.hashFunc {
+			bitIndex := hash(key)
+			arrayIndex := bitIndex / 64
+			bitPos := bitIndex % 64
+			if (bf.bits[arrayIndex] & (1 << bitPos)) == 0 {
+				return false // Definitely not in the set
+			}
+		}
+		return true // Might be in the set
+	}
+
+	// Initialize bloom filter for generated keys
+	// Use expected 50% of totalExpectedKeys and 1% false positive rate
+	generatedKeysBloom := newBloomFilter(totalExpectedKeys/2, 0.01)
+
 	// Magic marker to identify generated keys (0xGE = 0x47, 0x45)
 	const generatedKeyMarker1 = byte(0x47) // 'G'
 	const generatedKeyMarker2 = byte(0x45) // 'E'
 
 	// Helper function to check if a key was already generated
+	// Uses bloom filter for fast filtering, then magic marker for precise check
 	isGeneratedKey := func(key []byte) bool {
 		if len(key) < 4 {
 			return false
 		}
-		// Check for our magic marker in positions [len-4] and [len-3]
+
+		atomic.AddInt64(&bloomFilterChecks, 1)
+
+		// Fast bloom filter check first - if false, definitely not generated
+		if !bloomMightContain(generatedKeysBloom, key) {
+			return false
+		}
+
+		// Bloom filter says "might contain", increment hit counter
+		atomic.AddInt64(&bloomFilterHits, 1)
+		atomic.AddInt64(&magicMarkerChecks, 1)
+
+		// Do precise magic marker check
 		return key[len(key)-4] == generatedKeyMarker1 && key[len(key)-3] == generatedKeyMarker2
 	}
 
@@ -771,6 +871,9 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 						"newKeyLen", len(newKey))
 					continue
 				}
+
+				// Add new key to bloom filter for future duplicate detection
+				bloomAdd(generatedKeysBloom, newKey)
 
 				if err := batch.Put(newKey, newValue); err != nil {
 					atomic.AddInt64(&writeErrors, 1)
@@ -877,9 +980,18 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		count++
 
 		if count%10000 == 0 && time.Since(logged) > 5*time.Second {
+			currentBloomChecks := atomic.LoadInt64(&bloomFilterChecks)
+			currentBloomHits := atomic.LoadInt64(&bloomFilterHits)
+			bloomEfficiency := float64(0)
+			if currentBloomChecks > 0 {
+				bloomEfficiency = (float64(currentBloomChecks-currentBloomHits) / float64(currentBloomChecks)) * 100
+			}
+
 			log.Info("Scanning database",
 				"processedKeys", count,
 				"skippedGenerated", skippedGenerated,
+				"bloomFilterChecks", currentBloomChecks,
+				"bloomEfficiency", fmt.Sprintf("%.2f%%", bloomEfficiency),
 				"elapsed", common.PrettyDuration(time.Since(start)))
 			logged = time.Now()
 		}
@@ -898,6 +1010,15 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	finalErrors := atomic.LoadInt64(&writeErrors)
 	finalDuplicates := atomic.LoadInt64(&duplicateKeys)
 	finalSkipped := atomic.LoadInt64(&skippedGenerated)
+	finalBloomChecks := atomic.LoadInt64(&bloomFilterChecks)
+	finalBloomHits := atomic.LoadInt64(&bloomFilterHits)
+	finalMagicChecks := atomic.LoadInt64(&magicMarkerChecks)
+
+	// Calculate bloom filter efficiency
+	bloomFilterRate := float64(0)
+	if finalBloomChecks > 0 {
+		bloomFilterRate = (float64(finalBloomChecks-finalBloomHits) / float64(finalBloomChecks)) * 100
+	}
 
 	log.Info("Database expansion completed (1T -> 2T)",
 		"totalKeysScanned", count,
@@ -908,6 +1029,13 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		"writeErrors", finalErrors,
 		"duplicateKeys", finalDuplicates,
 		"totalDuration", common.PrettyDuration(time.Since(start)))
+
+	log.Info("Bloom filter performance statistics",
+		"totalBloomFilterChecks", finalBloomChecks,
+		"bloomFilterHits", finalBloomHits,
+		"magicMarkerChecks", finalMagicChecks,
+		"bloomFilterEffectiveFiltering", fmt.Sprintf("%.2f%%", bloomFilterRate),
+		"bloomFilterFalsePositiveRate", fmt.Sprintf("%.4f%%", float64(finalMagicChecks-finalSkipped)/float64(finalMagicChecks)*100))
 
 	return nil
 }
