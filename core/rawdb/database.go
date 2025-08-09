@@ -674,16 +674,29 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	log.Info("Starting database expansion from 1T to 2T with concurrent batch writing",
 		"workers", numWorkers, "maxBatchSize", "512MB", "expectedKeys", totalExpectedKeys)
 
+	// Magic marker to identify generated keys (0xGE = 0x47, 0x45)
+	const generatedKeyMarker1 = byte(0x47) // 'G'
+	const generatedKeyMarker2 = byte(0x45) // 'E'
+
+	// Helper function to check if a key was already generated
+	isGeneratedKey := func(key []byte) bool {
+		if len(key) < 4 {
+			return false
+		}
+		// Check for our magic marker in positions [len-4] and [len-3]
+		return key[len(key)-4] == generatedKeyMarker1 && key[len(key)-3] == generatedKeyMarker2
+	}
+
 	// Helper function to generate new key
 	generateNewKey := func(originalKey []byte) []byte {
-		if len(originalKey) <= 2 {
+		if len(originalKey) <= 4 {
 			return originalKey
 		}
 
 		newKey := make([]byte, len(originalKey))
 		copy(newKey, originalKey)
 
-		mid := len(originalKey) - 2
+		mid := len(originalKey) - 4 // Leave 4 bytes at the end for markers and version
 		for i := 0; i < mid/2; i++ {
 			j := (i + mid/2) % mid
 			newKey[i], newKey[j] = newKey[j], newKey[i]
@@ -695,6 +708,9 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			newKey[i] ^= xorKey[0]
 		}
 
+		// Set magic marker to identify this as a generated key
+		newKey[len(originalKey)-4] = generatedKeyMarker1
+		newKey[len(originalKey)-3] = generatedKeyMarker2
 		// 保留末尾两字节版本号不变
 		newKey[len(originalKey)-2] = originalKey[len(originalKey)-2]
 		newKey[len(originalKey)-1] = originalKey[len(originalKey)-1]
@@ -824,12 +840,32 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	logged := time.Now()
 	count := int64(0)
 
-	// Process all keys without switch case logic
+	// Process all keys without switch case logic, but skip already generated keys
+	var skippedGenerated int64
 	for it.Next() {
 		key := make([]byte, len(it.Key()))
 		value := make([]byte, len(it.Value()))
 		copy(key, it.Key())
 		copy(value, it.Value())
+
+		// Skip keys that were already generated in a previous iteration
+		if isGeneratedKey(key) {
+			atomic.AddInt64(&skippedGenerated, 1)
+			count++
+
+			// Log skipped keys periodically
+			if skippedGenerated%1000 == 0 {
+				keyLen := len(key)
+				if keyLen > 16 {
+					keyLen = 16
+				}
+				log.Debug("Skipping already generated key",
+					"skippedCount", skippedGenerated,
+					"keyPrefix", fmt.Sprintf("%x", key[:keyLen]),
+					"keyLen", len(key))
+			}
+			continue
+		}
 
 		kvChan <- kvPair{
 			key:   key,
@@ -841,14 +877,19 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		count++
 
 		if count%10000 == 0 && time.Since(logged) > 5*time.Second {
-			log.Info("Scanning database", "processedKeys", count, "elapsed", common.PrettyDuration(time.Since(start)))
+			log.Info("Scanning database",
+				"processedKeys", count,
+				"skippedGenerated", skippedGenerated,
+				"elapsed", common.PrettyDuration(time.Since(start)))
 			logged = time.Now()
 		}
 	}
 
 	// Close channel and wait for workers to finish
 	close(kvChan)
-	log.Info("Database scan completed, waiting for workers to finish...")
+	log.Info("Database scan completed, waiting for workers to finish...",
+		"totalScannedKeys", count,
+		"skippedGenerated", skippedGenerated)
 	wg.Wait()
 
 	// Final statistics
@@ -856,9 +897,12 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	finalBytesWritten := atomic.LoadInt64(&totalBytesWritten)
 	finalErrors := atomic.LoadInt64(&writeErrors)
 	finalDuplicates := atomic.LoadInt64(&duplicateKeys)
+	finalSkipped := atomic.LoadInt64(&skippedGenerated)
 
 	log.Info("Database expansion completed (1T -> 2T)",
-		"totalKeysProcessed", count,
+		"totalKeysScanned", count,
+		"originalKeysProcessed", count-finalSkipped,
+		"skippedGeneratedKeys", finalSkipped,
 		"newKeysCreated", finalKeysCreated,
 		"totalBytesWritten", common.StorageSize(finalBytesWritten).String(),
 		"writeErrors", finalErrors,
