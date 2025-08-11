@@ -897,16 +897,20 @@ func (n *Node) CheckIfMultiDataBase() bool {
 
 	separateSnapshotDir := filepath.Join(n.ResolvePath("chaindata"), "snapshot")
 	snapshotInfo, snapshotErr := os.Stat(separateSnapshotDir)
-	hasSnapshot := snapshotErr == nil && snapshotInfo.IsDir()
+	hasSnapshotDB := snapshotErr == nil && snapshotInfo.IsDir()
 
-	// Both must exist together or neither should exist
-	if hasState && hasSnapshot {
+	separateIndexDir := filepath.Join(n.ResolvePath("chaindata"), "txindex")
+	indexInfo, indexErr := os.Stat(separateIndexDir)
+	hasIndexDB := indexErr == nil && indexInfo.IsDir()
+
+	// All three must exist together or none should exist
+	if hasState && hasSnapshotDB && hasIndexDB {
 		return true
-	} else if !hasState && !hasSnapshot {
-		return false
-	} else {
-		panic("data corruption! missing snap or state dir.")
 	}
+	if !hasState && !hasSnapshotDB && !hasIndexDB {
+		return false
+	}
+	panic("data corruption! missing state, snapshot or txindex dir.")
 }
 
 // ResolvePath returns the absolute path of a resource in the instance directory.
