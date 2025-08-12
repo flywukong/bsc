@@ -42,8 +42,9 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/ethdb/leveldb"
+	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/triedb"
@@ -1548,37 +1549,30 @@ func migrateDatabase(ctx *cli.Context) error {
 	sourceDB := utils.MakeChainDatabase(ctx, sourceStack, true, false)
 	defer sourceDB.Close()
 
-	// Create target databases (multi-database format)
-	targetConfig := &node.Config{DataDir: targetDataDir}
-	targetStack, err := node.New(targetConfig)
-	if err != nil {
-		return fmt.Errorf("failed to create target node: %v", err)
-	}
-	defer targetStack.Close()
-
-	// Main chain database
-	chainDB, err := targetStack.OpenDatabase("chaindata", cacheSize*cacheDB*7/100, 64, "", false, false)
+	// Create target databases directly using low-level database creation
+	// This avoids Node's automatic directory nesting
+	chainDB, err := openTargetDatabase(targetChainDataPath, cacheSize*cacheDB*7/100, 64)
 	if err != nil {
 		return fmt.Errorf("failed to create target chain database: %v", err)
 	}
 	defer chainDB.Close()
 
-	// State database - use OpenDatabaseWithFreezer instead of OpenDatabase
-	stateDB, err := targetStack.OpenDatabaseWithFreezer("chaindata/state", cacheSize*cacheDB*50/100, 128, "", "eth/db/statedata/", false, false)
+	// State database with freezer
+	stateDB, err := openTargetDatabaseWithFreezer(targetStatePath, cacheSize*cacheDB*50/100, 128)
 	if err != nil {
 		return fmt.Errorf("failed to create target state database: %v", err)
 	}
 	defer stateDB.Close()
 
 	// Snapshot database
-	snapDB, err := targetStack.OpenDatabase("chaindata/snapshot", cacheSize*cacheDB*24/100, 32, "eth/db/snapdata/", false, true)
+	snapDB, err := openTargetDatabase(targetSnapshotPath, cacheSize*cacheDB*24/100, 32)
 	if err != nil {
 		return fmt.Errorf("failed to create target snapshot database: %v", err)
 	}
 	defer snapDB.Close()
 
 	// TxIndex database
-	indexDB, err := targetStack.OpenDatabase("chaindata/txindex", cacheSize*cacheDB*19/100, 32, "eth/db/txindex/", false, true)
+	indexDB, err := openTargetDatabase(targetTxIndexPath, cacheSize*cacheDB*19/100, 32)
 	if err != nil {
 		return fmt.Errorf("failed to create target txindex database: %v", err)
 	}
@@ -1586,6 +1580,34 @@ func migrateDatabase(ctx *cli.Context) error {
 
 	// Start migration
 	return performMigration(sourceDB, chainDB, stateDB, snapDB, indexDB)
+}
+
+// openTargetDatabase creates a key-value database at the specified path
+func openTargetDatabase(dbPath string, cache, handles int) (ethdb.Database, error) {
+	// Determine database type from the path or default to pebble
+	dbType := rawdb.PreexistingDatabase(dbPath)
+	if dbType == "" {
+		dbType = rawdb.DBPebble // Default to pebble
+	}
+
+	if dbType == rawdb.DBPebble {
+		return pebble.New(dbPath, cache, handles, "", false)
+	} else {
+		return leveldb.New(dbPath, cache, handles, "", false)
+	}
+}
+
+// openTargetDatabaseWithFreezer creates a database with freezer support
+func openTargetDatabaseWithFreezer(dbPath string, cache, handles int) (ethdb.Database, error) {
+	// First create the key-value database
+	kvdb, err := openTargetDatabase(dbPath, cache, handles)
+	if err != nil {
+		return nil, err
+	}
+
+	// Add freezer support
+	ancientPath := filepath.Join(dbPath, "ancient")
+	return rawdb.NewDatabaseWithFreezer(kvdb, ancientPath, "eth/db/statedata/", false, false, false)
 }
 
 // KeyValuePair represents a key-value pair with its target database type
