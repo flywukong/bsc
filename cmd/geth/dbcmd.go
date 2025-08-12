@@ -1530,12 +1530,6 @@ func migrateDatabase(ctx *cli.Context) error {
 	sourceStack, _ := makeConfigNode(ctx)
 	defer sourceStack.Close()
 
-	// Validate source directory using Node's ResolvePath method
-	sourceChainDataPath := sourceStack.ResolvePath("chaindata")
-	if !common.FileExist(sourceChainDataPath) {
-		return fmt.Errorf("source chaindata directory does not exist: %s", sourceChainDataPath)
-	}
-
 	// Create target directory structure
 	targetChainDataPath := filepath.Join(targetDataDir, "chaindata")
 	targetStatePath := filepath.Join(targetDataDir, "chaindata", "state")
@@ -1548,7 +1542,7 @@ func migrateDatabase(ctx *cli.Context) error {
 		}
 	}
 
-	log.Info("Starting database migration", "source", sourceChainDataPath, "target", targetDataDir)
+	log.Info("Starting database migration", "source", sourceStack.ResolvePath("chaindata"), "target", targetDataDir)
 
 	// Open source database using standard geth method
 	sourceDB := utils.MakeChainDatabase(ctx, sourceStack, true, false)
