@@ -1534,9 +1534,13 @@ func migrateDatabase(ctx *cli.Context) error {
 
 	log.Info("Starting in-place database migration", "source", sourceChainDataPath)
 
-	// Open source database for read/write (NOT readonly). IMPORTANT: Do this
-	// BEFORE creating subdirectories so the node does not auto-open them.
-	sourceDB := utils.MakeChainDatabase(ctx, sourceStack, false, false)
+	// Open source database for read/write (NOT readonly) without using the
+	// Node helper to avoid auto-opening separate state/snapshot/txindex DBs.
+	// We only need the hot key-value store for in-place extraction & deletion.
+	sourceDB, err := openTargetDatabase(sourceChainDataPath, cacheSize*cacheDB*7/100, 64)
+	if err != nil {
+		return fmt.Errorf("failed to open source chain database: %v", err)
+	}
 	defer sourceDB.Close()
 
 	// Create target directory structure (separate databases within source chaindata)
