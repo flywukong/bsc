@@ -1532,6 +1532,13 @@ func migrateDatabase(ctx *cli.Context) error {
 	// Get source database path
 	sourceChainDataPath := sourceStack.ResolvePath("chaindata")
 
+	log.Info("Starting in-place database migration", "source", sourceChainDataPath)
+
+	// Open source database for read/write (NOT readonly). IMPORTANT: Do this
+	// BEFORE creating subdirectories so the node does not auto-open them.
+	sourceDB := utils.MakeChainDatabase(ctx, sourceStack, false, false)
+	defer sourceDB.Close()
+
 	// Create target directory structure (separate databases within source chaindata)
 	targetStatePath := filepath.Join(sourceChainDataPath, "state")
 	targetSnapshotPath := filepath.Join(sourceChainDataPath, "snapshot")
@@ -1542,12 +1549,6 @@ func migrateDatabase(ctx *cli.Context) error {
 			return fmt.Errorf("failed to create directory %s: %v", dir, err)
 		}
 	}
-
-	log.Info("Starting in-place database migration", "source", sourceChainDataPath)
-
-	// Open source database for read/write (NOT readonly)
-	sourceDB := utils.MakeChainDatabase(ctx, sourceStack, false, false)
-	defer sourceDB.Close()
 
 	// Create target databases for extracted data
 	// State database with freezer
