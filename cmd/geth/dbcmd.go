@@ -320,19 +320,24 @@ of ancientStore, will also displays the reserved number of blocks in ancientStor
 		Action:    migrateDatabase,
 		Name:      "migrate",
 		Usage:     "Migrate single database to multi-database format",
-		ArgsUsage: "<source-datadir> <target-datadir>",
+		ArgsUsage: "<target-datadir>",
 		Flags: slices.Concat([]cli.Flag{
+			utils.DataDirFlag,
 			utils.SyncModeFlag,
 			utils.CacheFlag,
 			utils.CacheDatabaseFlag,
 		}, utils.NetworkFlags),
 		Description: `This command migrates a single chaindb database to multi-database format.
-The source database will be read from <source-datadir>/chaindata directory,
+The source database will be read from --datadir/chaindata directory,
 and the migrated data will be written to <target-datadir>/chaindata directory with separate subdirectories:
   - chaindata/      - chain and metadata
   - chaindata/state - state trie data
   - chaindata/snapshot - snapshot data
   - chaindata/txindex - transaction index data
+
+Usage examples:
+  geth --datadir /data/ethereum db migrate /data/ethereum-multidb
+  geth --datadir ~/.ethereum db migrate ~/.ethereum-multidb
 
 WARNING: This operation may take a very long time to finish for large databases (2TB+).`,
 	}
@@ -1513,18 +1518,20 @@ func inspectHistory(ctx *cli.Context) error {
 
 // migrateDatabase migrates a single database to multi-database format
 func migrateDatabase(ctx *cli.Context) error {
-	if ctx.NArg() != 2 {
+	if ctx.NArg() != 1 {
 		return fmt.Errorf("required arguments: %v", ctx.Command.ArgsUsage)
 	}
 
-	var (
-		sourceDataDir = ctx.Args().Get(0)
-		targetDataDir = ctx.Args().Get(1)
-		cacheSize     = ctx.Int(utils.CacheFlag.Name)
-		cacheDB       = ctx.Int(utils.CacheDatabaseFlag.Name)
-	)
+	targetDataDir := ctx.Args().Get(0)
+	cacheSize := ctx.Int(utils.CacheFlag.Name)
+	cacheDB := ctx.Int(utils.CacheDatabaseFlag.Name)
+
+	// Create source stack using standard geth configuration (handles --datadir)
+	sourceStack, _ := makeConfigNode(ctx)
+	defer sourceStack.Close()
 
 	// Validate source directory
+	sourceDataDir := sourceStack.DataDir()
 	sourceChainDataPath := filepath.Join(sourceDataDir, "chaindata")
 	if !common.FileExist(sourceChainDataPath) {
 		return fmt.Errorf("source chaindata directory does not exist: %s", sourceChainDataPath)
@@ -1544,18 +1551,8 @@ func migrateDatabase(ctx *cli.Context) error {
 
 	log.Info("Starting database migration", "source", sourceDataDir, "target", targetDataDir)
 
-	// Open source database (single database format)
-	sourceConfig := &node.Config{DataDir: sourceDataDir}
-	sourceStack, err := node.New(sourceConfig)
-	if err != nil {
-		return fmt.Errorf("failed to create source node: %v", err)
-	}
-	defer sourceStack.Close()
-
-	sourceDB, err := sourceStack.OpenDatabase("chaindata", cacheSize*cacheDB/100, 256, "", true, false)
-	if err != nil {
-		return fmt.Errorf("failed to open source database: %v", err)
-	}
+	// Open source database using standard geth method
+	sourceDB := utils.MakeChainDatabase(ctx, sourceStack, true, false)
 	defer sourceDB.Close()
 
 	// Create target databases (multi-database format)
