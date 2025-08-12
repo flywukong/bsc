@@ -327,15 +327,6 @@ of ancientStore, will also displays the reserved number of blocks in ancientStor
 			utils.SyncModeFlag,
 			utils.CacheFlag,
 			utils.CacheDatabaseFlag,
-			&cli.IntFlag{
-				Name:  "limit",
-				Usage: "Limit migration to first N entries (for testing)",
-				Value: 0,
-			},
-			&cli.BoolFlag{
-				Name:  "debug-verbose",
-				Usage: "Enable verbose debug logging",
-			},
 		}, utils.NetworkFlags),
 		Description: `This command migrates a single chaindb database to multi-database format.
 The source database will be read from --datadir/chaindata directory,
@@ -1532,7 +1523,6 @@ func migrateDatabase(ctx *cli.Context) error {
 		return fmt.Errorf("required arguments: %v", ctx.Command.ArgsUsage)
 	}
 
-	targetDataDir := ctx.Args().Get(0)
 	cacheSize := ctx.Int(utils.CacheFlag.Name)
 	cacheDB := ctx.Int(utils.CacheDatabaseFlag.Name)
 
@@ -1540,32 +1530,27 @@ func migrateDatabase(ctx *cli.Context) error {
 	sourceStack, _ := makeConfigNode(ctx)
 	defer sourceStack.Close()
 
-	// Create target directory structure
-	targetChainDataPath := filepath.Join(targetDataDir, "chaindata")
-	targetStatePath := filepath.Join(targetDataDir, "chaindata", "state")
-	targetSnapshotPath := filepath.Join(targetDataDir, "chaindata", "snapshot")
-	targetTxIndexPath := filepath.Join(targetDataDir, "chaindata", "txindex")
+	// Get source database path
+	sourceChainDataPath := sourceStack.ResolvePath("chaindata")
+	
+	// Create target directory structure (separate databases within source chaindata)
+	targetStatePath := filepath.Join(sourceChainDataPath, "state")
+	targetSnapshotPath := filepath.Join(sourceChainDataPath, "snapshot")
+	targetTxIndexPath := filepath.Join(sourceChainDataPath, "txindex")
 
-	for _, dir := range []string{targetChainDataPath, targetStatePath, targetSnapshotPath, targetTxIndexPath} {
+	for _, dir := range []string{targetStatePath, targetSnapshotPath, targetTxIndexPath} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return fmt.Errorf("failed to create directory %s: %v", dir, err)
 		}
 	}
 
-	log.Info("Starting database migration", "source", sourceStack.ResolvePath("chaindata"), "target", targetDataDir)
+	log.Info("Starting in-place database migration", "source", sourceChainDataPath)
 
-	// Open source database using standard geth method
-	sourceDB := utils.MakeChainDatabase(ctx, sourceStack, true, false)
+	// Open source database for read/write (NOT readonly)
+	sourceDB := utils.MakeChainDatabase(ctx, sourceStack, false, false)
 	defer sourceDB.Close()
 
-	// Create target databases directly using low-level database creation
-	// This avoids Node's automatic directory nesting
-	chainDB, err := openTargetDatabase(targetChainDataPath, cacheSize*cacheDB*7/100, 64)
-	if err != nil {
-		return fmt.Errorf("failed to create target chain database: %v", err)
-	}
-	defer chainDB.Close()
-
+	// Create target databases for extracted data
 	// State database with freezer
 	stateDB, err := openTargetDatabaseWithFreezer(targetStatePath, cacheSize*cacheDB*50/100, 128)
 	if err != nil {
@@ -1581,7 +1566,7 @@ func migrateDatabase(ctx *cli.Context) error {
 	defer snapDB.Close()
 
 	// TxIndex database
-	indexDB, err := openTargetDatabase(targetTxIndexPath, cacheSize*cacheDB*19/100, 32)
+	indexDB, err := openTargetDatabase(targetTxIndexPath, cacheSize*cacheDB*15/100, 32)
 	if err != nil {
 		return fmt.Errorf("failed to create target txindex database: %v", err)
 	}
@@ -1595,8 +1580,8 @@ func migrateDatabase(ctx *cli.Context) error {
 		log.Info("Running in test mode with limited entries", "limit", limit)
 	}
 
-	// Start migration
-	return performMigration(sourceDB, chainDB, stateDB, snapDB, indexDB, limit, verbose)
+	// Start in-place migration
+	return performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB, limit, verbose)
 }
 
 // openTargetDatabase creates a key-value database at the specified path
@@ -1671,11 +1656,6 @@ type MigrationStats struct {
 	startTime  time.Time
 }
 
-// GetTotal returns the total count atomically
-func (s *MigrationStats) GetTotal() int64 {
-	return atomic.LoadInt64(&s.total)
-}
-
 // Add atomically increments counters
 func (s *MigrationStats) Add(targetDB string, keySize, valueSize int) {
 	atomic.AddInt64(&s.total, 1)
@@ -1715,7 +1695,7 @@ func (s *MigrationStats) GetBytes() (int64, int64, int64, int64) {
 }
 
 // performMigration performs multi-threaded data migration
-func performMigration(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.Database, limit int, verbose bool) error {
+func performMigration(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.Database) error {
 	numWorkers := runtime.NumCPU() * 2 // Use 2x CPU cores for workers
 	if numWorkers > 16 {
 		numWorkers = 16 // Cap at 16 workers to avoid too much overhead
@@ -1750,22 +1730,6 @@ func performMigration(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.Database
 
 		targetDB := categorizeDataByKey(key, value)
 
-		// Debug: Log sample data sizes
-		if verbose && stats.GetTotal() < 1000 {
-			log.Info("Data classification",
-				"keyPrefix", fmt.Sprintf("%x", key[:min(8, len(key))]),
-				"keySize", len(key),
-				"valueSize", len(value),
-				"target", targetDB,
-				"count", stats.GetTotal())
-		}
-
-		// Check limit for test mode
-		if limit > 0 && stats.GetTotal() >= int64(limit) {
-			log.Info("Reached test limit, stopping iteration", "limit", limit)
-			break
-		}
-
 		select {
 		case kvChannel <- KeyValuePair{Key: key, Value: value, TargetDB: targetDB}:
 		case <-time.After(10 * time.Second):
@@ -1788,23 +1752,13 @@ func performMigration(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.Database
 	close(stopProgress)
 
 	total, chain, state, snapshot, txindex := stats.Get()
-	chainBytes, stateBytes, snapBytes, indexBytes := stats.GetBytes()
-	elapsed := time.Since(stats.startTime)
-
 	log.Info("Migration completed",
 		"total", total,
 		"chain", chain,
 		"state", state,
 		"snapshot", snapshot,
 		"txindex", txindex,
-		"elapsed", common.PrettyDuration(elapsed))
-
-	log.Info("Final data sizes",
-		"chainMB", chainBytes/(1024*1024),
-		"stateMB", stateBytes/(1024*1024),
-		"snapMB", snapBytes/(1024*1024),
-		"indexMB", indexBytes/(1024*1024),
-		"totalProcessedMB", (chainBytes+stateBytes+snapBytes+indexBytes)/(1024*1024))
+		"elapsed", common.PrettyDuration(time.Since(stats.startTime)))
 
 	return nil
 }
@@ -1899,8 +1853,6 @@ func progressMonitor(stats *MigrationStats, stop <-chan struct{}) {
 		select {
 		case <-ticker.C:
 			total, chain, state, snapshot, txindex := stats.Get()
-			chainBytes, stateBytes, snapBytes, indexBytes := stats.GetBytes()
-
 			log.Info("Migration progress",
 				"total", total,
 				"chain", chain,
@@ -1909,13 +1861,6 @@ func progressMonitor(stats *MigrationStats, stop <-chan struct{}) {
 				"txindex", txindex,
 				"elapsed", common.PrettyDuration(time.Since(stats.startTime)),
 				"rate", fmt.Sprintf("%.1f items/s", float64(total)/time.Since(stats.startTime).Seconds()))
-
-			log.Info("Migration data sizes",
-				"chainMB", chainBytes/(1024*1024),
-				"stateMB", stateBytes/(1024*1024),
-				"snapMB", snapBytes/(1024*1024),
-				"indexMB", indexBytes/(1024*1024),
-				"totalMB", (chainBytes+stateBytes+snapBytes+indexBytes)/(1024*1024))
 		case <-stop:
 			return
 		}
@@ -2001,4 +1946,142 @@ func categorizeDataByKey(key, value []byte) string {
 
 	// Everything else goes to chain database
 	return "chain"
+}
+
+// performInPlaceMigration performs in-place data migration by extracting data from source DB
+func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, limit int, verbose bool) error {
+	stats := &MigrationStats{startTime: time.Now()}
+
+	log.Info("Starting in-place data migration")
+
+	// Progress monitoring goroutine
+	stopProgress := make(chan struct{})
+	go progressMonitor(stats, stopProgress)
+
+	// Extract state data
+	if err := extractDataByCategory(sourceDB, stateDB, "state", stats, limit, verbose); err != nil {
+		close(stopProgress)
+		return fmt.Errorf("failed to extract state data: %v", err)
+	}
+
+	// Extract snapshot data
+	if err := extractDataByCategory(sourceDB, snapDB, "snapshot", stats, limit, verbose); err != nil {
+		close(stopProgress)
+		return fmt.Errorf("failed to extract snapshot data: %v", err)
+	}
+
+	// Extract txindex data
+	if err := extractDataByCategory(sourceDB, indexDB, "txindex", stats, limit, verbose); err != nil {
+		close(stopProgress)
+		return fmt.Errorf("failed to extract txindex data: %v", err)
+	}
+
+	close(stopProgress)
+
+	total, chain, state, snapshot, txindex := stats.Get()
+	chainBytes, stateBytes, snapBytes, indexBytes := stats.GetBytes()
+	elapsed := time.Since(stats.startTime)
+
+	log.Info("In-place migration completed",
+		"total", total,
+		"chain", chain,
+		"state", state,
+		"snapshot", snapshot,
+		"txindex", txindex,
+		"elapsed", common.PrettyDuration(elapsed))
+
+	log.Info("Final data sizes",
+		"chainMB", chainBytes/(1024*1024),
+		"stateMB", stateBytes/(1024*1024),
+		"snapMB", snapBytes/(1024*1024),
+		"indexMB", indexBytes/(1024*1024),
+		"totalExtractedMB", (stateBytes+snapBytes+indexBytes)/(1024*1024))
+
+	return nil
+}
+
+// extractDataByCategory extracts data of a specific category from source DB to target DB and deletes from source
+func extractDataByCategory(sourceDB, targetDB ethdb.Database, category string, stats *MigrationStats, limit int, verbose bool) error {
+	log.Info("Extracting data category", "category", category)
+
+	// Create batches for target DB and source deletion
+	targetBatch := targetDB.NewBatch()
+	deleteBatch := sourceDB.NewBatch()
+
+	// Iterate through source database
+	it := sourceDB.NewIterator(nil, nil)
+	defer it.Release()
+
+	extracted := 0
+	for it.Next() {
+		// Create copies of key and value since iterator reuses underlying memory
+		key := make([]byte, len(it.Key()))
+		value := make([]byte, len(it.Value()))
+		copy(key, it.Key())
+		copy(value, it.Value())
+
+		targetDB := categorizeDataByKey(key, value)
+
+		// Only process data that matches our target category
+		if targetDB != category {
+			continue
+		}
+
+		// Add to target database
+		if err := targetBatch.Put(key, value); err != nil {
+			return fmt.Errorf("failed to add key to target batch: %v", err)
+		}
+
+		// Mark for deletion from source database
+		if err := deleteBatch.Delete(key); err != nil {
+			return fmt.Errorf("failed to add key to delete batch: %v", err)
+		}
+
+		stats.Add(category, len(key), len(value))
+		extracted++
+
+		// Flush batches when they reach ideal size
+		if targetBatch.ValueSize() >= ethdb.IdealBatchSize {
+			if err := targetBatch.Write(); err != nil {
+				return fmt.Errorf("failed to write target batch: %v", err)
+			}
+			targetBatch.Reset()
+
+			if err := deleteBatch.Write(); err != nil {
+				return fmt.Errorf("failed to write delete batch: %v", err)
+			}
+			deleteBatch.Reset()
+
+			if verbose {
+				log.Info("Batch flushed", "category", category, "extracted", extracted, "batchSize", ethdb.IdealBatchSize/(1024*1024), "MB")
+			}
+		}
+
+		// Check limit for test mode
+		if limit > 0 && extracted >= limit {
+			log.Info("Reached test limit for category", "category", category, "limit", limit)
+			break
+		}
+	}
+
+	// Check for iterator errors
+	if err := it.Error(); err != nil {
+		return fmt.Errorf("iterator error: %v", err)
+	}
+
+	// Flush remaining data
+	if targetBatch.ValueSize() > 0 {
+		if err := targetBatch.Write(); err != nil {
+			return fmt.Errorf("failed to write final target batch: %v", err)
+		}
+	}
+
+	if deleteBatch.ValueSize() > 0 {
+		if err := deleteBatch.Write(); err != nil {
+			return fmt.Errorf("failed to write final delete batch: %v", err)
+		}
+	}
+
+	log.Info("Data extraction completed", "category", category, "extracted", extracted)
+	return nil
 }
