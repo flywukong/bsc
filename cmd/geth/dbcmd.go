@@ -1590,22 +1590,45 @@ func openTargetDatabase(dbPath string, cache, handles int) (ethdb.Database, erro
 		dbType = rawdb.DBPebble // Default to pebble
 	}
 
-	if dbType == rawdb.DBPebble {
-		return pebble.New(dbPath, cache, handles, "", false)
-	} else {
-		return leveldb.New(dbPath, cache, handles, "", false)
-	}
-}
+	var kvdb ethdb.KeyValueStore
+	var err error
 
-// openTargetDatabaseWithFreezer creates a database with freezer support
-func openTargetDatabaseWithFreezer(dbPath string, cache, handles int) (ethdb.Database, error) {
-	// First create the key-value database
-	kvdb, err := openTargetDatabase(dbPath, cache, handles)
+	if dbType == rawdb.DBPebble {
+		kvdb, err = pebble.New(dbPath, cache, handles, "", false)
+	} else {
+		kvdb, err = leveldb.New(dbPath, cache, handles, "", false)
+	}
+
 	if err != nil {
 		return nil, err
 	}
 
-	// Add freezer support
+	// Wrap with rawdb to get full ethdb.Database interface
+	return rawdb.NewDatabase(kvdb), nil
+}
+
+// openTargetDatabaseWithFreezer creates a database with freezer support
+func openTargetDatabaseWithFreezer(dbPath string, cache, handles int) (ethdb.Database, error) {
+	// Determine database type from the path or default to pebble
+	dbType := rawdb.PreexistingDatabase(dbPath)
+	if dbType == "" {
+		dbType = rawdb.DBPebble // Default to pebble
+	}
+
+	var kvdb ethdb.KeyValueStore
+	var err error
+
+	if dbType == rawdb.DBPebble {
+		kvdb, err = pebble.New(dbPath, cache, handles, "", false)
+	} else {
+		kvdb, err = leveldb.New(dbPath, cache, handles, "", false)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Add freezer support directly to the key-value store
 	ancientPath := filepath.Join(dbPath, "ancient")
 	return rawdb.NewDatabaseWithFreezer(kvdb, ancientPath, "eth/db/statedata/", false, false, false)
 }
