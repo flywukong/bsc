@@ -327,6 +327,15 @@ of ancientStore, will also displays the reserved number of blocks in ancientStor
 			utils.SyncModeFlag,
 			utils.CacheFlag,
 			utils.CacheDatabaseFlag,
+			&cli.IntFlag{
+				Name:  "limit",
+				Usage: "Limit migration to first N entries (for testing)",
+				Value: 0,
+			},
+			&cli.BoolFlag{
+				Name:  "debug-verbose",
+				Usage: "Enable verbose debug logging",
+			},
 		}, utils.NetworkFlags),
 		Description: `This command migrates a single chaindb database to multi-database format.
 The source database will be read from --datadir/chaindata directory,
@@ -1578,8 +1587,16 @@ func migrateDatabase(ctx *cli.Context) error {
 	}
 	defer indexDB.Close()
 
+	// Get additional flags
+	limit := ctx.Int("limit")
+	verbose := ctx.Bool("debug-verbose")
+
+	if limit > 0 {
+		log.Info("Running in test mode with limited entries", "limit", limit)
+	}
+
 	// Start migration
-	return performMigration(sourceDB, chainDB, stateDB, snapDB, indexDB)
+	return performMigration(sourceDB, chainDB, stateDB, snapDB, indexDB, limit, verbose)
 }
 
 // openTargetDatabase creates a key-value database at the specified path
@@ -1642,30 +1659,45 @@ type KeyValuePair struct {
 
 // MigrationStats holds thread-safe migration statistics
 type MigrationStats struct {
-	total     int64
-	chain     int64
-	state     int64
-	snapshot  int64
-	txindex   int64
-	startTime time.Time
+	total      int64
+	chain      int64
+	state      int64
+	snapshot   int64
+	txindex    int64
+	chainBytes int64
+	stateBytes int64
+	snapBytes  int64
+	indexBytes int64
+	startTime  time.Time
+}
+
+// GetTotal returns the total count atomically
+func (s *MigrationStats) GetTotal() int64 {
+	return atomic.LoadInt64(&s.total)
 }
 
 // Add atomically increments counters
-func (s *MigrationStats) Add(targetDB string) {
+func (s *MigrationStats) Add(targetDB string, keySize, valueSize int) {
 	atomic.AddInt64(&s.total, 1)
+	dataSize := int64(keySize + valueSize)
+
 	switch targetDB {
 	case "chain":
 		atomic.AddInt64(&s.chain, 1)
+		atomic.AddInt64(&s.chainBytes, dataSize)
 	case "state":
 		atomic.AddInt64(&s.state, 1)
+		atomic.AddInt64(&s.stateBytes, dataSize)
 	case "snapshot":
 		atomic.AddInt64(&s.snapshot, 1)
+		atomic.AddInt64(&s.snapBytes, dataSize)
 	case "txindex":
 		atomic.AddInt64(&s.txindex, 1)
+		atomic.AddInt64(&s.indexBytes, dataSize)
 	}
 }
 
-// Get returns current stats values
+// Get returns current counter values atomically
 func (s *MigrationStats) Get() (int64, int64, int64, int64, int64) {
 	return atomic.LoadInt64(&s.total),
 		atomic.LoadInt64(&s.chain),
@@ -1674,8 +1706,16 @@ func (s *MigrationStats) Get() (int64, int64, int64, int64, int64) {
 		atomic.LoadInt64(&s.txindex)
 }
 
+// GetBytes returns current byte counter values atomically
+func (s *MigrationStats) GetBytes() (int64, int64, int64, int64) {
+	return atomic.LoadInt64(&s.chainBytes),
+		atomic.LoadInt64(&s.stateBytes),
+		atomic.LoadInt64(&s.snapBytes),
+		atomic.LoadInt64(&s.indexBytes)
+}
+
 // performMigration performs multi-threaded data migration
-func performMigration(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.Database) error {
+func performMigration(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.Database, limit int, verbose bool) error {
 	numWorkers := runtime.NumCPU() * 2 // Use 2x CPU cores for workers
 	if numWorkers > 16 {
 		numWorkers = 16 // Cap at 16 workers to avoid too much overhead
@@ -1710,6 +1750,22 @@ func performMigration(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.Database
 
 		targetDB := categorizeDataByKey(key, value)
 
+		// Debug: Log sample data sizes
+		if verbose && stats.GetTotal() < 1000 {
+			log.Info("Data classification",
+				"keyPrefix", fmt.Sprintf("%x", key[:min(8, len(key))]),
+				"keySize", len(key),
+				"valueSize", len(value),
+				"target", targetDB,
+				"count", stats.GetTotal())
+		}
+
+		// Check limit for test mode
+		if limit > 0 && stats.GetTotal() >= int64(limit) {
+			log.Info("Reached test limit, stopping iteration", "limit", limit)
+			break
+		}
+
 		select {
 		case kvChannel <- KeyValuePair{Key: key, Value: value, TargetDB: targetDB}:
 		case <-time.After(10 * time.Second):
@@ -1732,13 +1788,23 @@ func performMigration(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.Database
 	close(stopProgress)
 
 	total, chain, state, snapshot, txindex := stats.Get()
+	chainBytes, stateBytes, snapBytes, indexBytes := stats.GetBytes()
+	elapsed := time.Since(stats.startTime)
+
 	log.Info("Migration completed",
 		"total", total,
 		"chain", chain,
 		"state", state,
 		"snapshot", snapshot,
 		"txindex", txindex,
-		"elapsed", common.PrettyDuration(time.Since(stats.startTime)))
+		"elapsed", common.PrettyDuration(elapsed))
+
+	log.Info("Final data sizes",
+		"chainMB", chainBytes/(1024*1024),
+		"stateMB", stateBytes/(1024*1024),
+		"snapMB", snapBytes/(1024*1024),
+		"indexMB", indexBytes/(1024*1024),
+		"totalProcessedMB", (chainBytes+stateBytes+snapBytes+indexBytes)/(1024*1024))
 
 	return nil
 }
@@ -1811,7 +1877,7 @@ func migrationWorker(id int, kvChannel <-chan KeyValuePair, chainDB, stateDB, sn
 			continue
 		}
 
-		stats.Add(kv.TargetDB)
+		stats.Add(kv.TargetDB, len(kv.Key), len(kv.Value))
 		batchCount++
 
 		// Flush batches when they get large enough
@@ -1833,6 +1899,8 @@ func progressMonitor(stats *MigrationStats, stop <-chan struct{}) {
 		select {
 		case <-ticker.C:
 			total, chain, state, snapshot, txindex := stats.Get()
+			chainBytes, stateBytes, snapBytes, indexBytes := stats.GetBytes()
+
 			log.Info("Migration progress",
 				"total", total,
 				"chain", chain,
@@ -1841,6 +1909,13 @@ func progressMonitor(stats *MigrationStats, stop <-chan struct{}) {
 				"txindex", txindex,
 				"elapsed", common.PrettyDuration(time.Since(stats.startTime)),
 				"rate", fmt.Sprintf("%.1f items/s", float64(total)/time.Since(stats.startTime).Seconds()))
+
+			log.Info("Migration data sizes",
+				"chainMB", chainBytes/(1024*1024),
+				"stateMB", stateBytes/(1024*1024),
+				"snapMB", snapBytes/(1024*1024),
+				"indexMB", indexBytes/(1024*1024),
+				"totalMB", (chainBytes+stateBytes+snapBytes+indexBytes)/(1024*1024))
 		case <-stop:
 			return
 		}
