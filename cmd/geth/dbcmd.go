@@ -320,25 +320,24 @@ of ancientStore, will also displays the reserved number of blocks in ancientStor
 	dbMigrateCmd = &cli.Command{
 		Action:    migrateDatabase,
 		Name:      "migrate",
-		Usage:     "Migrate single database to multi-database format",
-		ArgsUsage: "<target-datadir>",
+		Usage:     "Migrate single database to multi-database format (in-place)",
+		ArgsUsage: "",
 		Flags: slices.Concat([]cli.Flag{
 			utils.DataDirFlag,
 			utils.SyncModeFlag,
 			utils.CacheFlag,
 			utils.CacheDatabaseFlag,
 		}, utils.NetworkFlags),
-		Description: `This command migrates a single chaindb database to multi-database format.
-The source database will be read from --datadir/chaindata directory,
-and the migrated data will be written to <target-datadir>/chaindata directory with separate subdirectories:
-  - chaindata/      - chain and metadata
-  - chaindata/state - state trie data
-  - chaindata/snapshot - snapshot data
-  - chaindata/txindex - transaction index data
+		Description: `This command migrates a single chaindb database to multi-database format IN-PLACE.
+The source database will be read from --datadir/chaindata directory, and data will be split into:
+  - chaindata/           - chain and metadata (remaining)
+  - chaindata/state      - state trie data
+  - chaindata/snapshot   - snapshot data
+  - chaindata/txindex    - transaction index data
 
 Usage examples:
-  geth --datadir /data/ethereum db migrate /data/ethereum-multidb
-  geth --datadir ~/.ethereum db migrate ~/.ethereum-multidb
+  geth --datadir /data/ethereum db migrate
+  geth --datadir ~/.ethereum db migrate
 
 WARNING: This operation may take a very long time to finish for large databases (2TB+).`,
 	}
@@ -1519,8 +1518,8 @@ func inspectHistory(ctx *cli.Context) error {
 
 // migrateDatabase migrates a single database to multi-database format
 func migrateDatabase(ctx *cli.Context) error {
-	if ctx.NArg() != 1 {
-		return fmt.Errorf("required arguments: %v", ctx.Command.ArgsUsage)
+	if ctx.NArg() != 0 {
+		return fmt.Errorf("no arguments expected")
 	}
 
 	cacheSize := ctx.Int(utils.CacheFlag.Name)
@@ -1532,7 +1531,7 @@ func migrateDatabase(ctx *cli.Context) error {
 
 	// Get source database path
 	sourceChainDataPath := sourceStack.ResolvePath("chaindata")
-	
+
 	// Create target directory structure (separate databases within source chaindata)
 	targetStatePath := filepath.Join(sourceChainDataPath, "state")
 	targetSnapshotPath := filepath.Join(sourceChainDataPath, "snapshot")
