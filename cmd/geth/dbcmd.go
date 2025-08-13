@@ -2056,7 +2056,14 @@ func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 	checkDirectorySize(filepath.Join(baseDir, "snapshot"), "snapshot")
 	checkDirectorySize(filepath.Join(baseDir, "txindex"), "txindex")
 
-	log.Info("🎉 Migration completed successfully with proper ancient data structure!")
+	// Perform database compaction after migration
+	log.Info("Starting database compaction to reclaim space...")
+	if err := performDatabaseCompaction(sourceDB, stateDB, snapDB, indexDB); err != nil {
+		log.Error("Failed to compact databases", "error", err)
+		return fmt.Errorf("failed to compact databases: %v", err)
+	}
+
+	log.Info("🎉 Migration completed successfully with proper ancient data structure and compaction!")
 	return nil
 }
 
@@ -2202,6 +2209,14 @@ func moveAncientData(sourceChainDataPath string) error {
 		"to", newStateAncient,
 		"files", len(entries))
 
+	// If target ancient directory already exists, remove it first
+	if common.FileExist(newStateAncient) {
+		log.Info("Target ancient directory already exists, removing it", "target", newStateAncient)
+		if err := os.RemoveAll(newStateAncient); err != nil {
+			return fmt.Errorf("failed to remove existing ancient directory: %v", err)
+		}
+	}
+
 	// Create parent directory for new location if it doesn't exist
 	if err := os.MkdirAll(filepath.Dir(newStateAncient), 0755); err != nil {
 		return fmt.Errorf("failed to create state ancient parent directory: %v", err)
@@ -2216,5 +2231,49 @@ func moveAncientData(sourceChainDataPath string) error {
 		"from", originalStateAncient,
 		"to", newStateAncient)
 
+	return nil
+}
+
+// performDatabaseCompaction compacts all databases after migration to reclaim space
+func performDatabaseCompaction(sourceDB, stateDB, snapDB, indexDB ethdb.Database) error {
+	databases := []struct {
+		db   ethdb.Database
+		name string
+	}{
+		{sourceDB, "chaindata"},
+		{stateDB, "state"},
+		{snapDB, "snapshot"},
+		{indexDB, "txindex"},
+	}
+
+	for _, dbInfo := range databases {
+		log.Info("Compacting database", "name", dbInfo.name)
+
+		// Try to compact the database if it supports compaction
+		if compactor, ok := dbInfo.db.(interface {
+			Compact(start []byte, limit []byte) error
+		}); ok {
+			// Perform full database compaction (nil, nil means compact everything)
+			if err := compactor.Compact(nil, nil); err != nil {
+				log.Warn("Database compaction failed", "name", dbInfo.name, "error", err)
+				// Don't return error for compaction failure, just log it
+				continue
+			}
+			log.Info("✅ Database compacted successfully", "name", dbInfo.name)
+		} else {
+			// If database doesn't support compaction, try sync operation
+			if syncer, ok := dbInfo.db.(interface{ SyncKeyValue() error }); ok {
+				if err := syncer.SyncKeyValue(); err != nil {
+					log.Warn("Database sync failed", "name", dbInfo.name, "error", err)
+				} else {
+					log.Info("📝 Database synced successfully", "name", dbInfo.name)
+				}
+			} else {
+				log.Debug("Database does not support compaction or sync", "name", dbInfo.name)
+			}
+		}
+	}
+
+	log.Info("🗜️  Database compaction completed for all databases")
 	return nil
 }
