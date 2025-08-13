@@ -1534,6 +1534,14 @@ func migrateDatabase(ctx *cli.Context) error {
 
 	log.Info("Starting in-place database migration", "source", sourceChainDataPath)
 
+	// Safety check: ensure subdirectories don't already exist
+	for _, subdir := range []string{"state", "snapshot", "txindex"} {
+		subdirPath := filepath.Join(sourceChainDataPath, subdir)
+		if common.FileExist(subdirPath) {
+			return fmt.Errorf("target subdirectory already exists: %s - migration may have been run before", subdirPath)
+		}
+	}
+
 	// Open source database for read/write (NOT readonly) without using the
 	// Node helper to avoid auto-opening separate state/snapshot/txindex DBs.
 	// We only need the hot key-value store for in-place extraction & deletion.
@@ -1542,6 +1550,11 @@ func migrateDatabase(ctx *cli.Context) error {
 		return fmt.Errorf("failed to open source chain database: %v", err)
 	}
 	defer sourceDB.Close()
+
+	// Count total items before migration for verification
+	log.Info("Counting database entries before migration...")
+	totalItemsBefore := countDatabaseItems(sourceDB)
+	log.Info("Database scan completed", "totalItems", totalItemsBefore)
 
 	// Create target directory structure (separate databases within source chaindata)
 	targetStatePath := filepath.Join(sourceChainDataPath, "state")
@@ -1576,16 +1589,8 @@ func migrateDatabase(ctx *cli.Context) error {
 	}
 	defer indexDB.Close()
 
-	// Get additional flags
-	limit := ctx.Int("limit")
-	verbose := ctx.Bool("debug-verbose")
-
-	if limit > 0 {
-		log.Info("Running in test mode with limited entries", "limit", limit)
-	}
-
-	// Start in-place migration
-	return performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB, limit, verbose)
+	// Start in-place migration (pass the totalItemsBefore for verification)
+	return performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB, totalItemsBefore)
 }
 
 // openTargetDatabase creates a key-value database at the specified path
@@ -1953,7 +1958,7 @@ func categorizeDataByKey(key, value []byte) string {
 }
 
 // performInPlaceMigration performs in-place data migration by extracting data from source DB
-func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, limit int, verbose bool) error {
+func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, totalItemsBefore int64) error {
 	stats := &MigrationStats{startTime: time.Now()}
 
 	log.Info("Starting in-place data migration")
@@ -1963,19 +1968,19 @@ func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 	go progressMonitor(stats, stopProgress)
 
 	// Extract state data
-	if err := extractDataByCategory(sourceDB, stateDB, "state", stats, limit, verbose); err != nil {
+	if err := extractDataByCategory(sourceDB, stateDB, "state", stats); err != nil {
 		close(stopProgress)
 		return fmt.Errorf("failed to extract state data: %v", err)
 	}
 
 	// Extract snapshot data
-	if err := extractDataByCategory(sourceDB, snapDB, "snapshot", stats, limit, verbose); err != nil {
+	if err := extractDataByCategory(sourceDB, snapDB, "snapshot", stats); err != nil {
 		close(stopProgress)
 		return fmt.Errorf("failed to extract snapshot data: %v", err)
 	}
 
 	// Extract txindex data
-	if err := extractDataByCategory(sourceDB, indexDB, "txindex", stats, limit, verbose); err != nil {
+	if err := extractDataByCategory(sourceDB, indexDB, "txindex", stats); err != nil {
 		close(stopProgress)
 		return fmt.Errorf("failed to extract txindex data: %v", err)
 	}
@@ -2001,11 +2006,28 @@ func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 		"indexMB", indexBytes/(1024*1024),
 		"totalExtractedMB", (stateBytes+snapBytes+indexBytes)/(1024*1024))
 
+	// Post-migration verification: count remaining items in source DB
+	log.Info("Performing post-migration verification...")
+	totalItemsAfter := countDatabaseItems(sourceDB)
+	extractedItems := state + snapshot + txindex
+	
+	log.Info("Migration verification",
+		"itemsBefore", totalItemsBefore,
+		"itemsAfter", totalItemsAfter,
+		"itemsExtracted", extractedItems,
+		"expectedRemaining", totalItemsBefore-extractedItems)
+
+	if totalItemsAfter != (totalItemsBefore - extractedItems) {
+		return fmt.Errorf("migration verification failed: expected %d remaining items, found %d", 
+			totalItemsBefore-extractedItems, totalItemsAfter)
+	}
+
+	log.Info("✅ In-place migration completed and verified successfully!")
 	return nil
 }
 
 // extractDataByCategory extracts data of a specific category from source DB to target DB and deletes from source
-func extractDataByCategory(sourceDB, targetDB ethdb.Database, category string, stats *MigrationStats, limit int, verbose bool) error {
+func extractDataByCategory(sourceDB, targetDB ethdb.Database, category string, stats *MigrationStats) error {
 	log.Info("Extracting data category", "category", category)
 
 	// Create batches for target DB and source deletion
@@ -2056,15 +2078,12 @@ func extractDataByCategory(sourceDB, targetDB ethdb.Database, category string, s
 			}
 			deleteBatch.Reset()
 
-			if verbose {
-				log.Info("Batch flushed", "category", category, "extracted", extracted, "batchSize", ethdb.IdealBatchSize/(1024*1024), "MB")
-			}
+			log.Debug("Batch flushed", "category", category, "extracted", extracted, "batchSizeMB", ethdb.IdealBatchSize/(1024*1024))
 		}
 
-		// Check limit for test mode
-		if limit > 0 && extracted >= limit {
-			log.Info("Reached test limit for category", "category", category, "limit", limit)
-			break
+		// Progress update every 10000 items
+		if extracted%10000 == 0 && extracted > 0 {
+			log.Info("Extraction progress", "category", category, "extracted", extracted)
 		}
 	}
 
@@ -2088,4 +2107,26 @@ func extractDataByCategory(sourceDB, targetDB ethdb.Database, category string, s
 
 	log.Info("Data extraction completed", "category", category, "extracted", extracted)
 	return nil
+}
+
+// countDatabaseItems counts the total number of items in a database
+func countDatabaseItems(db ethdb.Database) int64 {
+	var count int64
+	it := db.NewIterator(nil, nil)
+	defer it.Release()
+
+	for it.Next() {
+		count++
+		// Log progress for large databases
+		if count%100000 == 0 {
+			log.Info("Counting progress", "count", count)
+		}
+	}
+	
+	if err := it.Error(); err != nil {
+		log.Error("Error during database count", "error", err)
+		return -1
+	}
+	
+	return count
 }
