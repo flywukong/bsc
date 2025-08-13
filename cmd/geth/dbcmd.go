@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -1590,7 +1591,7 @@ func migrateDatabase(ctx *cli.Context) error {
 	defer indexDB.Close()
 
 	// Start in-place migration (pass the totalItemsBefore for verification)
-	return performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB, totalItemsBefore)
+	return performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB, totalItemsBefore, sourceChainDataPath)
 }
 
 // openTargetDatabase creates a key-value database at the specified path
@@ -1958,7 +1959,7 @@ func categorizeDataByKey(key, value []byte) string {
 }
 
 // performInPlaceMigration performs in-place data migration by extracting data from source DB
-func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, totalItemsBefore int64) error {
+func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, totalItemsBefore int64, sourceChainDataPath string) error {
 	stats := &MigrationStats{startTime: time.Now()}
 
 	log.Info("Starting in-place data migration")
@@ -2010,7 +2011,7 @@ func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 	log.Info("Performing post-migration verification...")
 	totalItemsAfter := countDatabaseItems(sourceDB)
 	extractedItems := state + snapshot + txindex
-	
+
 	log.Info("Migration verification",
 		"itemsBefore", totalItemsBefore,
 		"itemsAfter", totalItemsAfter,
@@ -2018,11 +2019,44 @@ func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 		"expectedRemaining", totalItemsBefore-extractedItems)
 
 	if totalItemsAfter != (totalItemsBefore - extractedItems) {
-		return fmt.Errorf("migration verification failed: expected %d remaining items, found %d", 
+		return fmt.Errorf("migration verification failed: expected %d remaining items, found %d",
 			totalItemsBefore-extractedItems, totalItemsAfter)
 	}
 
 	log.Info("✅ In-place migration completed and verified successfully!")
+
+	// Handle ancient state data migration
+	if err := moveAncientData(sourceChainDataPath); err != nil {
+		log.Error("Failed to move ancient state data", "error", err)
+		return fmt.Errorf("failed to move ancient state data: %v", err)
+	}
+
+	// Show directory sizes for debugging
+	log.Info("Checking database directory sizes...")
+	checkDirectorySize := func(path, name string) {
+		if !common.FileExist(path) {
+			log.Info("Directory size", "name", name, "status", "not found")
+			return
+		}
+		// Try to get directory size using du command
+		cmd := exec.Command("du", "-sh", path)
+		output, err := cmd.Output()
+		if err != nil {
+			log.Info("Directory size", "name", name, "status", "unable to measure")
+		} else {
+			sizeStr := strings.Fields(string(output))[0]
+			log.Info("Directory size", "name", name, "size", sizeStr)
+		}
+	}
+
+	// Get the chaindata base directory from the source path
+	baseDir := sourceChainDataPath
+	checkDirectorySize(baseDir, "chaindata (remaining)")
+	checkDirectorySize(filepath.Join(baseDir, "state"), "state")
+	checkDirectorySize(filepath.Join(baseDir, "snapshot"), "snapshot")
+	checkDirectorySize(filepath.Join(baseDir, "txindex"), "txindex")
+
+	log.Info("🎉 Migration completed successfully with proper ancient data structure!")
 	return nil
 }
 
@@ -2122,11 +2156,65 @@ func countDatabaseItems(db ethdb.Database) int64 {
 			log.Info("Counting progress", "count", count)
 		}
 	}
-	
+
 	if err := it.Error(); err != nil {
 		log.Error("Error during database count", "error", err)
 		return -1
 	}
-	
+
 	return count
+}
+
+// moveAncientData moves ancient state data from chaindata/ancient/state to state/ancient
+func moveAncientData(sourceChainDataPath string) error {
+	log.Info("Checking for ancient state data to migrate...")
+
+	originalAncientDir := filepath.Join(sourceChainDataPath, "ancient")
+
+	// Check if original ancient directory exists
+	if !common.FileExist(originalAncientDir) {
+		log.Info("No ancient directory found", "path", originalAncientDir)
+		return nil
+	}
+
+	// Only handle state ancient data
+	originalStateAncient := filepath.Join(originalAncientDir, "state")
+	newStateAncient := filepath.Join(sourceChainDataPath, "state", "ancient")
+
+	if !common.FileExist(originalStateAncient) {
+		log.Info("No ancient state directory found", "path", originalStateAncient)
+		return nil
+	}
+
+	// Check if the directory has contents
+	entries, err := os.ReadDir(originalStateAncient)
+	if err != nil {
+		return fmt.Errorf("failed to read ancient state directory: %v", err)
+	}
+
+	if len(entries) == 0 {
+		log.Info("Ancient state directory is empty, removing it", "path", originalStateAncient)
+		return os.RemoveAll(originalStateAncient)
+	}
+
+	log.Info("Found ancient state data to migrate",
+		"from", originalStateAncient,
+		"to", newStateAncient,
+		"files", len(entries))
+
+	// Create parent directory for new location if it doesn't exist
+	if err := os.MkdirAll(filepath.Dir(newStateAncient), 0755); err != nil {
+		return fmt.Errorf("failed to create state ancient parent directory: %v", err)
+	}
+
+	// Move the entire ancient state directory
+	if err := os.Rename(originalStateAncient, newStateAncient); err != nil {
+		return fmt.Errorf("failed to move ancient state directory: %v", err)
+	}
+
+	log.Info("✅ Ancient state data moved successfully",
+		"from", originalStateAncient,
+		"to", newStateAncient)
+
+	return nil
 }
