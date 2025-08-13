@@ -2185,8 +2185,10 @@ func moveAncientData(sourceChainDataPath string) error {
 	}
 
 	// Only handle state ancient data
+	// Move chaindata/ancient/state/ to state/ancient/state/
+	// This creates the correct structure: state/ancient/state/ (and potentially state/ancient/chain/ for main chain data)
 	originalStateAncient := filepath.Join(originalAncientDir, "state")
-	newStateAncient := filepath.Join(sourceChainDataPath, "state", "ancient")
+	newStateAncient := filepath.Join(sourceChainDataPath, "state", "ancient", "state")
 
 	if !common.FileExist(originalStateAncient) {
 		log.Info("No ancient state directory found", "path", originalStateAncient)
@@ -2209,15 +2211,15 @@ func moveAncientData(sourceChainDataPath string) error {
 		"to", newStateAncient,
 		"files", len(entries))
 
-	// If target ancient directory already exists, remove it first
+	// If target ancient state directory already exists, remove it first
 	if common.FileExist(newStateAncient) {
-		log.Info("Target ancient directory already exists, removing it", "target", newStateAncient)
+		log.Info("Target ancient state directory already exists, removing it", "target", newStateAncient)
 		if err := os.RemoveAll(newStateAncient); err != nil {
-			return fmt.Errorf("failed to remove existing ancient directory: %v", err)
+			return fmt.Errorf("failed to remove existing ancient state directory: %v", err)
 		}
 	}
 
-	// Create parent directory for new location if it doesn't exist
+	// Create parent directory structure for new location (state/ancient/)
 	if err := os.MkdirAll(filepath.Dir(newStateAncient), 0755); err != nil {
 		return fmt.Errorf("failed to create state ancient parent directory: %v", err)
 	}
