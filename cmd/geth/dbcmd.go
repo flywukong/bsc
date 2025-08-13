@@ -328,6 +328,10 @@ of ancientStore, will also displays the reserved number of blocks in ancientStor
 			utils.SyncModeFlag,
 			utils.CacheFlag,
 			utils.CacheDatabaseFlag,
+			&cli.BoolFlag{
+				Name:  "conservative",
+				Usage: "Use conservative mode (only extract very specific data types)",
+			},
 		}, utils.NetworkFlags),
 		Description: `This command migrates a single chaindb database to multi-database format IN-PLACE.
 The source database will be read from --datadir/chaindata directory, and data will be split into:
@@ -1590,8 +1594,14 @@ func migrateDatabase(ctx *cli.Context) error {
 	}
 	defer indexDB.Close()
 
+	// Get conservative flag
+	conservative := ctx.Bool("conservative")
+	if conservative {
+		log.Info("🛡️ Running in CONSERVATIVE mode - only extracting very specific data types")
+	}
+
 	// Start in-place migration (pass the totalItemsBefore for verification)
-	return performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB, totalItemsBefore, sourceChainDataPath)
+	return performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB, totalItemsBefore, sourceChainDataPath, conservative)
 }
 
 // openTargetDatabase creates a key-value database at the specified path
@@ -1912,6 +1922,38 @@ func isTrieKey(key, value []byte) bool {
 // categorizeDataByKey categorizes database entries based on key prefixes
 // Returns the target database name: "state", "snapshot", "txindex", or "" (stay in original chaindata)
 func categorizeDataByKey(key, value []byte) string {
+	// CRITICAL: Explicit protection for essential metadata keys
+	// These keys must NEVER be extracted and should always stay in chaindata
+	keyStr := string(key)
+	criticalMetadataKeys := []string{
+		"InvalidBlock",             // badBlockKey - CRITICAL for bad block tracking
+		"DatabaseVersion",          // databaseVersionKey
+		"LastHeader",               // headHeaderKey
+		"LastBlock",                // headBlockKey
+		"LastFast",                 // headFastBlockKey
+		"LastFinalized",            // headFinalizedBlockKey
+		"LastPivot",                // lastPivotKey
+		"unclean-shutdown",         // uncleanShutdownKey
+		"eth2-transition",          // transitionStatusKey
+		"SnapshotDisabled",         // snapshotDisabledKey
+		"SkeletonSyncStatus",       // skeletonSyncStatusKey
+		"LastSafePointBlockNumber", // LastSafePointBlockKey
+	}
+
+	for _, criticalKey := range criticalMetadataKeys {
+		if keyStr == criticalKey {
+			log.Debug("🛡️ Protecting critical metadata key", "key", keyStr)
+			return "" // Keep in original chaindata
+		}
+	}
+
+	// Also protect any key starting with config or genesis prefixes
+	if bytes.HasPrefix(key, []byte("ethereum-config-")) ||
+		bytes.HasPrefix(key, []byte("ethereum-genesis-")) {
+		log.Debug("🛡️ Protecting config/genesis key", "keyPrefix", string(key[:min(20, len(key))]))
+		return "" // Keep in original chaindata
+	}
+
 	// State trie data - use the comprehensive trie key logic
 	if isTrieKey(key, value) {
 		return "state"
@@ -1959,7 +2001,7 @@ func categorizeDataByKey(key, value []byte) string {
 }
 
 // performInPlaceMigration performs in-place data migration by extracting data from source DB
-func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, totalItemsBefore int64, sourceChainDataPath string) error {
+func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, totalItemsBefore int64, sourceChainDataPath string, conservative bool) error {
 	stats := &MigrationStats{startTime: time.Now()}
 
 	log.Info("Starting in-place data migration")
@@ -1968,22 +2010,35 @@ func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 	stopProgress := make(chan struct{})
 	go progressMonitor(stats, stopProgress)
 
-	// Extract state data
-	if err := extractDataByCategory(sourceDB, stateDB, "state", stats); err != nil {
-		close(stopProgress)
-		return fmt.Errorf("failed to extract state data: %v", err)
-	}
+	if conservative {
+		// Conservative mode: only extract txindex data (safest)
+		log.Info("🔍 CONSERVATIVE: Only extracting txindex data...")
+		if err := extractDataByCategoryConservative(sourceDB, indexDB, "txindex", stats); err != nil {
+			close(stopProgress)
+			return fmt.Errorf("failed to extract txindex data: %v", err)
+		}
+	} else {
+		// Normal mode: extract all data types
+		// Extract state data
+		log.Info("🔍 Starting state data extraction...")
+		if err := extractDataByCategory(sourceDB, stateDB, "state", stats); err != nil {
+			close(stopProgress)
+			return fmt.Errorf("failed to extract state data: %v", err)
+		}
 
-	// Extract snapshot data
-	if err := extractDataByCategory(sourceDB, snapDB, "snapshot", stats); err != nil {
-		close(stopProgress)
-		return fmt.Errorf("failed to extract snapshot data: %v", err)
-	}
+		// Extract snapshot data
+		log.Info("🔍 Starting snapshot data extraction...")
+		if err := extractDataByCategory(sourceDB, snapDB, "snapshot", stats); err != nil {
+			close(stopProgress)
+			return fmt.Errorf("failed to extract snapshot data: %v", err)
+		}
 
-	// Extract txindex data
-	if err := extractDataByCategory(sourceDB, indexDB, "txindex", stats); err != nil {
-		close(stopProgress)
-		return fmt.Errorf("failed to extract txindex data: %v", err)
+		// Extract txindex data
+		log.Info("🔍 Starting txindex data extraction...")
+		if err := extractDataByCategory(sourceDB, indexDB, "txindex", stats); err != nil {
+			close(stopProgress)
+			return fmt.Errorf("failed to extract txindex data: %v", err)
+		}
 	}
 
 	close(stopProgress)
@@ -2095,6 +2150,16 @@ func extractDataByCategory(sourceDB, targetDB ethdb.Database, category string, s
 			continue
 		}
 
+		// Debug: Log first few extractions for each category
+		if extracted < 10 {
+			log.Info("📝 Extracting key",
+				"category", category,
+				"keyHex", fmt.Sprintf("%x", key[:min(16, len(key))]),
+				"keyStr", string(key[:min(32, len(key))]),
+				"keyLen", len(key),
+				"valueLen", len(value))
+		}
+
 		// Add to target database
 		if err := targetBatch.Put(key, value); err != nil {
 			return fmt.Errorf("failed to add key to target batch: %v", err)
@@ -2148,6 +2213,125 @@ func extractDataByCategory(sourceDB, targetDB ethdb.Database, category string, s
 	}
 
 	log.Info("Data extraction completed", "category", category, "extracted", extracted)
+	return nil
+}
+
+// extractDataByCategoryConservative - super conservative extraction (only very specific keys)
+func extractDataByCategoryConservative(sourceDB, targetDB ethdb.Database, category string, stats *MigrationStats) error {
+	log.Info("Extracting data category (CONSERVATIVE)", "category", category)
+
+	// Create batches for target DB and source deletion
+	targetBatch := targetDB.NewBatch()
+	deleteBatch := sourceDB.NewBatch()
+
+	// Iterate through source database
+	it := sourceDB.NewIterator(nil, nil)
+	defer it.Release()
+
+	extracted := 0
+	for it.Next() {
+		// Create copies of key and value since iterator reuses underlying memory
+		key := make([]byte, len(it.Key()))
+		value := make([]byte, len(it.Value()))
+		copy(key, it.Key())
+		copy(value, it.Value())
+
+		var shouldExtract bool
+
+		// SUPER CONSERVATIVE: Only extract the most obvious keys
+		if category == "txindex" {
+			// Only extract transaction lookup keys with exact prefix and length
+			if bytes.HasPrefix(key, []byte("l")) && len(key) == (1+32) { // txLookupPrefix + hash
+				shouldExtract = true
+			}
+		} else if category == "snapshot" {
+			// Only extract account snapshots with exact prefix and length
+			if bytes.HasPrefix(key, []byte("a")) && len(key) == (1+32) { // SnapshotAccountPrefix + hash
+				shouldExtract = true
+			}
+			// Only extract storage snapshots with exact prefix and length
+			if bytes.HasPrefix(key, []byte("o")) && len(key) == (1+32+32) { // SnapshotStoragePrefix + accountHash + storageHash
+				shouldExtract = true
+			}
+		} else if category == "state" {
+			// Only extract the most obvious trie keys
+			keyStr := string(key)
+			if keyStr == "TrieJournal" || keyStr == "TrieSync" || keyStr == "LastStateID" {
+				shouldExtract = true
+			}
+			// Only extract very specific prefixed trie data
+			if bytes.HasPrefix(key, []byte("A")) && len(key) > 1 { // TrieNodeAccountPrefix
+				shouldExtract = true
+			}
+			if bytes.HasPrefix(key, []byte("O")) && len(key) > 1 { // TrieNodeStoragePrefix
+				shouldExtract = true
+			}
+		}
+
+		if !shouldExtract {
+			continue
+		}
+
+		// Log what we're extracting
+		log.Info("🔎 CONSERVATIVE extracting",
+			"category", category,
+			"keyHex", fmt.Sprintf("%x", key[:min(16, len(key))]),
+			"keyStr", string(key[:min(32, len(key))]),
+			"keyLen", len(key))
+
+		// Add to target database
+		if err := targetBatch.Put(key, value); err != nil {
+			return fmt.Errorf("failed to add key to target batch: %v", err)
+		}
+
+		// Mark for deletion from source database
+		if err := deleteBatch.Delete(key); err != nil {
+			return fmt.Errorf("failed to add key to delete batch: %v", err)
+		}
+
+		stats.Add(category, len(key), len(value))
+		extracted++
+
+		// Flush batches when they reach ideal size
+		if targetBatch.ValueSize() >= ethdb.IdealBatchSize {
+			if err := targetBatch.Write(); err != nil {
+				return fmt.Errorf("failed to write target batch: %v", err)
+			}
+			targetBatch.Reset()
+
+			if err := deleteBatch.Write(); err != nil {
+				return fmt.Errorf("failed to write delete batch: %v", err)
+			}
+			deleteBatch.Reset()
+
+			log.Debug("Batch flushed (CONSERVATIVE)", "category", category, "extracted", extracted, "batchSizeMB", ethdb.IdealBatchSize/(1024*1024))
+		}
+
+		// Progress update every 1000 items (more frequent for conservative mode)
+		if extracted%1000 == 0 && extracted > 0 {
+			log.Info("Conservative extraction progress", "category", category, "extracted", extracted)
+		}
+	}
+
+	// Check for iterator errors
+	if err := it.Error(); err != nil {
+		return fmt.Errorf("iterator error: %v", err)
+	}
+
+	// Flush remaining data
+	if targetBatch.ValueSize() > 0 {
+		if err := targetBatch.Write(); err != nil {
+			return fmt.Errorf("failed to write final target batch: %v", err)
+		}
+	}
+
+	if deleteBatch.ValueSize() > 0 {
+		if err := deleteBatch.Write(); err != nil {
+			return fmt.Errorf("failed to write final delete batch: %v", err)
+		}
+	}
+
+	log.Info("CONSERVATIVE data extraction completed", "category", category, "extracted", extracted)
 	return nil
 }
 
