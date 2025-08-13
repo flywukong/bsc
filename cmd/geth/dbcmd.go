@@ -1910,7 +1910,7 @@ func isTrieKey(key, value []byte) bool {
 }
 
 // categorizeDataByKey categorizes database entries based on key prefixes
-// Returns the target database name: "state", "snapshot", "txindex", or "chain"
+// Returns the target database name: "state", "snapshot", "txindex", or "" (stay in original chaindata)
 func categorizeDataByKey(key, value []byte) string {
 	// State trie data - use the comprehensive trie key logic
 	if isTrieKey(key, value) {
@@ -1954,8 +1954,8 @@ func categorizeDataByKey(key, value []byte) string {
 		}
 	}
 
-	// Everything else goes to chain database
-	return "chain"
+	// Everything else stays in the original chaindata (not processed)
+	return ""
 }
 
 // performInPlaceMigration performs in-place data migration by extracting data from source DB
@@ -2090,7 +2090,8 @@ func extractDataByCategory(sourceDB, targetDB ethdb.Database, category string, s
 		targetDB := categorizeDataByKey(key, value)
 
 		// Only process data that matches our target category
-		if targetDB != category {
+		// Skip empty classification (data stays in original chaindata)
+		if targetDB == "" || targetDB != category {
 			continue
 		}
 
