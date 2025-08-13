@@ -1909,6 +1909,8 @@ func isTrieKey(key, value []byte) bool {
 		bytes.HasPrefix(key, rawdb.BloomTrieIndexPrefix) ||
 		bytes.HasPrefix(key, rawdb.BloomTriePrefix): // Bloomtrie sub
 		return true
+	case bytes.HasPrefix(key, []byte("c")) && len(key) == (1+common.HashLength): // CodePrefix - contract code
+		return true
 	default:
 		// Check specific metadata keys
 		keyStr := string(key)
@@ -1925,34 +1927,6 @@ func categorizeDataByKey(key, value []byte) string {
 	// CRITICAL: Explicit protection for essential metadata keys
 	// These keys must NEVER be extracted and should always stay in chaindata
 	keyStr := string(key)
-	criticalMetadataKeys := []string{
-		"InvalidBlock",             // badBlockKey - CRITICAL for bad block tracking
-		"DatabaseVersion",          // databaseVersionKey
-		"LastHeader",               // headHeaderKey
-		"LastBlock",                // headBlockKey
-		"LastFast",                 // headFastBlockKey
-		"LastFinalized",            // headFinalizedBlockKey
-		"LastPivot",                // lastPivotKey
-		"unclean-shutdown",         // uncleanShutdownKey
-		"eth2-transition",          // transitionStatusKey
-		"SnapshotDisabled",         // snapshotDisabledKey
-		"SkeletonSyncStatus",       // skeletonSyncStatusKey
-		"LastSafePointBlockNumber", // LastSafePointBlockKey
-	}
-
-	for _, criticalKey := range criticalMetadataKeys {
-		if keyStr == criticalKey {
-			log.Debug("🛡️ Protecting critical metadata key", "key", keyStr)
-			return "" // Keep in original chaindata
-		}
-	}
-
-	// Also protect any key starting with config or genesis prefixes
-	if bytes.HasPrefix(key, []byte("ethereum-config-")) ||
-		bytes.HasPrefix(key, []byte("ethereum-genesis-")) {
-		log.Debug("🛡️ Protecting config/genesis key", "keyPrefix", string(key[:min(20, len(key))]))
-		return "" // Keep in original chaindata
-	}
 
 	// State trie data - use the comprehensive trie key logic
 	if isTrieKey(key, value) {
@@ -1969,7 +1943,6 @@ func categorizeDataByKey(key, value []byte) string {
 	}
 
 	// Snapshot metadata keys
-	keyStr := string(key)
 	snapshotMetadataKeys := []string{
 		"SnapshotRoot", "SnapshotJournal", "SnapshotGenerator",
 		"SnapshotRecovery", "SnapshotSyncStatus",
@@ -1987,8 +1960,7 @@ func categorizeDataByKey(key, value []byte) string {
 
 	// Transaction index metadata
 	txIndexMetadataKeys := []string{
-		"TransactionIndexTail",       // txIndexTailKey - tracks the oldest indexed block
-		"FastTransactionLookupLimit", // fastTxLookupLimitKey - deprecated but kept for completeness
+		"TransactionIndexTail", // txIndexTailKey - tracks the oldest indexed block
 	}
 	for _, metaKey := range txIndexMetadataKeys {
 		if keyStr == metaKey {
