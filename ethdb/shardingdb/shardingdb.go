@@ -7,8 +7,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/ethdb/memorydb"
 	"github.com/ethereum/go-ethereum/ethdb/pebble"
+	"github.com/ethereum/go-ethereum/metrics"
 
 	"github.com/ethereum/go-ethereum/ethdb"
 
@@ -160,6 +162,11 @@ type Database struct {
 	shardCfgs      []ShardConfig // the final config of each shard
 	shards         []ethdb.KeyValueStore
 	shardIndexFunc ShardIndexFunc
+	cache          *fastcache.Cache // 5GB fastcache for read/write acceleration
+
+	// Metrics
+	cacheHitMeter  *metrics.Meter
+	cacheMissMeter *metrics.Meter
 }
 
 // New creates a new sharding database
@@ -201,11 +208,17 @@ func New(cfg *Config, cache int, handles int, readonly bool, f ShardIndexFunc) (
 		}
 	}
 
+	// Initialize 5GB fastcache for read/write acceleration
+	fastCache := fastcache.New(8 * 1024 * 1024 * 1024) // 5GB
+
 	return &Database{
 		cfg:            cfg,
 		shardCfgs:      shardCfgs,
 		shards:         shards,
 		shardIndexFunc: f,
+		cache:          fastCache,
+		cacheHitMeter:  metrics.GetOrRegisterMeter(cfg.Namespace+"sharddb/cache/hit", nil),
+		cacheMissMeter: metrics.GetOrRegisterMeter(cfg.Namespace+"sharddb/cache/miss", nil),
 	}, nil
 }
 
@@ -213,6 +226,10 @@ func New(cfg *Config, cache int, handles int, readonly bool, f ShardIndexFunc) (
 func (db *Database) Close() error {
 	for _, shard := range db.shards {
 		shard.Close()
+	}
+	// Reset fastcache to free memory
+	if db.cache != nil {
+		db.cache.Reset()
 	}
 	return nil
 }
@@ -239,17 +256,57 @@ func (db *Database) Has(key []byte) (bool, error) {
 
 // Get retrieves the value for a given key
 func (db *Database) Get(key []byte) ([]byte, error) {
-	return db.Shard(key).Get(key)
+	// First, try to get from cache
+	if db.cache != nil {
+		if value := db.cache.Get(nil, key); value != nil {
+			db.cacheHitMeter.Mark(1)
+			return value, nil
+		}
+		db.cacheMissMeter.Mark(1)
+	}
+
+	// Cache miss, get from shard database
+	value, err := db.Shard(key).Get(key)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store in cache for future use
+	if db.cache != nil && value != nil {
+		db.cache.Set(key, value)
+	}
+
+	return value, nil
 }
 
 // Put inserts the value for a given key
 func (db *Database) Put(key []byte, value []byte) error {
-	return db.Shard(key).Put(key, value)
+	// First, write to the shard database
+	if err := db.Shard(key).Put(key, value); err != nil {
+		return err
+	}
+
+	// Then, update the cache
+	if db.cache != nil {
+		db.cache.Set(key, value)
+	}
+
+	return nil
 }
 
 // Delete removes the value for a given key
 func (db *Database) Delete(key []byte) error {
-	return db.Shard(key).Delete(key)
+	// First, delete from the shard database
+	if err := db.Shard(key).Delete(key); err != nil {
+		return err
+	}
+
+	// Then, delete from cache
+	if db.cache != nil {
+		db.cache.Del(key)
+	}
+
+	return nil
 }
 
 // DeleteRange deletes the range of keys
@@ -387,7 +444,10 @@ func (b *shardingBatch) Replay(w ethdb.KeyValueWriter) error {
 
 // NewBatch creates a new batch
 func (db *Database) NewBatch() ethdb.Batch {
-	return &shardingBatch{parent: db, batches: make([]ethdb.Batch, len(db.shards))}
+	return &shardingBatch{
+		parent:  db,
+		batches: make([]ethdb.Batch, len(db.shards)),
+	}
 }
 
 // NewBatchWithSize creates a new batch with a given size
