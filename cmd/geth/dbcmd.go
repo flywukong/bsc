@@ -565,15 +565,13 @@ func makeConfigNodeWithDataDir(ctx *cli.Context, dataDir string) (*node.Node, er
 func expand(ctx *cli.Context) error {
 	var (
 		targetDataDir string
-		prefix        []byte
-		start         []byte
 	)
 
-	// Parse arguments: target-datadir [prefix] [start]
+	// Parse arguments: target-datadir [suffix]
 	if ctx.NArg() < 1 {
 		return fmt.Errorf("missing required target data directory argument: %v", ctx.Command.ArgsUsage)
 	}
-	if ctx.NArg() > 3 {
+	if ctx.NArg() > 2 {
 		return fmt.Errorf("too many arguments: %v", ctx.Command.ArgsUsage)
 	}
 
@@ -584,27 +582,21 @@ func expand(ctx *cli.Context) error {
 		return fmt.Errorf("target data directory cannot be empty")
 	}
 
-	// Parse optional prefix and start
+	// Parse optional suffix
+	var suffix byte = 1 // default suffix
 	if ctx.NArg() >= 2 {
-		if d, err := hexutil.Decode(ctx.Args().Get(1)); err != nil {
-			return fmt.Errorf("failed to hex-decode 'prefix': %v", err)
+		suffixArg := ctx.Args().Get(1)
+		if suffixVal, err := strconv.ParseUint(suffixArg, 10, 8); err != nil {
+			return fmt.Errorf("failed to parse 'suffix' as number: %v", err)
 		} else {
-			prefix = d
-		}
-	}
-	if ctx.NArg() >= 3 {
-		if d, err := hexutil.Decode(ctx.Args().Get(2)); err != nil {
-			return fmt.Errorf("failed to hex-decode 'start': %v", err)
-		} else {
-			start = d
+			suffix = byte(suffixVal)
 		}
 	}
 
 	log.Info("Starting database expansion",
 		"sourceDb", "current database (from --datadir)",
 		"targetDataDir", targetDataDir,
-		"prefix", fmt.Sprintf("%x", prefix),
-		"start", fmt.Sprintf("%x", start))
+		"suffix", suffix)
 
 	// Create source database using current configuration (like inspect command)
 	sourceStack, _ := makeConfigNode(ctx)
@@ -624,7 +616,7 @@ func expand(ctx *cli.Context) error {
 	defer targetDb.Close()
 
 	// Perform the expansion
-	return rawdb.InspectDatabaseWithExpansion(sourceDb, targetDb, prefix, start)
+	return rawdb.InspectDatabaseWithExpansion(sourceDb, targetDb, nil, nil, suffix)
 }
 
 func ancientInspect(ctx *cli.Context) error {

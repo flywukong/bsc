@@ -645,19 +645,19 @@ func DataTypeByKey(key []byte) DataType {
 // InspectDatabase traverses the entire database and checks the size
 // of all different categories of data.
 func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
-	return InspectDatabaseWithExpansion(db, nil, keyPrefix, keyStart)
+	return InspectDatabaseWithExpansion(db, nil, keyPrefix, keyStart, 1)
 }
 
 // InspectDatabaseWithExpansion traverses the source database and optionally
 // expands data to a target database (1T -> 2T expansion)
-func InspectDatabaseWithExpansion(sourceDb ethdb.Database, targetDb ethdb.Database, keyPrefix, keyStart []byte) error {
+func InspectDatabaseWithExpansion(sourceDb ethdb.Database, targetDb ethdb.Database, keyPrefix, keyStart []byte, suffix byte) error {
 	// If no target database provided, run normal inspection
 	if targetDb == nil {
 		return inspectDatabaseNormal(sourceDb, keyPrefix, keyStart)
 	}
 
 	// Run database expansion from source to target
-	return expandDatabase(sourceDb, targetDb, keyPrefix, keyStart)
+	return expandDatabase(sourceDb, targetDb, keyPrefix, keyStart, suffix)
 }
 
 // inspectDatabaseNormal performs normal database inspection without expansion
@@ -668,7 +668,7 @@ func inspectDatabaseNormal(db ethdb.Database, keyPrefix, keyStart []byte) error 
 }
 
 // expandDatabase performs 1T -> 2T database expansion from source to target
-func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byte) error {
+func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byte, suffix byte) error {
 	// Data expansion logic: 1T -> 2T with concurrent batch writing
 	type kvPair struct {
 		key   []byte
@@ -700,30 +700,25 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 		"sourceDb", "read-only", "targetDb", "write-only")
 
 	// Helper function to generate new key (simplified version without magic markers)
-	generateNewKey := func(originalKey []byte) []byte {
+	generateNewKey := func(originalKey []byte, suffix byte) []byte {
 		if len(originalKey) <= 2 {
 			return originalKey
 		}
 
-		newKey := make([]byte, len(originalKey)+1)
+		newKey := make([]byte, len(originalKey))
+		
+		// Keep prefix same as original
 		newKey[0] = originalKey[0]
-
-		mid := len(originalKey) - 1
-		for i := 1; i < mid; i++ {
-			j := ((i-1)+mid/2)%mid + 1
-			if j >= len(originalKey) {
-				j = j%mid + 1
-			}
-			newKey[i] = originalKey[j]
+		
+		// Set suffix from flag
+		newKey[len(newKey)-1] = suffix
+		
+		// Fill middle part with random data
+		if len(originalKey) > 2 {
+			randomBytes := make([]byte, len(originalKey)-2)
+			rand.Read(randomBytes)
+			copy(newKey[1:len(newKey)-1], randomBytes)
 		}
-
-		var xorKey [1]byte
-		rand.Read(xorKey[:])
-		for i := 1; i < len(originalKey); i++ {
-			newKey[i] ^= xorKey[0]
-		}
-
-		newKey[len(newKey)-1] = 1
 
 		return newKey
 	}
@@ -763,7 +758,7 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 			batchStartTime := time.Now()
 
 			for kv := range kvChan {
-				newKey := generateNewKey(kv.key)
+				newKey := generateNewKey(kv.key, suffix)
 				newValue := shuffleValue(kv.value)
 
 				// Check if new key is the same as original key
