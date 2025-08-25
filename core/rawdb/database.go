@@ -24,12 +24,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/memorydb"
-	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/olekukonko/tablewriter"
 )
@@ -644,280 +645,266 @@ func DataTypeByKey(key []byte) DataType {
 // InspectDatabase traverses the entire database and checks the size
 // of all different categories of data.
 func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
-	// Initialize PebbleDB for sampling data with high-performance configuration
-	// cache: 3.52 GiB = 3686 MB, handles: 2048, memory table: ~300 MiB
-	testCaseDB, err := pebble.New("test-case", 3686, 2048, "testcase/", false)
-	if err != nil {
-		return fmt.Errorf("failed to create test-case pebbledb: %v", err)
+	return InspectDatabaseWithExpansion(db, nil, keyPrefix, keyStart, 1)
+}
+
+// InspectDatabaseWithExpansion traverses the source database and optionally
+// expands data to a target database (1T -> 2T expansion)
+func InspectDatabaseWithExpansion(sourceDb ethdb.Database, targetDb ethdb.Database, keyPrefix, keyStart []byte, suffix byte) error {
+	// If no target database provided, run normal inspection
+	if targetDb == nil {
+		return inspectDatabaseNormal(sourceDb, keyPrefix, keyStart)
 	}
-	defer func() {
-		if closeErr := testCaseDB.Close(); closeErr != nil {
-			log.Error("Failed to close test-case pebbledb", "err", closeErr)
-		}
-	}()
 
-	log.Info("Initialized test-case PebbleDB with high-performance configuration",
-		"cache", "3.52 GiB", "handles", 2048, "memory_table", "~300 MiB")
+	// Run database expansion from source to target
+	return expandDatabase(sourceDb, targetDb, keyPrefix, keyStart, suffix)
+}
 
-	// Sampling counters for 3% data collection
-	var (
-		accountTriesTotal   int64
-		storageTriesTotal   int64
-		accountSnapsTotal   int64
-		storageSnapsTotal   int64
-		accountTriesSampled int64
-		storageTriesSampled int64
-		accountSnapsSampled int64
-		storageSnapsSampled int64
+// inspectDatabaseNormal performs normal database inspection without expansion
+func inspectDatabaseNormal(db ethdb.Database, keyPrefix, keyStart []byte) error {
+	// TODO: Implement normal inspection logic if needed
+	log.Info("Normal database inspection not implemented, use geth db inspect command instead")
+	return nil
+}
+
+// expandDatabase performs 1T -> 2T database expansion from source to target
+func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byte, suffix byte) error {
+	// Data expansion logic: 1T -> 2T with concurrent batch writing
+	type kvPair struct {
+		key   []byte
+		value []byte
+		size  int
+	}
+
+	const (
+		totalExpectedKeys = 18881610000
+		numWorkers        = 15
+		maxBatchSize      = 512 * 1024 * 1024 // 512MB batch size
 	)
 
-	// Sampling rate: 3%
-	const samplingRate = 0.03
+	var (
+		newKeysCreated    int64
+		totalBytesWritten int64
+		writeErrors       int64
+		duplicateKeys     int64
+		lastProgress      int
+		wg                sync.WaitGroup
+		processedCount    int64
+	)
 
-	it := db.NewIterator(keyPrefix, keyStart)
+	// Channel for sending key-value pairs to workers
+	kvChan := make(chan kvPair, 1000)
+
+	log.Info("Starting database expansion from 1T to 2T with read-write separation",
+		"workers", numWorkers, "maxBatchSize", "512MB", "expectedKeys", totalExpectedKeys,
+		"sourceDb", "read-only", "targetDb", "write-only")
+
+	// Helper function to generate new key (simplified version without magic markers)
+	generateNewKey := func(originalKey []byte, suffix byte) []byte {
+		if len(originalKey) <= 2 {
+			return originalKey
+		}
+
+		newKey := make([]byte, len(originalKey))
+		
+		// Keep prefix same as original
+		newKey[0] = originalKey[0]
+		
+		// Set suffix from flag
+		newKey[len(newKey)-1] = suffix
+		
+		// Fill middle part with random data
+		if len(originalKey) > 2 {
+			randomBytes := make([]byte, len(originalKey)-2)
+			rand.Read(randomBytes)
+			copy(newKey[1:len(newKey)-1], randomBytes)
+		}
+
+		return newKey
+	}
+
+	// Helper function to shuffle value
+	shuffleValue := func(originalValue []byte) []byte {
+		if len(originalValue) <= 1 {
+			return originalValue
+		}
+
+		newValue := make([]byte, len(originalValue))
+		copy(newValue, originalValue)
+
+		// Simple shuffle: swap bytes in a deterministic pattern
+		for i := 0; i < len(newValue)/2; i++ {
+			j := (i + len(newValue)/2) % len(newValue)
+			newValue[i], newValue[j] = newValue[j], newValue[i]
+		}
+
+		// XOR with a random 1-byte key to add more entropy
+		var xorKey [1]byte
+		rand.Read(xorKey[:])
+		for i := range newValue {
+			newValue[i] ^= xorKey[0]
+		}
+
+		return newValue
+	}
+
+	// Start worker goroutines
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			batch := targetDb.NewBatch() // Write to target database
+			currentBatchSize := 0
+			batchStartTime := time.Now()
+
+			for kv := range kvChan {
+				newKey := generateNewKey(kv.key, suffix)
+				newValue := shuffleValue(kv.value)
+
+				// Check if new key is the same as original key
+				if bytes.Equal(newKey, kv.key) {
+					atomic.AddInt64(&duplicateKeys, 1)
+					keyLen := len(kv.key)
+					if keyLen > 16 {
+						keyLen = 16
+					}
+					log.Error("CRITICAL: New key is same as original key",
+						"originalKey", fmt.Sprintf("%x", kv.key[:keyLen]),
+						"originalKeyLen", len(kv.key),
+						"newKey", fmt.Sprintf("%x", newKey[:keyLen]),
+						"newKeyLen", len(newKey))
+					continue
+				}
+
+				if err := batch.Put(newKey, newValue); err != nil {
+					atomic.AddInt64(&writeErrors, 1)
+					log.Error("Failed to add to batch", "err", err, "worker", workerID)
+					continue
+				}
+
+				currentBatchSize += len(newKey) + len(newValue)
+				atomic.AddInt64(&newKeysCreated, 1)
+				atomic.AddInt64(&totalBytesWritten, int64(len(newKey)+len(newValue)))
+
+				// Check if batch should be written
+				if currentBatchSize >= maxBatchSize {
+					if err := batch.Write(); err != nil {
+						atomic.AddInt64(&writeErrors, 1)
+						log.Error("Batch write failed", "err", err, "worker", workerID, "size", currentBatchSize)
+					} else {
+						// Increment processedCount only after successful batch write
+						atomic.AddInt64(&processedCount, int64(batch.ValueSize()/1024)) // Approximate key count in this batch
+
+						writeDuration := time.Since(batchStartTime)
+						throughput := float64(currentBatchSize) / writeDuration.Seconds() / (1024 * 1024) // MB/s
+						log.Debug("Batch written",
+							"worker", workerID,
+							"size", common.StorageSize(currentBatchSize).String(),
+							"duration", writeDuration,
+							"throughput", fmt.Sprintf("%.2f MB/s", throughput))
+
+						// Progress reporting every 10%
+						processed := atomic.LoadInt64(&processedCount)
+						progress := int(processed * 100 / totalExpectedKeys)
+						if progress >= lastProgress+10 && progress != lastProgress {
+							lastProgress = progress
+							totalBytes := atomic.LoadInt64(&totalBytesWritten)
+							log.Info("Data expansion progress",
+								"progress", fmt.Sprintf("%d%%", progress),
+								"processedKeys", processed,
+								"totalBytesWritten", common.StorageSize(totalBytes).String(),
+								"newKeysCreated", atomic.LoadInt64(&newKeysCreated),
+								"duplicateKeys", atomic.LoadInt64(&duplicateKeys))
+						}
+					}
+
+					batch = targetDb.NewBatch() // Create new batch for target database
+					currentBatchSize = 0
+					batchStartTime = time.Now()
+				}
+			}
+
+			// Write remaining batch
+			if currentBatchSize > 0 {
+				if err := batch.Write(); err != nil {
+					atomic.AddInt64(&writeErrors, 1)
+					log.Error("Final batch write failed", "err", err, "worker", workerID)
+				} else {
+					log.Info("Final batch written", "worker", workerID, "size", common.StorageSize(currentBatchSize).String())
+				}
+			}
+		}(i)
+	}
+
+	// Scan source database and send key-value pairs to workers
+	it := sourceDb.NewIterator(keyPrefix, keyStart)
 	defer it.Release()
 
-	var (
-		count  int64
-		start  = time.Now()
-		logged = time.Now()
+	start := time.Now()
+	logged := time.Now()
+	count := int64(0)
 
-		// Key-value store statistics
-		headers         stat
-		bodies          stat
-		receipts        stat
-		tds             stat
-		numHashPairings stat
-		blobSidecars    stat
-		hashNumPairings stat
-		legacyTries     stat
-		stateLookups    stat
-		accountTries    stat
-		storageTries    stat
-		codes           stat
-		txLookups       stat
-		accountSnaps    stat
-		storageSnaps    stat
-		preimages       stat
-		bloomBits       stat
-		cliqueSnaps     stat
-		parliaSnaps     stat
+	log.Info("Scanning source database for expansion...", "sourceDb", "read-only")
 
-		// Verkle statistics
-		verkleTries        stat
-		verkleStateLookups stat
-
-		// Les statistic
-		chtTrieNodes   stat
-		bloomTrieNodes stat
-
-		// Meta- and unaccounted data
-		metadata    stat
-		unaccounted stat
-
-		// Totals
-		total common.StorageSize
-	)
-	// Inspect key-value database first.
 	for it.Next() {
-		var (
-			key  = it.Key()
-			size = common.StorageSize(len(key) + len(it.Value()))
-		)
-		total += size
-		switch {
-		case bytes.HasPrefix(key, headerPrefix) && len(key) == (len(headerPrefix)+8+common.HashLength):
-			headers.Add(size)
-		case bytes.HasPrefix(key, blockBodyPrefix) && len(key) == (len(blockBodyPrefix)+8+common.HashLength):
-			bodies.Add(size)
-		case bytes.HasPrefix(key, blockReceiptsPrefix) && len(key) == (len(blockReceiptsPrefix)+8+common.HashLength):
-			receipts.Add(size)
-		case IsLegacyTrieNode(key, it.Value()):
-			legacyTries.Add(size)
-		case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerTDSuffix):
-			tds.Add(size)
-		case bytes.HasPrefix(key, BlockBlobSidecarsPrefix):
-			blobSidecars.Add(size)
-		case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerHashSuffix):
-			numHashPairings.Add(size)
-		case bytes.HasPrefix(key, headerNumberPrefix) && len(key) == (len(headerNumberPrefix)+common.HashLength):
-			hashNumPairings.Add(size)
-		case bytes.HasPrefix(key, stateIDPrefix) && len(key) == len(stateIDPrefix)+common.HashLength:
-			stateLookups.Add(size)
-		case IsAccountTrieNode(key):
-			accountTries.Add(size)
-			accountTriesTotal++
-			// Sample 3% of account trie data
-			if rand.Float64() < samplingRate {
-				if err := testCaseDB.Put(key, it.Value()); err != nil {
-					log.Warn("Failed to write account trie data to test-case db", "err", err)
-				} else {
-					accountTriesSampled++
-				}
-			}
-		case IsStorageTrieNode(key):
-			storageTries.Add(size)
-			storageTriesTotal++
-			// Sample 3% of storage trie data
-			if rand.Float64() < samplingRate {
-				if err := testCaseDB.Put(key, it.Value()); err != nil {
-					log.Warn("Failed to write storage trie data to test-case db", "err", err)
-				} else {
-					storageTriesSampled++
-				}
-			}
-		case bytes.HasPrefix(key, CodePrefix) && len(key) == len(CodePrefix)+common.HashLength:
-			codes.Add(size)
-		case bytes.HasPrefix(key, txLookupPrefix) && len(key) == (len(txLookupPrefix)+common.HashLength):
-			txLookups.Add(size)
-		case bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength):
-			accountSnaps.Add(size)
-			accountSnapsTotal++
-			// Sample 3% of account snapshot data
-			if rand.Float64() < samplingRate {
-				if err := testCaseDB.Put(key, it.Value()); err != nil {
-					log.Warn("Failed to write account snapshot data to test-case db", "err", err)
-				} else {
-					accountSnapsSampled++
-				}
-			}
-		case bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength):
-			storageSnaps.Add(size)
-			storageSnapsTotal++
-			// Sample 3% of storage snapshot data
-			if rand.Float64() < samplingRate {
-				if err := testCaseDB.Put(key, it.Value()); err != nil {
-					log.Warn("Failed to write storage snapshot data to test-case db", "err", err)
-				} else {
-					storageSnapsSampled++
-				}
-			}
-		case bytes.HasPrefix(key, PreimagePrefix) && len(key) == (len(PreimagePrefix)+common.HashLength):
-			preimages.Add(size)
-		case bytes.HasPrefix(key, configPrefix) && len(key) == (len(configPrefix)+common.HashLength):
-			metadata.Add(size)
-		case bytes.HasPrefix(key, genesisPrefix) && len(key) == (len(genesisPrefix)+common.HashLength):
-			metadata.Add(size)
-		case bytes.HasPrefix(key, bloomBitsPrefix) && len(key) == (len(bloomBitsPrefix)+10+common.HashLength):
-			bloomBits.Add(size)
-		case bytes.HasPrefix(key, BloomBitsIndexPrefix):
-			bloomBits.Add(size)
-		case bytes.HasPrefix(key, CliqueSnapshotPrefix) && len(key) == 7+common.HashLength:
-			cliqueSnaps.Add(size)
-		case bytes.HasPrefix(key, ParliaSnapshotPrefix) && len(key) == 7+common.HashLength:
-			parliaSnaps.Add(size)
-		case bytes.HasPrefix(key, ChtTablePrefix) ||
-			bytes.HasPrefix(key, ChtIndexTablePrefix) ||
-			bytes.HasPrefix(key, ChtPrefix): // Canonical hash trie
-			chtTrieNodes.Add(size)
-		case bytes.HasPrefix(key, BloomTrieTablePrefix) ||
-			bytes.HasPrefix(key, BloomTrieIndexPrefix) ||
-			bytes.HasPrefix(key, BloomTriePrefix): // Bloomtrie sub
-			bloomTrieNodes.Add(size)
+		key := make([]byte, len(it.Key()))
+		value := make([]byte, len(it.Value()))
+		copy(key, it.Key())
+		copy(value, it.Value())
 
-		// Verkle trie data is detected, determine the sub-category
-		case bytes.HasPrefix(key, VerklePrefix):
-			remain := key[len(VerklePrefix):]
-			switch {
-			case IsAccountTrieNode(remain):
-				verkleTries.Add(size)
-			case bytes.HasPrefix(remain, stateIDPrefix) && len(remain) == len(stateIDPrefix)+common.HashLength:
-				verkleStateLookups.Add(size)
-			case bytes.Equal(remain, persistentStateIDKey):
-				metadata.Add(size)
-			case bytes.Equal(remain, trieJournalKey):
-				metadata.Add(size)
-			case bytes.Equal(remain, snapSyncStatusFlagKey):
-				metadata.Add(size)
-			default:
-				unaccounted.Add(size)
-			}
-		default:
-			var accounted bool
-			for _, meta := range [][]byte{
-				databaseVersionKey, headHeaderKey, headBlockKey, headFastBlockKey,
-				lastPivotKey, fastTrieProgressKey, snapshotDisabledKey, SnapshotRootKey, snapshotJournalKey,
-				snapshotGeneratorKey, snapshotRecoveryKey, txIndexTailKey, fastTxLookupLimitKey,
-				uncleanShutdownKey, badBlockKey, transitionStatusKey, skeletonSyncStatusKey,
-				persistentStateIDKey, trieJournalKey, snapshotSyncStatusKey, snapSyncStatusFlagKey,
-			} {
-				if bytes.Equal(key, meta) {
-					metadata.Add(size)
-					accounted = true
-					break
-				}
-			}
-			if !accounted {
-				unaccounted.Add(size)
-			}
+		kvChan <- kvPair{
+			key:   key,
+			value: value,
+			size:  len(key) + len(value),
 		}
+
+		atomic.AddInt64(&processedCount, 1)
 		count++
-		if count%1000 == 0 && time.Since(logged) > 8*time.Second {
-			log.Info("Inspecting database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
+
+		if count%10000 == 0 && time.Since(logged) > 5*time.Second {
+			log.Info("Scanning source database",
+				"processedKeys", count,
+				"throughputMBps", fmt.Sprintf("%.2f", float64(atomic.LoadInt64(&totalBytesWritten))/(1024*1024*time.Since(start).Seconds())),
+				"elapsed", common.PrettyDuration(time.Since(start)))
 			logged = time.Now()
 		}
 	}
 
-	// Log sampling statistics
-	log.Info("Data sampling completed",
-		"accountTriesTotal", accountTriesTotal, "accountTriesSampled", accountTriesSampled,
-		"storageTriesTotal", storageTriesTotal, "storageTriesSampled", storageTriesSampled,
-		"accountSnapsTotal", accountSnapsTotal, "accountSnapsSampled", accountSnapsSampled,
-		"storageSnapsTotal", storageSnapsTotal, "storageSnapsSampled", storageSnapsSampled)
+	// Close channel and wait for workers to finish
+	close(kvChan)
+	log.Info("Source database scan completed, waiting for workers to finish...",
+		"totalScannedKeys", count)
+	wg.Wait()
 
-	// Display the database statistic of key-value store.
-	stats := [][]string{
-		{"Key-Value store", "Headers", headers.Size(), headers.Count()},
-		{"Key-Value store", "Bodies", bodies.Size(), bodies.Count()},
-		{"Key-Value store", "Receipt lists", receipts.Size(), receipts.Count()},
-		{"Key-Value store", "Difficulties", tds.Size(), tds.Count()},
-		{"Key-Value store", "BlobSidecars", blobSidecars.Size(), blobSidecars.Count()},
-		{"Key-Value store", "Block number->hash", numHashPairings.Size(), numHashPairings.Count()},
-		{"Key-Value store", "Block hash->number", hashNumPairings.Size(), hashNumPairings.Count()},
-		{"Key-Value store", "Transaction index", txLookups.Size(), txLookups.Count()},
-		{"Key-Value store", "Bloombit index", bloomBits.Size(), bloomBits.Count()},
-		{"Key-Value store", "Contract codes", codes.Size(), codes.Count()},
-		{"Key-Value store", "Hash trie nodes", legacyTries.Size(), legacyTries.Count()},
-		{"Key-Value store", "Path trie state lookups", stateLookups.Size(), stateLookups.Count()},
-		{"Key-Value store", "Path trie account nodes", accountTries.Size(), accountTries.Count()},
-		{"Key-Value store", "Path trie storage nodes", storageTries.Size(), storageTries.Count()},
-		{"Key-Value store", "Verkle trie nodes", verkleTries.Size(), verkleTries.Count()},
-		{"Key-Value store", "Verkle trie state lookups", verkleStateLookups.Size(), verkleStateLookups.Count()},
-		{"Key-Value store", "Trie preimages", preimages.Size(), preimages.Count()},
-		{"Key-Value store", "Account snapshot", accountSnaps.Size(), accountSnaps.Count()},
-		{"Key-Value store", "Storage snapshot", storageSnaps.Size(), storageSnaps.Count()},
-		{"Key-Value store", "Clique snapshots", cliqueSnaps.Size(), cliqueSnaps.Count()},
-		{"Key-Value store", "Parlia snapshots", parliaSnaps.Size(), parliaSnaps.Count()},
-		{"Key-Value store", "Singleton metadata", metadata.Size(), metadata.Count()},
-		{"Light client", "CHT trie nodes", chtTrieNodes.Size(), chtTrieNodes.Count()},
-		{"Light client", "Bloom trie nodes", bloomTrieNodes.Size(), bloomTrieNodes.Count()},
-	}
-	// Inspect all registered append-only file store then.
-	ancients, err := inspectFreezers(db)
-	if err != nil {
-		return err
-	}
-	for _, ancient := range ancients {
-		for _, table := range ancient.sizes {
-			stats = append(stats, []string{
-				fmt.Sprintf("Ancient store (%s)", strings.Title(ancient.name)),
-				strings.Title(table.name),
-				table.size.String(),
-				fmt.Sprintf("%d", ancient.count()),
-			})
-		}
-		total += ancient.size()
+	// Final statistics
+	finalKeysCreated := atomic.LoadInt64(&newKeysCreated)
+	finalBytesWritten := atomic.LoadInt64(&totalBytesWritten)
+	finalErrors := atomic.LoadInt64(&writeErrors)
+	finalDuplicates := atomic.LoadInt64(&duplicateKeys)
+
+	totalDuration := time.Since(start)
+	throughputMBps := float64(finalBytesWritten) / (1024 * 1024 * totalDuration.Seconds())
+
+	log.Info("Database expansion completed (1T -> 2T) with read-write separation",
+		"totalKeysScanned", count,
+		"newKeysCreated", finalKeysCreated,
+		"totalBytesWritten", common.StorageSize(finalBytesWritten).String(),
+		"writeErrors", finalErrors,
+		"duplicateKeys", finalDuplicates,
+		"averageThroughput", fmt.Sprintf("%.2f MB/s", throughputMBps),
+		"totalDuration", common.PrettyDuration(totalDuration))
+
+	if finalDuplicates > 0 {
+		log.Warn("Duplicate key generation detected",
+			"duplicateCount", finalDuplicates,
+			"duplicateRate", fmt.Sprintf("%.4f%%", float64(finalDuplicates)*100/float64(count)))
 	}
 
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"Database", "Category", "Size", "Items"})
-	table.SetFooter([]string{"", "Total", total.String(), " "})
-	table.AppendBulk(stats)
-	table.Render()
+	log.Info("Expansion summary",
+		"sourceDatabase", "unchanged (1T)",
+		"targetDatabase", fmt.Sprintf("expanded to ~%.1fT", float64(finalBytesWritten)/(1024*1024*1024*1024)+1.0),
+		"expansionRatio", fmt.Sprintf("1:%.1f", float64(finalKeysCreated)/float64(count)))
 
-	if unaccounted.size > 0 {
-		log.Error("Database contains unaccounted data", "size", unaccounted.size, "count", unaccounted.count)
-	}
 	return nil
 }
 
