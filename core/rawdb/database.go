@@ -705,24 +705,25 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 			return originalKey
 		}
 
-		newKey := make([]byte, len(originalKey))
-		copy(newKey, originalKey)
+		newKey := make([]byte, len(originalKey)+1)
+		newKey[0] = originalKey[0]
 
-		mid := len(originalKey) - 2 // Leave 2 bytes at the end for version
-		for i := 0; i < mid/2; i++ {
-			j := (i + mid/2) % mid
-			newKey[i], newKey[j] = newKey[j], newKey[i]
+		mid := len(originalKey) - 1
+		for i := 1; i < mid; i++ {
+			j := ((i-1)+mid/2)%mid + 1
+			if j >= len(originalKey) {
+				j = j%mid + 1
+			}
+			newKey[i] = originalKey[j]
 		}
 
 		var xorKey [1]byte
 		rand.Read(xorKey[:])
-		for i := 0; i < mid; i++ {
+		for i := 1; i < len(originalKey); i++ {
 			newKey[i] ^= xorKey[0]
 		}
 
-		// 保留末尾两字节版本号不变
-		newKey[len(originalKey)-2] = originalKey[len(originalKey)-2]
-		newKey[len(originalKey)-1] = originalKey[len(originalKey)-1]
+		newKey[len(newKey)-1] = 1
 
 		return newKey
 	}
