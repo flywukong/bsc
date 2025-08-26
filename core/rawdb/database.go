@@ -678,7 +678,7 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 
 	const (
 		totalExpectedKeys = 18881610000
-		numWorkers        = 15
+		numWorkers        = 25
 		maxBatchSize      = 512 * 1024 * 1024 // 512MB batch size
 	)
 
@@ -705,19 +705,21 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 			return originalKey
 		}
 
+		// Create deterministic random generator based on key properties
+		seed := int64(originalKey[0])*31*31 + int64(len(originalKey))*31 + int64(suffix)
+		deterministicRand := rand.New(rand.NewSource(seed))
+
 		newKey := make([]byte, len(originalKey))
-		
+
 		// Keep prefix same as original
 		newKey[0] = originalKey[0]
-		
+
 		// Set suffix from flag
 		newKey[len(newKey)-1] = suffix
-		
-		// Fill middle part with random data
-		if len(originalKey) > 2 {
-			randomBytes := make([]byte, len(originalKey)-2)
-			rand.Read(randomBytes)
-			copy(newKey[1:len(newKey)-1], randomBytes)
+
+		// Fill middle part with random data directly (optimized: use Read for bulk generation)
+		if len(newKey) > 2 {
+			deterministicRand.Read(newKey[1 : len(newKey)-1])
 		}
 
 		return newKey
@@ -729,21 +731,13 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 			return originalValue
 		}
 
+		// Create deterministic random generator based on value properties
+		seed := int64(originalValue[0])*31 + int64(len(originalValue))
+		deterministicRand := rand.New(rand.NewSource(seed))
+
+		// Optimized: generate completely new random bytes (no loops, maximum performance)
 		newValue := make([]byte, len(originalValue))
-		copy(newValue, originalValue)
-
-		// Simple shuffle: swap bytes in a deterministic pattern
-		for i := 0; i < len(newValue)/2; i++ {
-			j := (i + len(newValue)/2) % len(newValue)
-			newValue[i], newValue[j] = newValue[j], newValue[i]
-		}
-
-		// XOR with a random 1-byte key to add more entropy
-		var xorKey [1]byte
-		rand.Read(xorKey[:])
-		for i := range newValue {
-			newValue[i] ^= xorKey[0]
-		}
+		deterministicRand.Read(newValue)
 
 		return newValue
 	}
