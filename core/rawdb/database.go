@@ -679,8 +679,8 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 	const (
 		totalExpectedKeys = 18000000000 // 180亿个key
 		numWorkers        = 15
-		maxBatchSize      = 512 * 1024 * 1024       // 512MB batch size
-		progressInterval  = totalExpectedKeys / 100 // 1% = 1.8亿个key
+		maxBatchSize      = 512 * 1024 * 1024        // 512MB batch size
+		progressInterval  = totalExpectedKeys / 1000 // 0.1% = 1800万个key
 	)
 
 	var (
@@ -700,6 +700,7 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 
 	log.Info("Starting database expansion from 1T to 2T with read-write separation",
 		"workers", numWorkers, "maxBatchSize", "512MB", "expectedKeys", totalExpectedKeys,
+		"progressInterval", fmt.Sprintf("every %.1f%% (every %d keys)", 0.1, progressInterval),
 		"sourceDb", "read-only", "targetDb", "write-only")
 
 	// Helper function to generate new key (simplified version without magic markers)
@@ -773,6 +774,19 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 					continue
 				}
 
+				// Debug: Log first successful transformation
+				if atomic.LoadInt64(&newKeysCreated) == 0 {
+					keyLen := len(kv.key)
+					if keyLen > 8 {
+						keyLen = 8
+					}
+					log.Info("🎉 First successful key transformation!",
+						"originalKey", fmt.Sprintf("%x", kv.key[:keyLen]),
+						"originalLen", len(kv.key),
+						"newKey", fmt.Sprintf("%x", newKey[:keyLen]),
+						"newLen", len(newKey))
+				}
+
 				if err := batch.Put(newKey, newValue); err != nil {
 					atomic.AddInt64(&writeErrors, 1)
 					log.Error("Failed to add to batch", "err", err, "worker", workerID)
@@ -784,11 +798,11 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 				atomic.AddInt64(&totalBytesWritten, int64(len(newKey)+len(newValue)))
 				atomic.AddInt64(&writtenCount, 1)
 
-				// 每1%打印写入进度
+				// 每0.1%打印写入进度
 				if newKeys%progressInterval == 0 {
-					progress := newKeys * 100 / totalExpectedKeys
+					progress := float64(newKeys) * 100.0 / float64(totalExpectedKeys)
 					log.Info("📝 WRITE Progress",
-						"progress", fmt.Sprintf("%d%%", progress),
+						"progress", fmt.Sprintf("%.1f%%", progress),
 						"writtenKeys", newKeys,
 						"totalBytes", common.StorageSize(atomic.LoadInt64(&totalBytesWritten)).String(),
 						"duplicates", atomic.LoadInt64(&duplicateKeys),
@@ -797,10 +811,12 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 
 				// Check if batch should be written
 				if currentBatchSize >= maxBatchSize {
+					log.Info("🚀 Writing batch to disk", "worker", workerID, "batchSize", common.StorageSize(currentBatchSize).String())
 					if err := batch.Write(); err != nil {
 						atomic.AddInt64(&writeErrors, 1)
-						log.Error("Batch write failed", "err", err, "worker", workerID, "size", currentBatchSize)
+						log.Error("❌ Batch write failed", "err", err, "worker", workerID, "size", currentBatchSize)
 					} else {
+						log.Info("✅ Batch written successfully", "worker", workerID, "size", common.StorageSize(currentBatchSize).String())
 						// Increment processedCount only after successful batch write
 						atomic.AddInt64(&processedCount, int64(batch.ValueSize()/1024)) // Approximate key count in this batch
 
@@ -871,12 +887,12 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 		scanned := atomic.AddInt64(&scannedCount, 1)
 		count++
 
-		// 每1%打印读取进度
+		// 每0.1%打印读取进度
 		if scanned%progressInterval == 0 {
-			progress := scanned * 100 / totalExpectedKeys
+			progress := float64(scanned) * 100.0 / float64(totalExpectedKeys)
 			writtenKeys := atomic.LoadInt64(&newKeysCreated)
 			log.Info("📖 READ Progress",
-				"progress", fmt.Sprintf("%d%%", progress),
+				"progress", fmt.Sprintf("%.1f%%", progress),
 				"scannedKeys", scanned,
 				"writtenKeys", writtenKeys,
 				"channelBuffer", len(kvChan),
