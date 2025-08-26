@@ -669,6 +669,12 @@ func inspectDatabaseNormal(db ethdb.Database, keyPrefix, keyStart []byte) error 
 
 // expandDatabase performs 1T -> 2T database expansion from source to target
 func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byte, suffix byte) error {
+	// Try to get target database path for logging
+	var targetPath string = "unknown"
+	if pathGetter, ok := targetDb.(interface{ Path() string }); ok {
+		targetPath = pathGetter.Path()
+	}
+
 	// Data expansion logic: 1T -> 2T with concurrent batch writing
 	type kvPair struct {
 		key   []byte
@@ -701,7 +707,7 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 	log.Info("Starting database expansion from 1T to 2T with read-write separation",
 		"workers", numWorkers, "maxBatchSize", "512MB", "expectedKeys", totalExpectedKeys,
 		"progressInterval", fmt.Sprintf("every %.1f%% (every %d keys)", 0.1, progressInterval),
-		"sourceDb", "read-only", "targetDb", "write-only")
+		"sourceDb", "read-only", "targetDb", "write-only", "targetPath", targetPath)
 
 	// Helper function to generate new key (simplified version without magic markers)
 	generateNewKey := func(originalKey []byte, suffix byte) []byte {
@@ -749,7 +755,7 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 	// Start worker goroutines
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
-		go func(workerID int) {
+		go func(workerID int, dbPath string) {
 			defer wg.Done()
 			batch := targetDb.NewBatch() // Write to target database
 			currentBatchSize := 0
@@ -811,12 +817,12 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 
 				// Check if batch should be written
 				if currentBatchSize >= maxBatchSize {
-					log.Info("🚀 Writing batch to disk", "worker", workerID, "batchSize", common.StorageSize(currentBatchSize).String())
+					log.Info("🚀 Writing batch to disk", "worker", workerID, "batchSize", common.StorageSize(currentBatchSize).String(), "targetPath", dbPath)
 					if err := batch.Write(); err != nil {
 						atomic.AddInt64(&writeErrors, 1)
 						log.Error("❌ Batch write failed", "err", err, "worker", workerID, "size", currentBatchSize)
 					} else {
-						log.Info("✅ Batch written successfully", "worker", workerID, "size", common.StorageSize(currentBatchSize).String())
+						log.Info("✅ Batch written successfully", "worker", workerID, "size", common.StorageSize(currentBatchSize).String(), "targetPath", dbPath)
 						// Increment processedCount only after successful batch write
 						atomic.AddInt64(&processedCount, int64(batch.ValueSize()/1024)) // Approximate key count in this batch
 
@@ -855,10 +861,10 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 					atomic.AddInt64(&writeErrors, 1)
 					log.Error("Final batch write failed", "err", err, "worker", workerID)
 				} else {
-					log.Info("Final batch written", "worker", workerID, "size", common.StorageSize(currentBatchSize).String())
+					log.Info("Final batch written", "worker", workerID, "size", common.StorageSize(currentBatchSize).String(), "targetPath", dbPath)
 				}
 			}
-		}(i)
+		}(i, targetPath)
 	}
 
 	// Scan source database and send key-value pairs to workers
