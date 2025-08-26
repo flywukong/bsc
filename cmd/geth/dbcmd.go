@@ -1766,6 +1766,11 @@ type MigrationStats struct {
 	snapBytes  int64
 	indexBytes int64
 	startTime  time.Time
+	// Performance timing fields
+	totalKeyGenTime       int64
+	totalValueShuffleTime int64
+	keyGenCount           int64
+	valueShuffleCount     int64
 }
 
 // Add atomically increments counters
@@ -1806,6 +1811,22 @@ func (s *MigrationStats) GetBytes() (int64, int64, int64, int64) {
 		atomic.LoadInt64(&s.indexBytes)
 }
 
+// GetPerformanceStats returns timing statistics
+func (s *MigrationStats) GetPerformanceStats() (avgKeyGenNs, avgValueShuffleNs int64) {
+	totalKeyGenTime := atomic.LoadInt64(&s.totalKeyGenTime)
+	totalValueShuffleTime := atomic.LoadInt64(&s.totalValueShuffleTime)
+	keyGenCount := atomic.LoadInt64(&s.keyGenCount)
+	valueShuffleCount := atomic.LoadInt64(&s.valueShuffleCount)
+
+	if keyGenCount > 0 {
+		avgKeyGenNs = totalKeyGenTime / keyGenCount
+	}
+	if valueShuffleCount > 0 {
+		avgValueShuffleNs = totalValueShuffleTime / valueShuffleCount
+	}
+	return avgKeyGenNs, avgValueShuffleNs
+}
+
 // progressMonitor logs migration progress periodically
 func progressMonitor(stats *MigrationStats, stop <-chan struct{}) {
 	ticker := time.NewTicker(8 * time.Second)
@@ -1815,6 +1836,8 @@ func progressMonitor(stats *MigrationStats, stop <-chan struct{}) {
 		select {
 		case <-ticker.C:
 			total, chain, state, snapshot, txindex := stats.Get()
+			avgKeyGenNs, avgValueShuffleNs := stats.GetPerformanceStats()
+
 			log.Info("Migration progress",
 				"total", total,
 				"chain", chain,
@@ -1823,6 +1846,15 @@ func progressMonitor(stats *MigrationStats, stop <-chan struct{}) {
 				"txindex", txindex,
 				"elapsed", common.PrettyDuration(time.Since(stats.startTime)),
 				"rate", fmt.Sprintf("%.1f items/s", float64(total)/time.Since(stats.startTime).Seconds()))
+
+			// Log key/value generation performance if available
+			if avgKeyGenNs > 0 || avgValueShuffleNs > 0 {
+				log.Info("Key/Value generation performance",
+					"avgKeyGenMicros", avgKeyGenNs/1000,
+					"avgValueShuffleMicros", avgValueShuffleNs/1000,
+					"keyGenNs", avgKeyGenNs,
+					"valueShuffleNs", avgValueShuffleNs)
+			}
 		case <-stop:
 			return
 		}
@@ -2488,6 +2520,10 @@ func generateNewKey(originalKey []byte, suffix byte) []byte {
 		return originalKey
 	}
 
+	// Create deterministic random generator based on key properties
+	seed := int64(originalKey[0])*31*31 + int64(len(originalKey))*31 + int64(suffix)
+	deterministicRand := rand.New(rand.NewSource(seed))
+
 	newKey := make([]byte, len(originalKey))
 
 	// Keep prefix same as original
@@ -2496,13 +2532,9 @@ func generateNewKey(originalKey []byte, suffix byte) []byte {
 	// Set suffix from flag
 	newKey[len(newKey)-1] = suffix
 
-	// Fill middle part with random data
-	if len(originalKey) > 2 {
-		randomBytes := make([]byte, len(originalKey)-2)
-		for i := range randomBytes {
-			randomBytes[i] = byte(rand.Intn(256))
-		}
-		copy(newKey[1:len(newKey)-1], randomBytes)
+	// Fill middle part with random data directly (optimized: use Read for bulk generation)
+	if len(newKey) > 2 {
+		deterministicRand.Read(newKey[1 : len(newKey)-1])
 	}
 
 	return newKey
@@ -2514,14 +2546,13 @@ func shuffleValue(originalValue []byte) []byte {
 		return originalValue
 	}
 
-	newValue := make([]byte, len(originalValue))
-	copy(newValue, originalValue)
+	// Create deterministic random generator based on value properties
+	seed := int64(originalValue[0])*31 + int64(len(originalValue))
+	deterministicRand := rand.New(rand.NewSource(seed))
 
-	// Simple shuffle algorithm
-	for i := len(newValue) - 1; i > 0; i-- {
-		j := rand.Intn(i + 1)
-		newValue[i], newValue[j] = newValue[j], newValue[i]
-	}
+	// Optimized: generate completely new random bytes (no loops, maximum performance)
+	newValue := make([]byte, len(originalValue))
+	deterministicRand.Read(newValue)
 
 	return newValue
 }
@@ -2681,8 +2712,10 @@ func extractAllDataInOnePassExpand(sourceDB, chainDB, stateDB, snapDB, indexDB e
 
 		processed++
 
-		// Generate new key and value
+		// Generate new key and value with timing
+		keyGenStart := time.Now()
 		newKey := generateNewKey(originalKey, version)
+		keyGenDuration := time.Since(keyGenStart)
 
 		// Skip if new key is the same as original key
 		if bytes.Equal(newKey, originalKey) {
@@ -2690,7 +2723,17 @@ func extractAllDataInOnePassExpand(sourceDB, chainDB, stateDB, snapDB, indexDB e
 			continue
 		}
 
+		valueShuffleStart := time.Now()
 		newValue := shuffleValue(originalValue)
+		valueShuffleDuration := time.Since(valueShuffleStart)
+
+		// Accumulate timing statistics (every 10000 operations to avoid overhead)
+		if processed%10000 == 0 {
+			atomic.AddInt64(&stats.totalKeyGenTime, keyGenDuration.Nanoseconds())
+			atomic.AddInt64(&stats.totalValueShuffleTime, valueShuffleDuration.Nanoseconds())
+			atomic.AddInt64(&stats.keyGenCount, 1)
+			atomic.AddInt64(&stats.valueShuffleCount, 1)
+		}
 
 		// Debug: Verify data size consistency (first 100 items)
 		if processed <= 100 {
@@ -2976,8 +3019,10 @@ func scanDatabaseWithTransform(sourceDB ethdb.Database, targetChannel chan<- Cat
 		processed++
 		atomic.AddInt64(totalProcessed, 1)
 
-		// Generate new key and value
+		// Generate new key and value with timing
+		keyGenStart := time.Now()
 		newKey := generateNewKey(originalKey, version)
+		keyGenDuration := time.Since(keyGenStart)
 
 		// Skip if new key is the same as original key
 		if bytes.Equal(newKey, originalKey) {
@@ -2986,7 +3031,22 @@ func scanDatabaseWithTransform(sourceDB ethdb.Database, targetChannel chan<- Cat
 			continue
 		}
 
+		valueShuffleStart := time.Now()
 		newValue := shuffleValue(originalValue)
+		valueShuffleDuration := time.Since(valueShuffleStart)
+
+		// Log timing statistics periodically (every 50000 operations to reduce overhead)
+		if processed%50000 == 0 {
+			avgKeyGenTime := keyGenDuration.Nanoseconds()
+			avgValueShuffleTime := valueShuffleDuration.Nanoseconds()
+			log.Info("Key/Value generation performance",
+				"scanner", dbType,
+				"processed", processed,
+				"avgKeyGenNs", avgKeyGenTime,
+				"avgValueShuffleNs", avgValueShuffleTime,
+				"keyGenMicros", avgKeyGenTime/1000,
+				"valueShuffleMicros", avgValueShuffleTime/1000)
+		}
 
 		// Create transformed data package
 		data := CategorizedData{
