@@ -677,9 +677,10 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 	}
 
 	const (
-		totalExpectedKeys = 18881610000
-		numWorkers        = 25
-		maxBatchSize      = 512 * 1024 * 1024 // 512MB batch size
+		totalExpectedKeys = 18000000000 // 180亿个key
+		numWorkers        = 15
+		maxBatchSize      = 512 * 1024 * 1024       // 512MB batch size
+		progressInterval  = totalExpectedKeys / 100 // 1% = 1.8亿个key
 	)
 
 	var (
@@ -690,6 +691,8 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 		lastProgress      int
 		wg                sync.WaitGroup
 		processedCount    int64
+		scannedCount      int64 // 读取进度计数器
+		writtenCount      int64 // 写入进度计数器
 	)
 
 	// Channel for sending key-value pairs to workers
@@ -777,8 +780,20 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 				}
 
 				currentBatchSize += len(newKey) + len(newValue)
-				atomic.AddInt64(&newKeysCreated, 1)
+				newKeys := atomic.AddInt64(&newKeysCreated, 1)
 				atomic.AddInt64(&totalBytesWritten, int64(len(newKey)+len(newValue)))
+				atomic.AddInt64(&writtenCount, 1)
+
+				// 每1%打印写入进度
+				if newKeys%progressInterval == 0 {
+					progress := newKeys * 100 / totalExpectedKeys
+					log.Info("📝 WRITE Progress",
+						"progress", fmt.Sprintf("%d%%", progress),
+						"writtenKeys", newKeys,
+						"totalBytes", common.StorageSize(atomic.LoadInt64(&totalBytesWritten)).String(),
+						"duplicates", atomic.LoadInt64(&duplicateKeys),
+						"errors", atomic.LoadInt64(&writeErrors))
+				}
 
 				// Check if batch should be written
 				if currentBatchSize >= maxBatchSize {
@@ -853,8 +868,22 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 		}
 
 		atomic.AddInt64(&processedCount, 1)
+		scanned := atomic.AddInt64(&scannedCount, 1)
 		count++
 
+		// 每1%打印读取进度
+		if scanned%progressInterval == 0 {
+			progress := scanned * 100 / totalExpectedKeys
+			writtenKeys := atomic.LoadInt64(&newKeysCreated)
+			log.Info("📖 READ Progress",
+				"progress", fmt.Sprintf("%d%%", progress),
+				"scannedKeys", scanned,
+				"writtenKeys", writtenKeys,
+				"channelBuffer", len(kvChan),
+				"elapsed", common.PrettyDuration(time.Since(start)))
+		}
+
+		// 每10000个key或每5秒打印详细信息
 		if count%10000 == 0 && time.Since(logged) > 5*time.Second {
 			log.Info("Scanning source database",
 				"processedKeys", count,
@@ -879,12 +908,13 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 	totalDuration := time.Since(start)
 	throughputMBps := float64(finalBytesWritten) / (1024 * 1024 * totalDuration.Seconds())
 
-	log.Info("Database expansion completed (1T -> 2T) with read-write separation",
+	log.Info("🎉 Database expansion completed (1T -> 2T) with read-write separation",
 		"totalKeysScanned", count,
 		"newKeysCreated", finalKeysCreated,
 		"totalBytesWritten", common.StorageSize(finalBytesWritten).String(),
 		"writeErrors", finalErrors,
 		"duplicateKeys", finalDuplicates,
+		"successRate", fmt.Sprintf("%.2f%%", float64(finalKeysCreated)*100/float64(count)),
 		"averageThroughput", fmt.Sprintf("%.2f MB/s", throughputMBps),
 		"totalDuration", common.PrettyDuration(totalDuration))
 
