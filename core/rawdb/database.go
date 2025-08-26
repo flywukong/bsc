@@ -779,20 +779,7 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 						"newKeyLen", len(newKey))
 					continue
 				}
-
-				// Debug: Log first successful transformation
-				if atomic.LoadInt64(&newKeysCreated) == 0 {
-					keyLen := len(kv.key)
-					if keyLen > 8 {
-						keyLen = 8
-					}
-					log.Info("🎉 First successful key transformation!",
-						"originalKey", fmt.Sprintf("%x", kv.key[:keyLen]),
-						"originalLen", len(kv.key),
-						"newKey", fmt.Sprintf("%x", newKey[:keyLen]),
-						"newLen", len(newKey))
-				}
-
+				
 				if err := batch.Put(newKey, newValue); err != nil {
 					atomic.AddInt64(&writeErrors, 1)
 					log.Error("Failed to add to batch", "err", err, "worker", workerID)
