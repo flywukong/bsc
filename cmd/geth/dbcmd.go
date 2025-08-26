@@ -2472,7 +2472,7 @@ func migrateDBExpandMode(ctx *cli.Context, targetDataDir string, version byte, c
 	defer sourceDB.Close()
 
 	// Open existing target database (already migrated with multi-database structure)
-	targetChainDataPath := filepath.Join(targetDataDir, "chaindata")
+	targetChainDataPath := filepath.Join(targetDataDir, "geth", "chaindata")
 
 	// Verify target database structure exists
 	targetStatePath := filepath.Join(targetChainDataPath, "state")
