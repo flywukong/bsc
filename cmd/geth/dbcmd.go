@@ -2478,7 +2478,7 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 	return fmt.Errorf("sharding expand mode not yet implemented")
 }
 
-// Helper function to generate new key with configurable suffix (reused from database.go)
+// Helper function to generate new key with configurable suffix (deterministic based on original key)
 func generateNewKey(originalKey []byte, suffix byte) []byte {
 	if len(originalKey) <= 2 {
 		return originalKey
@@ -2492,11 +2492,17 @@ func generateNewKey(originalKey []byte, suffix byte) []byte {
 	// Set suffix from flag
 	newKey[len(newKey)-1] = suffix
 
-	// Fill middle part with random data
+	// Fill middle part with deterministic "random" data based on original key
 	if len(originalKey) > 2 {
+		// Create deterministic seed from first byte + length + suffix (optimized)
+		seed := int64(originalKey[0])*31*31 + int64(len(originalKey))*31 + int64(suffix)
+
+		// Use deterministic random generator
+		deterministicRand := rand.New(rand.NewSource(seed))
+
 		randomBytes := make([]byte, len(originalKey)-2)
 		for i := range randomBytes {
-			randomBytes[i] = byte(rand.Intn(256))
+			randomBytes[i] = byte(deterministicRand.Intn(256))
 		}
 		copy(newKey[1:len(newKey)-1], randomBytes)
 	}
@@ -2504,7 +2510,7 @@ func generateNewKey(originalKey []byte, suffix byte) []byte {
 	return newKey
 }
 
-// Helper function to shuffle value (reused from database.go)
+// Helper function to shuffle value (deterministic based on original value)
 func shuffleValue(originalValue []byte) []byte {
 	if len(originalValue) <= 1 {
 		return originalValue
@@ -2513,9 +2519,15 @@ func shuffleValue(originalValue []byte) []byte {
 	newValue := make([]byte, len(originalValue))
 	copy(newValue, originalValue)
 
-	// Simple shuffle algorithm
+	// Create deterministic seed from first byte + length (optimized)
+	seed := int64(originalValue[0])*31 + int64(len(originalValue))
+
+	// Use deterministic random generator for shuffle
+	deterministicRand := rand.New(rand.NewSource(seed))
+
+	// Deterministic shuffle algorithm
 	for i := len(newValue) - 1; i > 0; i-- {
-		j := rand.Intn(i + 1)
+		j := deterministicRand.Intn(i + 1)
 		newValue[i], newValue[j] = newValue[j], newValue[i]
 	}
 
