@@ -790,6 +790,22 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 			newValue[0] = originalValue[0] + 1
 		}
 
+		// Special handling for 2-5 byte values: if still same, shuffle again
+		if len(newValue) > 1 && len(newValue) <= 5 && bytes.Equal(newValue, originalValue) {
+			// Apply another round of shuffle
+			for i := 0; i < len(newValue)/2; i++ {
+				j := (i + len(newValue)/2) % len(newValue)
+				newValue[i], newValue[j] = newValue[j], newValue[i]
+			}
+
+			// Apply another random XOR transformation
+			var xorKey2 [1]byte
+			rand.Read(xorKey2[:])
+			for i := range newValue {
+				newValue[i] ^= xorKey2[0]
+			}
+		}
+
 		return newValue
 	}
 
