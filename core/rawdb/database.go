@@ -668,64 +668,91 @@ func inspectDatabaseNormal(db ethdb.Database, keyPrefix, keyStart []byte) error 
 }
 
 // expandDatabase performs 1T -> 2T database expansion from source to target
+// Now uses focused concurrent prefix-based scanning for better performance
 func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byte, suffix byte) error {
-	// Data expansion logic: 1T -> 2T with concurrent batch writing
-	type kvPair struct {
-		key   []byte
-		value []byte
-		size  int
-	}
+	log.Info("Starting database expansion with focused concurrent scanning",
+		"sourceDb", "read-only", "targetDb", "write-only", "suffix", suffix,
+		"mode", "focused_concurrent_prefix_based",
+		"targetDataTypes", "accountTrie,storageTrie,code,txLookup,accountSnapshot,storageSnapshot")
 
+	// Use the new focused expansion implementation for better performance
+	return expandDatabaseFocused(sourceDb, targetDb, suffix)
+}
+
+// kvPair represents a key-value pair for the focused expansion
+type kvPair struct {
+	key   []byte
+	value []byte
+	size  int
+}
+
+// expandDatabaseFocused performs concurrent database expansion focusing on specific data types
+// This version uses prefix-based concurrent scanning for better performance
+func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suffix byte) error {
 	const (
-		totalExpectedKeys = 18881610000
-		numWorkers        = 35
+		totalExpectedKeys = 18800000000       // 18.8 billion keys
+		numWriters        = 35                // Number of writer goroutines
 		maxBatchSize      = 512 * 1024 * 1024 // 512MB batch size
+		channelBufferSize = 10000             // Channel buffer size
 	)
 
+	log.Info("run with new version")
+	// Define focused prefixes to scan concurrently - only the data types we want
+	prefixes := []struct {
+		prefix  []byte
+		name    string
+		checker func([]byte) bool
+	}{
+		{TrieNodeAccountPrefix, "accountTrie", IsAccountTrieNode},
+		{TrieNodeStoragePrefix, "storageTrie", IsStorageTrieNode},
+		{CodePrefix, "code", func(key []byte) bool {
+			return bytes.HasPrefix(key, CodePrefix) && len(key) == len(CodePrefix)+common.HashLength
+		}},
+		{txLookupPrefix, "txLookup", func(key []byte) bool {
+			return bytes.HasPrefix(key, txLookupPrefix) && len(key) == (len(txLookupPrefix)+common.HashLength)
+		}},
+		{SnapshotAccountPrefix, "accountSnapshot", func(key []byte) bool {
+			return bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)
+		}},
+		{SnapshotStoragePrefix, "storageSnapshot", func(key []byte) bool {
+			return bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)
+		}},
+	}
+
+	// Shared statistics
 	var (
 		newKeysCreated    int64
 		totalBytesWritten int64
 		writeErrors       int64
 		duplicateKeys     int64
 		duplicateValues   int64
-		lastProgress      int
-		wg                sync.WaitGroup
-		processedCount    int64
+		skippedKeys       int64
 	)
 
-	// Channel for sending key-value pairs to workers
-	kvChan := make(chan kvPair, 5000)
+	// Shared channel for key-value pairs
+	kvChan := make(chan kvPair, channelBufferSize)
 
-	log.Info("Starting database expansion from 1T to 2T with read-write separation",
-		"workers", numWorkers, "maxBatchSize", "512MB", "expectedKeys", totalExpectedKeys,
-		"sourceDb", "read-only", "targetDb", "write-only", "version", suffix,
-		"valueExpansion", "original_length + 1 byte version")
+	log.Info("Starting focused concurrent database expansion from 1T to 2T",
+		"writers", numWriters, "maxBatchSize", "512MB", "expectedKeys", totalExpectedKeys,
+		"focusedPrefixes", len(prefixes), "sourceDb", "read-only", "targetDb", "write-only",
+		"version", suffix, "scanStrategy", "focused_concurrent_prefix_based",
+		"targetDataTypes", "accountTrie,storageTrie,code,txLookup,accountSnapshot,storageSnapshot")
 
-	// Helper function to shuffle value with version info
+	// Helper functions (same transformation logic as before)
 	shuffleValue := func(originalValue []byte, version byte) []byte {
-		if len(originalValue) <= 1 {
-			return originalValue
-		}
-
-		// Create new value with extra space for version info
-		newValue := make([]byte, len(originalValue)+1) // +1 for version byte
+		// Always create new value with same length as original
+		newValue := make([]byte, len(originalValue))
 		copy(newValue, originalValue)
 
-		// Add version byte at the end
-		newValue[len(originalValue)] = version
-
-		// Simple shuffle: swap bytes in a deterministic pattern
+		// Apply deterministic shuffle pattern
 		for i := 0; i < len(newValue)/2; i++ {
 			j := (i + len(newValue)/2) % len(newValue)
 			newValue[i], newValue[j] = newValue[j], newValue[i]
 		}
 
-		// XOR with a cryptographically secure random 1-byte key to add more entropy
+		// Apply random XOR transformation
 		var xorKey [1]byte
-		if _, err := rand.Read(xorKey[:]); err != nil {
-			// Fallback: use a deterministic value if crypto/rand fails
-			xorKey[0] = byte(len(originalValue) ^ int(version))
-		}
+		rand.Read(xorKey[:])
 		for i := range newValue {
 			newValue[i] ^= xorKey[0]
 		}
@@ -733,32 +760,49 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 		return newValue
 	}
 
-	// Helper function to generate new key (simplified version without magic markers)
 	generateNewKey := func(originalKey []byte, suffix byte) []byte {
 		if len(originalKey) <= 2 {
 			return originalKey
 		}
 
 		newKey := make([]byte, len(originalKey))
+		copy(newKey, originalKey)
 
-		// Keep prefix same as original
-		newKey[0] = originalKey[0]
+		// 替换前缀以避免与原有trie节点冲突
+		// TrieNodeAccountPrefix "A" -> "X"
+		// TrieNodeStoragePrefix "O" -> "Y"
+		if bytes.HasPrefix(originalKey, []byte("A")) {
+			newKey[0] = 'X'
+		} else if bytes.HasPrefix(originalKey, []byte("O")) {
+			newKey[0] = 'Y'
+		}
 
-		// Set suffix from flag
-		newKey[len(newKey)-1] = suffix
-
-		// Fill middle part with random data
+		// 填充中间部分随机数据
 		if len(originalKey) > 2 {
 			randomBytes := make([]byte, len(originalKey)-2)
 			rand.Read(randomBytes)
 			copy(newKey[1:len(newKey)-1], randomBytes)
 		}
 
+		// key末尾一位使用version
+		newKey[len(newKey)-1] = suffix
+		// 检查生成的key是否与原始key相同，如果相同则跳过
+		if bytes.Equal(newKey, originalKey) {
+			return nil // 返回nil表示跳过这个key
+		}
+
 		return newKey
 	}
 
-	// Start worker goroutines
-	for i := 0; i < numWorkers; i++ {
+	// Additional variables needed for the worker goroutines
+	var (
+		processedCount int64
+		lastProgress   int
+		wg             sync.WaitGroup
+	)
+
+	// Start writer goroutines
+	for i := 0; i < numWriters; i++ {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
@@ -768,9 +812,20 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 
 			for kv := range kvChan {
 				newKey := generateNewKey(kv.key, suffix)
-				newValue := shuffleValue(kv.value, suffix)
 
-				// Check if new key is the same as original key
+				// Skip if generateNewKey returned nil (indicating key should be skipped)
+				if newKey == nil {
+					atomic.AddInt64(&skippedKeys, 1)
+					keyLen := len(kv.key)
+					if keyLen > 16 {
+						keyLen = 16
+					}
+					log.Debug("Key skipped due to same key generation",
+						"originalKey", fmt.Sprintf("%x", kv.key[:keyLen]))
+					continue
+				}
+
+				// Check if new key is the same as original key (should not happen now)
 				if bytes.Equal(newKey, kv.key) {
 					atomic.AddInt64(&duplicateKeys, 1)
 					keyLen := len(kv.key)
@@ -784,6 +839,7 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 						"newKeyLen", len(newKey))
 					continue
 				}
+				newValue := shuffleValue(kv.value, suffix)
 
 				// Check if new value is the same as original value (should never happen with version byte)
 				if bytes.Equal(newValue, kv.value) {
@@ -798,16 +854,6 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 						"newValue", fmt.Sprintf("%x", newValue[:valueLen]),
 						"newValueLen", len(newValue))
 					continue
-				}
-
-				// Debug: Log value expansion for first few items
-				if atomic.LoadInt64(&newKeysCreated) < 5 {
-					log.Info("🔄 Value expansion with version and crypto XOR shuffle",
-						"originalLen", len(kv.value),
-						"newLen", len(newValue),
-						"versionByte", suffix,
-						"shuffle", "deterministic_swap + crypto_XOR_entropy",
-						"expansion", fmt.Sprintf("%d -> %d bytes", len(kv.value), len(newValue)))
 				}
 
 				if err := batch.Put(newKey, newValue); err != nil {
@@ -870,44 +916,57 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 		}(i)
 	}
 
-	// Scan source database and send key-value pairs to workers
-	it := sourceDb.NewIterator(keyPrefix, keyStart)
-	defer it.Release()
+	// Start concurrent prefix scanners for focused data types
+	var scannerWg sync.WaitGroup
+	for _, prefixInfo := range prefixes {
+		scannerWg.Add(1)
+		go func(prefix []byte, name string, checker func([]byte) bool) {
+			defer scannerWg.Done()
 
-	start := time.Now()
-	logged := time.Now()
-	count := int64(0)
+			log.Info("🔍 Starting focused prefix scanner",
+				"prefix", name, "prefixHex", fmt.Sprintf("%x", prefix))
 
-	log.Info("Scanning source database for expansion...", "sourceDb", "read-only")
+			// Create iterator for this prefix
+			it := sourceDb.NewIterator(prefix, nil)
+			defer it.Release()
 
-	for it.Next() {
-		key := make([]byte, len(it.Key()))
-		value := make([]byte, len(it.Value()))
-		copy(key, it.Key())
-		copy(value, it.Value())
+			var prefixScanned int64
+			for it.Next() {
+				key := it.Key()
+				value := it.Value()
 
-		kvChan <- kvPair{
-			key:   key,
-			value: value,
-			size:  len(key) + len(value),
-		}
+				// Apply specific checker function
+				if !checker(key) {
+					atomic.AddInt64(&skippedKeys, 1)
+					continue
+				}
 
-		atomic.AddInt64(&processedCount, 1)
-		count++
+				// Send to writer channel
+				kv := kvPair{
+					key:   common.CopyBytes(key),
+					value: common.CopyBytes(value),
+					size:  len(key) + len(value),
+				}
+				kvChan <- kv
+				prefixScanned++
 
-		if count%10000 == 0 && time.Since(logged) > 5*time.Second {
-			log.Info("Scanning source database",
-				"processedKeys", count,
-				"throughputMBps", fmt.Sprintf("%.2f", float64(atomic.LoadInt64(&totalBytesWritten))/(1024*1024*time.Since(start).Seconds())),
-				"elapsed", common.PrettyDuration(time.Since(start)))
-			logged = time.Now()
-		}
+				// Progress logging for this prefix
+				if prefixScanned%500000 == 0 {
+					log.Info("📊 Prefix scanning progress",
+						"prefix", name, "scanned", prefixScanned)
+				}
+			}
+
+			log.Info("✅ Prefix scanning completed",
+				"prefix", name, "totalScanned", prefixScanned)
+		}(prefixInfo.prefix, prefixInfo.name, prefixInfo.checker)
 	}
 
-	// Close channel and wait for workers to finish
-	close(kvChan)
-	log.Info("Source database scan completed, waiting for workers to finish...",
-		"totalScannedKeys", count)
+	// Wait for all scanners to complete
+	scannerWg.Wait()
+	close(kvChan) // Signal writers to finish
+
+	// Wait for all writers to complete
 	wg.Wait()
 
 	// Final statistics
@@ -915,32 +974,21 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 	finalBytesWritten := atomic.LoadInt64(&totalBytesWritten)
 	finalErrors := atomic.LoadInt64(&writeErrors)
 	finalDuplicates := atomic.LoadInt64(&duplicateKeys)
-
-	totalDuration := time.Since(start)
-	throughputMBps := float64(finalBytesWritten) / (1024 * 1024 * totalDuration.Seconds())
-
 	finalDuplicateValues := atomic.LoadInt64(&duplicateValues)
+	finalSkipped := atomic.LoadInt64(&skippedKeys)
 
-	log.Info("Database expansion completed (1T -> 2T) with read-write separation",
-		"totalKeysScanned", count,
+	log.Info("🎉 Focused concurrent database expansion completed!",
 		"newKeysCreated", finalKeysCreated,
 		"totalBytesWritten", common.StorageSize(finalBytesWritten).String(),
 		"writeErrors", finalErrors,
 		"duplicateKeys", finalDuplicates,
 		"duplicateValues", finalDuplicateValues,
-		"averageThroughput", fmt.Sprintf("%.2f MB/s", throughputMBps),
-		"totalDuration", common.PrettyDuration(totalDuration))
+		"skippedKeys", finalSkipped,
+		"focusedDataTypes", "accountTrie,storageTrie,code,txLookup,accountSnapshot,storageSnapshot")
 
 	if finalDuplicates > 0 {
-		log.Warn("Duplicate key generation detected",
-			"duplicateCount", finalDuplicates,
-			"duplicateRate", fmt.Sprintf("%.4f%%", float64(finalDuplicates)*100/float64(count)))
+		log.Warn("Duplicate key generation detected", "duplicateCount", finalDuplicates)
 	}
-
-	log.Info("Expansion summary",
-		"sourceDatabase", "unchanged (1T)",
-		"targetDatabase", fmt.Sprintf("expanded to ~%.1fT", float64(finalBytesWritten)/(1024*1024*1024*1024)+1.0),
-		"expansionRatio", fmt.Sprintf("1:%.1f", float64(finalKeysCreated)/float64(count)))
 
 	return nil
 }
@@ -1034,4 +1082,32 @@ func ReadChainMetadata(db ethdb.Reader) [][]string {
 		{"txIndexTail", pp(ReadTxIndexTail(db))},
 	}
 	return data
+}
+
+// getDataTypeDescription returns a human-readable description of each data type
+func getDataTypeDescription(name string) string {
+	descriptions := map[string]string{
+		"accountTrie":     "Account trie nodes (state data)",
+		"storageTrie":     "Storage trie nodes (contract storage)",
+		"code":            "Smart contract bytecode",
+		"txLookup":        "Transaction hash to block lookup",
+		"accountSnapshot": "Account state snapshots",
+		"storageSnapshot": "Storage state snapshots",
+	}
+	if desc, exists := descriptions[name]; exists {
+		return desc
+	}
+	return "Unknown data type"
+}
+
+// InspectDatabaseWithExpansionFocused uses focused concurrent prefix-based scanning for specific data types
+// This version only processes: accountTrie, storageTrie, code, txLookup, accountSnapshot, storageSnapshot
+func InspectDatabaseWithExpansionFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suffix byte) error {
+	// If no target database provided, return error
+	if targetDb == nil {
+		return fmt.Errorf("target database is required for expansion")
+	}
+
+	// Run focused concurrent database expansion from source to target
+	return expandDatabaseFocused(sourceDb, targetDb, suffix)
 }
