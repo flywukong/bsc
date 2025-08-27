@@ -673,7 +673,7 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 	log.Info("Starting database expansion with focused concurrent scanning",
 		"sourceDb", "read-only", "targetDb", "write-only", "suffix", suffix,
 		"mode", "focused_concurrent_prefix_based",
-		"targetDataTypes", "accountTrie,storageTrie,code,txLookup,accountSnapshot,storageSnapshot")
+		"targetDataTypes", "accountTrie,storageTrie,code,txLookup,accountSnapshot,storageSnapshot,headers,blockBodies,blockReceipts,headerTDs,blobSidecars,headerHashes,headerNumbers,stateIDs,bloomBits")
 
 	// Use the new focused expansion implementation for better performance
 	return expandDatabaseFocused(sourceDb, targetDb, suffix)
@@ -691,7 +691,7 @@ type kvPair struct {
 func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suffix byte) error {
 	const (
 		totalExpectedKeys = 18800000000       // 18.8 billion keys
-		numWriters        = 35                // Number of writer goroutines
+		numWriters        = 45                // Number of writer goroutines
 		maxBatchSize      = 512 * 1024 * 1024 // 512MB batch size
 		channelBufferSize = 10000             // Channel buffer size
 	)
@@ -717,6 +717,33 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 		{SnapshotStoragePrefix, "storageSnapshot", func(key []byte) bool {
 			return bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)
 		}},
+		{headerPrefix, "headers", func(key []byte) bool {
+			return bytes.HasPrefix(key, headerPrefix) && len(key) == (len(headerPrefix)+8+common.HashLength)
+		}},
+		{blockBodyPrefix, "blockBodies", func(key []byte) bool {
+			return bytes.HasPrefix(key, blockBodyPrefix) && len(key) == (len(blockBodyPrefix)+8+common.HashLength)
+		}},
+		{blockReceiptsPrefix, "blockReceipts", func(key []byte) bool {
+			return bytes.HasPrefix(key, blockReceiptsPrefix) && len(key) == (len(blockReceiptsPrefix)+8+common.HashLength)
+		}},
+		{headerPrefix, "headerTDs", func(key []byte) bool {
+			return bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerTDSuffix)
+		}},
+		{BlockBlobSidecarsPrefix, "blobSidecars", func(key []byte) bool {
+			return bytes.HasPrefix(key, BlockBlobSidecarsPrefix)
+		}},
+		{headerPrefix, "headerHashes", func(key []byte) bool {
+			return bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerHashSuffix)
+		}},
+		{headerNumberPrefix, "headerNumbers", func(key []byte) bool {
+			return bytes.HasPrefix(key, headerNumberPrefix) && len(key) == (len(headerNumberPrefix)+common.HashLength)
+		}},
+		{stateIDPrefix, "stateIDs", func(key []byte) bool {
+			return bytes.HasPrefix(key, stateIDPrefix) && len(key) == len(stateIDPrefix)+common.HashLength
+		}},
+		{bloomBitsPrefix, "bloomBits", func(key []byte) bool {
+			return bytes.HasPrefix(key, bloomBitsPrefix) && len(key) == (len(bloomBitsPrefix)+10+common.HashLength)
+		}},
 	}
 
 	// Shared statistics
@@ -736,7 +763,7 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 		"writers", numWriters, "maxBatchSize", "512MB", "expectedKeys", totalExpectedKeys,
 		"focusedPrefixes", len(prefixes), "sourceDb", "read-only", "targetDb", "write-only",
 		"version", suffix, "scanStrategy", "focused_concurrent_prefix_based",
-		"targetDataTypes", "accountTrie,storageTrie,code,txLookup,accountSnapshot,storageSnapshot")
+		"targetDataTypes", "accountTrie,storageTrie,code,txLookup,accountSnapshot,storageSnapshot,headers,blockBodies,blockReceipts,headerTDs,blobSidecars,headerHashes,headerNumbers,stateIDs,bloomBits")
 
 	// Helper functions (same transformation logic as before)
 	shuffleValue := func(originalValue []byte, version byte) []byte {
@@ -755,6 +782,12 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 		rand.Read(xorKey[:])
 		for i := range newValue {
 			newValue[i] ^= xorKey[0]
+		}
+
+		// Special handling for 1-byte values: ensure they are different from original
+		if len(newValue) == 1 && bytes.Equal(newValue, originalValue) {
+			// Simply increment by 1 to ensure difference
+			newValue[0] = originalValue[0] + 1
 		}
 
 		return newValue
