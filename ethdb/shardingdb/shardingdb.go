@@ -12,6 +12,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/ethdb"
 
+	pebble2 "github.com/cockroachdb/pebble"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
 )
 
@@ -184,26 +185,32 @@ func New(cfg *Config, cache int, handles int, readonly bool, f ShardIndexFunc) (
 	shardCache := cache / len(shardCfgs)
 	shardHandles := handles / len(shardCfgs)
 	shards := make([]ethdb.KeyValueStore, len(shardCfgs))
-	for i, shardCfg := range shardCfgs {
-		namespace := fmt.Sprintf("%s%s/", cfg.Namespace, ShardSuffix(i))
-		switch cfg.DBType {
-		case DBTypePebble:
-			db, err := pebble.New(shardCfg.DBPath, shardCache, shardHandles, namespace, readonly)
+	switch cfg.DBType {
+	case DBTypePebble:
+		sharedCache := pebble2.NewCache(int64(cache * 1024 * 1024))
+		for i, shardCfg := range shardCfgs {
+			namespace := fmt.Sprintf("%s%s/", cfg.Namespace, ShardSuffix(i))
+			db, err := pebble.NewWithCache(shardCfg.DBPath, cache, shardHandles, namespace, readonly, sharedCache)
 			if err != nil {
 				return nil, err
 			}
 			shards[i] = db
-		case DBTypeLeveldb:
+		}
+	case DBTypeLeveldb:
+		for i, shardCfg := range shardCfgs {
+			namespace := fmt.Sprintf("%s%s/", cfg.Namespace, ShardSuffix(i))
 			db, err := leveldb.New(shardCfg.DBPath, shardCache, shardHandles, namespace, readonly)
 			if err != nil {
 				return nil, err
 			}
 			shards[i] = db
-		case DBTypeMemory:
-			shards[i] = memorydb.New()
-		default:
-			return nil, fmt.Errorf("unsupported db type: %s", cfg.DBType)
 		}
+	case DBTypeMemory:
+		for i := range shardCfgs {
+			shards[i] = memorydb.New()
+		}
+	default:
+		return nil, fmt.Errorf("unsupported db type: %s", cfg.DBType)
 	}
 
 	return &Database{
