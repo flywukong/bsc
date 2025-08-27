@@ -18,6 +18,7 @@ package rawdb
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -678,7 +679,7 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 
 	const (
 		totalExpectedKeys = 18881610000
-		numWorkers        = 15
+		numWorkers        = 35
 		maxBatchSize      = 512 * 1024 * 1024 // 512MB batch size
 	)
 
@@ -693,7 +694,7 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 	)
 
 	// Channel for sending key-value pairs to workers
-	kvChan := make(chan kvPair, 1000)
+	kvChan := make(chan kvPair, 5000)
 
 	log.Info("Starting database expansion from 1T to 2T with read-write separation",
 		"workers", numWorkers, "maxBatchSize", "512MB", "expectedKeys", totalExpectedKeys,
@@ -728,15 +729,20 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 		if len(originalValue) <= 1 {
 			return originalValue
 		}
+		
+		hasher := sha256.New()
+		hasher.Write(originalValue)
+		hashBytes := hasher.Sum(nil)
+
+		seed := int64(hashBytes[0])<<56 |
+			int64(hashBytes[1])<<48 |
+			int64(hashBytes[2])<<40 |
+			int64(hashBytes[3])<<32
+
+		rng := rand.New(rand.NewSource(seed))
 
 		newValue := make([]byte, len(originalValue))
-		copy(newValue, originalValue)
-
-		// Simple shuffle: swap bytes in a deterministic pattern
-		for i := 0; i < len(newValue)/2; i++ {
-			j := (i + len(newValue)/2) % len(newValue)
-			newValue[i], newValue[j] = newValue[j], newValue[i]
-		}
+		rng.Read(newValue) // 完全随机的新值
 
 		return newValue
 	}
