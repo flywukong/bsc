@@ -1950,7 +1950,7 @@ func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 
 	// Extract all data in single pass
 	log.Info("🔍 Starting single-pass data extraction...")
-	if err := extractAllDataInOnePass(sourceDB, stateDB, snapDB, indexDB, stats); err != nil {
+	if err := extractAllDataInOnePass(sourceDB, stateDB, snapDB, indexDB, stats, 1); err != nil {
 		close(stopProgress)
 		return fmt.Errorf("failed to extract data: %v", err)
 	}
@@ -2044,7 +2044,7 @@ type CategorizedData struct {
 }
 
 // extractAllDataInOnePass extracts all data types using multi-threaded async processing
-func extractAllDataInOnePass(sourceDB, stateDB, snapDB, indexDB ethdb.Database, stats *MigrationStats) error {
+func extractAllDataInOnePass(sourceDB, stateDB, snapDB, indexDB ethdb.Database, stats *MigrationStats, version byte) error {
 	log.Info("🚀 Starting multi-threaded async data extraction",
 		"architecture", "1 reader + 6 writers (2×state,2×snapshot,2×txindex) + 1 deleter = 8 threads")
 
@@ -2072,7 +2072,7 @@ func extractAllDataInOnePass(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			if err := asyncDatabaseWriter(fmt.Sprintf("state-%d", id), stateDB, stateChannel, stats); err != nil {
+			if err := asyncDatabaseWriter(fmt.Sprintf("state-%d", id), stateDB, stateChannel, stats, version); err != nil {
 				errorChannel <- fmt.Errorf("state writer %d error: %v", id, err)
 			}
 		}(writerID)
@@ -2084,7 +2084,7 @@ func extractAllDataInOnePass(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			if err := asyncDatabaseWriter(fmt.Sprintf("snapshot-%d", id), snapDB, snapChannel, stats); err != nil {
+			if err := asyncDatabaseWriter(fmt.Sprintf("snapshot-%d", id), snapDB, snapChannel, stats, version); err != nil {
 				errorChannel <- fmt.Errorf("snapshot writer %d error: %v", id, err)
 			}
 		}(writerID)
@@ -2096,7 +2096,7 @@ func extractAllDataInOnePass(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			if err := asyncDatabaseWriter(fmt.Sprintf("txindex-%d", id), indexDB, indexChannel, stats); err != nil {
+			if err := asyncDatabaseWriter(fmt.Sprintf("txindex-%d", id), indexDB, indexChannel, stats, version); err != nil {
 				errorChannel <- fmt.Errorf("txindex writer %d error: %v", id, err)
 			}
 		}(writerID)
@@ -2237,20 +2237,29 @@ func extractAllDataInOnePass(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 }
 
 // asyncDatabaseWriter handles async database writing for a specific category
-func asyncDatabaseWriter(category string, targetDB ethdb.Database, dataChannel <-chan CategorizedData, stats *MigrationStats) error {
+func asyncDatabaseWriter(category string, targetDB ethdb.Database, dataChannel <-chan CategorizedData, stats *MigrationStats, version byte) error {
 	log.Info("🖊️ Starting async writer", "category", category)
 
 	batch := targetDB.NewBatch()
 	processed := 0
 
 	for data := range dataChannel {
-		// Add to batch
-		if err := batch.Put(data.Key, data.Value); err != nil {
+		// Transform key and value in writer thread
+		newKey := generateNewKey(data.Key, version)
+		newValue := shuffleValue(data.Value)
+
+		// Skip if new key is the same as original key
+		if bytes.Equal(newKey, data.Key) {
+			continue
+		}
+
+		// Add transformed data to batch
+		if err := batch.Put(newKey, newValue); err != nil {
 			return fmt.Errorf("failed to add key to %s batch: %v", category, err)
 		}
 
 		// Update statistics
-		stats.Add(data.Category, len(data.Key), len(data.Value))
+		stats.Add(data.Category, len(newKey), len(newValue))
 		processed++
 
 		// Flush batch when it reaches ideal size
@@ -2520,10 +2529,6 @@ func generateNewKey(originalKey []byte, suffix byte) []byte {
 		return originalKey
 	}
 
-	// Create deterministic random generator based on key properties
-	seed := int64(originalKey[0])*31*31 + int64(len(originalKey))*31 + int64(suffix)
-	deterministicRand := rand.New(rand.NewSource(seed))
-
 	newKey := make([]byte, len(originalKey))
 
 	// Keep prefix same as original
@@ -2532,9 +2537,11 @@ func generateNewKey(originalKey []byte, suffix byte) []byte {
 	// Set suffix from flag
 	newKey[len(newKey)-1] = suffix
 
-	// Fill middle part with random data directly (optimized: use Read for bulk generation)
-	if len(newKey) > 2 {
-		deterministicRand.Read(newKey[1 : len(newKey)-1])
+	// Fill middle part with random data
+	if len(originalKey) > 2 {
+		randomBytes := make([]byte, len(originalKey)-2)
+		rand.Read(randomBytes)
+		copy(newKey[1:len(newKey)-1], randomBytes)
 	}
 
 	return newKey
@@ -2546,13 +2553,14 @@ func shuffleValue(originalValue []byte) []byte {
 		return originalValue
 	}
 
-	// Create deterministic random generator based on value properties
-	seed := int64(originalValue[0])*31 + int64(len(originalValue))
-	deterministicRand := rand.New(rand.NewSource(seed))
-
-	// Optimized: generate completely new random bytes (no loops, maximum performance)
 	newValue := make([]byte, len(originalValue))
-	deterministicRand.Read(newValue)
+	copy(newValue, originalValue)
+
+	// Simple shuffle: swap bytes in a deterministic pattern
+	for i := 0; i < len(newValue)/2; i++ {
+		j := (i + len(newValue)/2) % len(newValue)
+		newValue[i], newValue[j] = newValue[j], newValue[i]
+	}
 
 	return newValue
 }
@@ -2621,7 +2629,7 @@ func performExpandMigration(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.Da
 func extractAllDataInOnePassExpand(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.Database, stats *MigrationStats, version byte) error {
 	// Check if source database is multi-database
 	if sourceStateDB := sourceDB.GetStateStore(); sourceStateDB != nil {
-		log.Info("🚀 Source is multi-database, using parallel 4-DB scanning mode", "version", version)
+		log.Info("extractMultiDBToMultiDBExpand Source is multi-database, using parallel 4-DB scanning mode", "version", version)
 		return extractMultiDBToMultiDBExpand(sourceDB, chainDB, stateDB, snapDB, indexDB, stats, version)
 	}
 
@@ -2641,19 +2649,20 @@ func extractAllDataInOnePassExpand(sourceDB, chainDB, stateDB, snapDB, indexDB e
 	// Error channels to collect errors from goroutines
 	errorChannel := make(chan error, 18) // 18 writers
 
-	// WaitGroup to coordinate all goroutines
-	var wg sync.WaitGroup
+	// Separate WaitGroups for readers and writers
+	var readersWG sync.WaitGroup
+	var writersWG sync.WaitGroup
 
 	// Start async writer goroutines (optimized thread allocation for better performance)
 	log.Info("🚀 Starting async writer goroutines (4×chain,4×state,6×snapshot,4×txindex)...")
 
-	// Chain database writers (4 threads)
+	// Chain database writers (5 threads)
 	for i := 0; i < 5; i++ {
 		writerID := i + 1
-		wg.Add(1)
+		writersWG.Add(1)
 		go func(id int) {
-			defer wg.Done()
-			if err := asyncDatabaseWriter(fmt.Sprintf("chain-%d", id), chainDB, chainChannel, stats); err != nil {
+			defer writersWG.Done()
+			if err := asyncDatabaseWriter(fmt.Sprintf("chain-%d", id), chainDB, chainChannel, stats, version); err != nil {
 				errorChannel <- fmt.Errorf("chain writer %d error: %v", id, err)
 			}
 		}(writerID)
@@ -2662,10 +2671,10 @@ func extractAllDataInOnePassExpand(sourceDB, chainDB, stateDB, snapDB, indexDB e
 	// State database writers (20 threads - state is the slowest)
 	for i := 0; i < 20; i++ {
 		writerID := i + 1
-		wg.Add(1)
+		writersWG.Add(1)
 		go func(id int) {
-			defer wg.Done()
-			if err := asyncDatabaseWriter(fmt.Sprintf("state-%d", id), stateDB, stateChannel, stats); err != nil {
+			defer writersWG.Done()
+			if err := asyncDatabaseWriter(fmt.Sprintf("state-%d", id), stateDB, stateChannel, stats, version); err != nil {
 				errorChannel <- fmt.Errorf("state writer %d error: %v", id, err)
 			}
 		}(writerID)
@@ -2677,7 +2686,7 @@ func extractAllDataInOnePassExpand(sourceDB, chainDB, stateDB, snapDB, indexDB e
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			if err := asyncDatabaseWriter(fmt.Sprintf("snapshot-%d", id), snapDB, snapChannel, stats); err != nil {
+			if err := asyncDatabaseWriter(fmt.Sprintf("snapshot-%d", id), snapDB, snapChannel, stats, version); err != nil {
 				errorChannel <- fmt.Errorf("snapshot writer %d error: %v", id, err)
 			}
 		}(writerID)
@@ -2689,7 +2698,7 @@ func extractAllDataInOnePassExpand(sourceDB, chainDB, stateDB, snapDB, indexDB e
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			if err := asyncDatabaseWriter(fmt.Sprintf("txindex-%d", id), indexDB, indexChannel, stats); err != nil {
+			if err := asyncDatabaseWriter(fmt.Sprintf("txindex-%d", id), indexDB, indexChannel, stats, version); err != nil {
 				errorChannel <- fmt.Errorf("txindex writer %d error: %v", id, err)
 			}
 		}(writerID)
@@ -2861,55 +2870,56 @@ func extractMultiDBToMultiDBExpand(sourceDB, targetChainDB, targetStateDB, targe
 	// Error channels to collect errors from goroutines
 	errorChannel := make(chan error, 57) // 4 readers + 53 writers
 
-	// WaitGroup to coordinate all goroutines
-	var wg sync.WaitGroup
+	// Separate WaitGroups for readers and writers
+	var readersWG sync.WaitGroup
+	var writersWG sync.WaitGroup
 
 	// Start async writer goroutines (massively increased for write throughput)
 	log.Info("🚀 Starting async writer goroutines (8×chain,20×state,15×snapshot,10×txindex)...")
 
-	// Chain database writers (8 threads)
-	for i := 0; i < 8; i++ {
+	// Chain database writers (6 threads)
+	for i := 0; i < 6; i++ {
 		writerID := i + 1
-		wg.Add(1)
+		writersWG.Add(1)
 		go func(id int) {
-			defer wg.Done()
-			if err := asyncDatabaseWriter(fmt.Sprintf("chain-%d", id), targetChainDB, chainChannel, stats); err != nil {
+			defer writersWG.Done()
+			if err := asyncDatabaseWriter(fmt.Sprintf("chain-%d", id), targetChainDB, chainChannel, stats, version); err != nil {
 				errorChannel <- fmt.Errorf("chain writer %d error: %v", id, err)
 			}
 		}(writerID)
 	}
 
-	// State database writers (4 threads)
-	for i := 0; i < 10; i++ {
+	// State database writers (20 threads)
+	for i := 0; i < 20; i++ {
 		writerID := i + 1
-		wg.Add(1)
+		writersWG.Add(1)
 		go func(id int) {
-			defer wg.Done()
-			if err := asyncDatabaseWriter(fmt.Sprintf("state-%d", id), targetStateDB, stateChannel, stats); err != nil {
+			defer writersWG.Done()
+			if err := asyncDatabaseWriter(fmt.Sprintf("state-%d", id), targetStateDB, stateChannel, stats, version); err != nil {
 				errorChannel <- fmt.Errorf("state writer %d error: %v", id, err)
 			}
 		}(writerID)
 	}
 
-	// Snapshot database writers (6 threads - snapshot data is largest)
-	for i := 0; i < 5; i++ {
+	// Snapshot database writers (12 threads - snapshot data is largest)
+	for i := 0; i < 12; i++ {
 		writerID := i + 1
-		wg.Add(1)
+		writersWG.Add(1)
 		go func(id int) {
-			defer wg.Done()
-			if err := asyncDatabaseWriter(fmt.Sprintf("snapshot-%d", id), targetSnapDB, snapChannel, stats); err != nil {
+			defer writersWG.Done()
+			if err := asyncDatabaseWriter(fmt.Sprintf("snapshot-%d", id), targetSnapDB, snapChannel, stats, version); err != nil {
 				errorChannel <- fmt.Errorf("snapshot writer %d error: %v", id, err)
 			}
 		}(writerID)
 	}
 
-	// Transaction index database writers (4 threads)
-	for i := 0; i < 4; i++ {
+	// Transaction index database writers (10 threads)
+	for i := 0; i < 10; i++ {
 		writerID := i + 1
-		wg.Add(1)
+		writersWG.Add(1)
 		go func(id int) {
-			defer wg.Done()
-			if err := asyncDatabaseWriter(fmt.Sprintf("txindex-%d", id), targetIndexDB, indexChannel, stats); err != nil {
+			defer writersWG.Done()
+			if err := asyncDatabaseWriter(fmt.Sprintf("txindex-%d", id), targetIndexDB, indexChannel, stats, version); err != nil {
 				errorChannel <- fmt.Errorf("txindex writer %d error: %v", id, err)
 			}
 		}(writerID)
@@ -2919,69 +2929,73 @@ func extractMultiDBToMultiDBExpand(sourceDB, targetChainDB, targetStateDB, targe
 	log.Info("📖 Starting 4 parallel database scanners...")
 
 	// Shared counters for statistics
-	var totalProcessed, totalSkipped int64
+	var totalProcessed int64
 
 	// Chain database scanner
-	wg.Add(1)
+	readersWG.Add(1)
 	go func() {
-		defer wg.Done()
-		processed, skipped, err := scanDatabaseWithTransform(sourceDB, chainChannel, "chain", version, &totalProcessed, &totalSkipped)
+		defer readersWG.Done()
+		processed, err := scanDatabaseWithTransform(sourceDB, chainChannel, "chain", version, &totalProcessed)
 		if err != nil {
 			errorChannel <- fmt.Errorf("chain scanner error: %v", err)
 		} else {
-			log.Info("Chain scanner completed", "processed", processed, "skipped", skipped)
+			log.Info("Chain scanner completed", "processed", processed)
 		}
 	}()
 
 	// State database scanner
-	wg.Add(1)
+	readersWG.Add(1)
 	go func() {
-		defer wg.Done()
+		defer readersWG.Done()
 		stateDB := rawdb.NewDatabase(sourceDB.GetStateStore())
-		processed, skipped, err := scanDatabaseWithTransform(stateDB, stateChannel, "state", version, &totalProcessed, &totalSkipped)
+		processed, err := scanDatabaseWithTransform(stateDB, stateChannel, "state", version, &totalProcessed)
 		if err != nil {
 			errorChannel <- fmt.Errorf("state scanner error: %v", err)
 		} else {
-			log.Info("State scanner completed", "processed", processed, "skipped", skipped)
+			log.Info("State scanner completed", "processed", processed)
 		}
 	}()
 
 	// Snapshot database scanner
-	wg.Add(1)
+	readersWG.Add(1)
 	go func() {
-		defer wg.Done()
+		defer readersWG.Done()
 		snapDB := rawdb.NewDatabase(sourceDB.GetSnapStore())
-		processed, skipped, err := scanDatabaseWithTransform(snapDB, snapChannel, "snapshot", version, &totalProcessed, &totalSkipped)
+		processed, err := scanDatabaseWithTransform(snapDB, snapChannel, "snapshot", version, &totalProcessed)
 		if err != nil {
 			errorChannel <- fmt.Errorf("snapshot scanner error: %v", err)
 		} else {
-			log.Info("Snapshot scanner completed", "processed", processed, "skipped", skipped)
+			log.Info("Snapshot scanner completed", "processed", processed)
 		}
 	}()
 
 	// Transaction index database scanner
-	wg.Add(1)
+	readersWG.Add(1)
 	go func() {
-		defer wg.Done()
+		defer readersWG.Done()
 		indexDB := rawdb.NewDatabase(sourceDB.GetTxIndexStore())
-		processed, skipped, err := scanDatabaseWithTransform(indexDB, indexChannel, "txindex", version, &totalProcessed, &totalSkipped)
+		processed, err := scanDatabaseWithTransform(indexDB, indexChannel, "txindex", version, &totalProcessed)
 		if err != nil {
 			errorChannel <- fmt.Errorf("txindex scanner error: %v", err)
 		} else {
-			log.Info("TxIndex scanner completed", "processed", processed, "skipped", skipped)
+			log.Info("TxIndex scanner completed", "processed", processed)
 		}
 	}()
 
-	// Wait for all goroutines to complete
-	log.Info("⏳ Waiting for all parallel scanners and writers to complete...")
-	wg.Wait()
+	// Wait for all scanners to complete first
+	log.Info("⏳ Waiting for all parallel scanners to complete...")
+	readersWG.Wait()
 
-	// Close channels to signal completion to worker goroutines
+	// Close channels to signal completion to writer goroutines
 	log.Info("📖 All scanners completed, closing channels...")
 	close(chainChannel)
 	close(stateChannel)
 	close(snapChannel)
 	close(indexChannel)
+
+	// Now wait for all writers to complete
+	log.Info("⏳ Waiting for all writers to complete...")
+	writersWG.Wait()
 
 	// Check for any errors from worker goroutines
 	close(errorChannel)
@@ -2991,23 +3005,39 @@ func extractMultiDBToMultiDBExpand(sourceDB, targetChainDB, targetStateDB, targe
 		}
 	}
 
-	log.Info("✅ Parallel multi-database extraction with transformation completed",
+	log.Info("✅ Parallel multi-database extraction completed",
 		"totalProcessed", atomic.LoadInt64(&totalProcessed),
-		"totalSkipped", atomic.LoadInt64(&totalSkipped),
-		"totalTransformed", atomic.LoadInt64(&totalProcessed)-atomic.LoadInt64(&totalSkipped),
-		"threadsUsed", "22 (4 scanners + 18 writers)",
+		"threadsUsed", "52 (4 scanners + 48 writers)",
 		"version", version)
 	return nil
 }
 
 // scanDatabaseWithTransform scans a single database and sends transformed data to the appropriate channel
-func scanDatabaseWithTransform(sourceDB ethdb.Database, targetChannel chan<- CategorizedData, dbType string, version byte, totalProcessed, totalSkipped *int64) (int64, int64, error) {
-	log.Info("Starting database scanner", "type", dbType)
+func scanDatabaseWithTransform(sourceDB ethdb.Database, targetChannel chan<- CategorizedData, dbType string, version byte, totalProcessed *int64) (int64, error) {
+	// Estimated database sizes based on 18B total keys
+	var estimatedKeys int64
+	switch dbType {
+	case "chain":
+		estimatedKeys = 1980000000 // 11% of 18B = 1.98B
+	case "state":
+		estimatedKeys = 9000000000 // 50% of 18B = 9B
+	case "snapshot":
+		estimatedKeys = 3600000000 // 20% of 18B = 3.6B
+	case "txindex":
+		estimatedKeys = 3420000000 // 19% of 18B = 3.42B
+	default:
+		estimatedKeys = 1000000000 // fallback
+	}
+
+	log.Info("🚀 Starting database scanner",
+		"type", dbType,
+		"estimatedKeys", estimatedKeys,
+		"estimatedKeysFormatted", fmt.Sprintf("%.2fB", float64(estimatedKeys)/1000000000))
 
 	it := sourceDB.NewIterator(nil, nil)
 	defer it.Release()
 
-	var processed, skipped int64
+	var processed int64
 
 	for it.Next() {
 		// Create copies of key and value
@@ -3019,39 +3049,18 @@ func scanDatabaseWithTransform(sourceDB ethdb.Database, targetChannel chan<- Cat
 		processed++
 		atomic.AddInt64(totalProcessed, 1)
 
-		// Generate new key and value with timing
-		keyGenStart := time.Now()
-		newKey := generateNewKey(originalKey, version)
-		keyGenDuration := time.Since(keyGenStart)
-
-		// Skip if new key is the same as original key
-		if bytes.Equal(newKey, originalKey) {
-			skipped++
-			atomic.AddInt64(totalSkipped, 1)
-			continue
-		}
-
-		valueShuffleStart := time.Now()
-		newValue := shuffleValue(originalValue)
-		valueShuffleDuration := time.Since(valueShuffleStart)
-
-		// Log timing statistics periodically (every 50000 operations to reduce overhead)
-		if processed%50000 == 0 {
-			avgKeyGenTime := keyGenDuration.Nanoseconds()
-			avgValueShuffleTime := valueShuffleDuration.Nanoseconds()
-			log.Info("Key/Value generation performance",
+		// Log progress every 100,000 operations for each scanner
+		if processed%100000 == 0 {
+			log.Info("📖 Scanner Progress",
 				"scanner", dbType,
 				"processed", processed,
-				"avgKeyGenNs", avgKeyGenTime,
-				"avgValueShuffleNs", avgValueShuffleTime,
-				"keyGenMicros", avgKeyGenTime/1000,
-				"valueShuffleMicros", avgValueShuffleTime/1000)
+				"scanned", processed)
 		}
 
-		// Create transformed data package
+		// Create data package with original key/value (transformation will happen in writer)
 		data := CategorizedData{
-			Key:      newKey,
-			Value:    newValue,
+			Key:      originalKey,
+			Value:    originalValue,
 			Category: dbType, // Use the database type as category
 		}
 
@@ -3060,21 +3069,21 @@ func scanDatabaseWithTransform(sourceDB ethdb.Database, targetChannel chan<- Cat
 		case targetChannel <- data:
 		default:
 			// Channel full, this is a problem
-			return processed, skipped, fmt.Errorf("target channel for %s is full", dbType)
+			return processed, fmt.Errorf("target channel for %s is full", dbType)
 		}
 
 		// Progress logging
 		if processed%100000 == 0 && processed > 0 {
-			log.Info("Scanner progress", "type", dbType, "processed", processed, "skipped", skipped)
+			log.Info("Scanner progress", "type", dbType, "processed", processed)
 		}
 	}
 
 	if err := it.Error(); err != nil {
-		return processed, skipped, fmt.Errorf("iterator error in %s scanner: %v", dbType, err)
+		return processed, fmt.Errorf("iterator error in %s scanner: %v", dbType, err)
 	}
 
-	log.Info("Scanner completed", "type", dbType, "totalProcessed", processed, "totalSkipped", skipped)
-	return processed, skipped, nil
+	log.Info("Scanner completed", "type", dbType, "totalProcessed", processed)
+	return processed, nil
 }
 
 // flushAllBatches flushes all database batches
