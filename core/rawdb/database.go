@@ -706,13 +706,13 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 		}
 
 		newKey := make([]byte, len(originalKey))
-		
+
 		// Keep prefix same as original
 		newKey[0] = originalKey[0]
-		
+
 		// Set suffix from flag
 		newKey[len(newKey)-1] = suffix
-		
+
 		// Fill middle part with random data
 		if len(originalKey) > 2 {
 			randomBytes := make([]byte, len(originalKey)-2)
@@ -763,6 +763,22 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 
 				// Check if new key is the same as original key
 				if bytes.Equal(newKey, kv.key) {
+					atomic.AddInt64(&duplicateKeys, 1)
+					keyLen := len(kv.key)
+					if keyLen > 16 {
+						keyLen = 16
+					}
+					log.Error("CRITICAL: New key is same as original key",
+						"originalKey", fmt.Sprintf("%x", kv.key[:keyLen]),
+						"originalKeyLen", len(kv.key),
+						"newKey", fmt.Sprintf("%x", newKey[:keyLen]),
+						"newKeyLen", len(newKey))
+					continue
+				}
+
+				// Check if new key is the same as original key
+				if bytes.Equal(newValue, kv.value) {
+
 					atomic.AddInt64(&duplicateKeys, 1)
 					keyLen := len(kv.key)
 					if keyLen > 16 {
