@@ -18,10 +18,9 @@ package rawdb
 
 import (
 	"bytes"
-	"crypto/sha256"
+	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -688,6 +687,7 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 		totalBytesWritten int64
 		writeErrors       int64
 		duplicateKeys     int64
+		duplicateValues   int64
 		lastProgress      int
 		wg                sync.WaitGroup
 		processedCount    int64
@@ -698,7 +698,40 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 
 	log.Info("Starting database expansion from 1T to 2T with read-write separation",
 		"workers", numWorkers, "maxBatchSize", "512MB", "expectedKeys", totalExpectedKeys,
-		"sourceDb", "read-only", "targetDb", "write-only")
+		"sourceDb", "read-only", "targetDb", "write-only", "version", suffix,
+		"valueExpansion", "original_length + 1 byte version")
+
+	// Helper function to shuffle value with version info
+	shuffleValue := func(originalValue []byte, version byte) []byte {
+		if len(originalValue) <= 1 {
+			return originalValue
+		}
+
+		// Create new value with extra space for version info
+		newValue := make([]byte, len(originalValue)+1) // +1 for version byte
+		copy(newValue, originalValue)
+
+		// Add version byte at the end
+		newValue[len(originalValue)] = version
+
+		// Simple shuffle: swap bytes in a deterministic pattern
+		for i := 0; i < len(newValue)/2; i++ {
+			j := (i + len(newValue)/2) % len(newValue)
+			newValue[i], newValue[j] = newValue[j], newValue[i]
+		}
+
+		// XOR with a cryptographically secure random 1-byte key to add more entropy
+		var xorKey [1]byte
+		if _, err := rand.Read(xorKey[:]); err != nil {
+			// Fallback: use a deterministic value if crypto/rand fails
+			xorKey[0] = byte(len(originalValue) ^ int(version))
+		}
+		for i := range newValue {
+			newValue[i] ^= xorKey[0]
+		}
+
+		return newValue
+	}
 
 	// Helper function to generate new key (simplified version without magic markers)
 	generateNewKey := func(originalKey []byte, suffix byte) []byte {
@@ -724,29 +757,6 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 		return newKey
 	}
 
-	// Helper function to shuffle value
-	shuffleValue := func(originalValue []byte) []byte {
-		if len(originalValue) <= 1 {
-			return originalValue
-		}
-		
-		hasher := sha256.New()
-		hasher.Write(originalValue)
-		hashBytes := hasher.Sum(nil)
-
-		seed := int64(hashBytes[0])<<56 |
-			int64(hashBytes[1])<<48 |
-			int64(hashBytes[2])<<40 |
-			int64(hashBytes[3])<<32
-
-		rng := rand.New(rand.NewSource(seed))
-
-		newValue := make([]byte, len(originalValue))
-		rng.Read(newValue) // 完全随机的新值
-
-		return newValue
-	}
-
 	// Start worker goroutines
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
@@ -758,7 +768,7 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 
 			for kv := range kvChan {
 				newKey := generateNewKey(kv.key, suffix)
-				newValue := shuffleValue(kv.value)
+				newValue := shuffleValue(kv.value, suffix)
 
 				// Check if new key is the same as original key
 				if bytes.Equal(newKey, kv.key) {
@@ -775,20 +785,29 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 					continue
 				}
 
-				// Check if new key is the same as original key
+				// Check if new value is the same as original value (should never happen with version byte)
 				if bytes.Equal(newValue, kv.value) {
-
-					atomic.AddInt64(&duplicateKeys, 1)
-					keyLen := len(kv.key)
-					if keyLen > 16 {
-						keyLen = 16
+					atomic.AddInt64(&duplicateValues, 1)
+					valueLen := len(kv.value)
+					if valueLen > 16 {
+						valueLen = 16
 					}
-					log.Error("CRITICAL: New key is same as original key",
-						"originalKey", fmt.Sprintf("%x", kv.key[:keyLen]),
-						"originalKeyLen", len(kv.key),
-						"newKey", fmt.Sprintf("%x", newKey[:keyLen]),
-						"newKeyLen", len(newKey))
+					log.Error("CRITICAL: New value is same as original value",
+						"originalValue", fmt.Sprintf("%x", kv.value[:valueLen]),
+						"originalValueLen", len(kv.value),
+						"newValue", fmt.Sprintf("%x", newValue[:valueLen]),
+						"newValueLen", len(newValue))
 					continue
+				}
+
+				// Debug: Log value expansion for first few items
+				if atomic.LoadInt64(&newKeysCreated) < 5 {
+					log.Info("🔄 Value expansion with version and crypto XOR shuffle",
+						"originalLen", len(kv.value),
+						"newLen", len(newValue),
+						"versionByte", suffix,
+						"shuffle", "deterministic_swap + crypto_XOR_entropy",
+						"expansion", fmt.Sprintf("%d -> %d bytes", len(kv.value), len(newValue)))
 				}
 
 				if err := batch.Put(newKey, newValue); err != nil {
@@ -900,12 +919,15 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 	totalDuration := time.Since(start)
 	throughputMBps := float64(finalBytesWritten) / (1024 * 1024 * totalDuration.Seconds())
 
+	finalDuplicateValues := atomic.LoadInt64(&duplicateValues)
+
 	log.Info("Database expansion completed (1T -> 2T) with read-write separation",
 		"totalKeysScanned", count,
 		"newKeysCreated", finalKeysCreated,
 		"totalBytesWritten", common.StorageSize(finalBytesWritten).String(),
 		"writeErrors", finalErrors,
 		"duplicateKeys", finalDuplicates,
+		"duplicateValues", finalDuplicateValues,
 		"averageThroughput", fmt.Sprintf("%.2f MB/s", throughputMBps),
 		"totalDuration", common.PrettyDuration(totalDuration))
 
