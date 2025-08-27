@@ -2683,21 +2683,21 @@ func extractAllDataInOnePassExpand(sourceDB, chainDB, stateDB, snapDB, indexDB e
 	// Snapshot database writers (15 threads - snapshot data is largest)
 	for i := 0; i < 15; i++ {
 		writerID := i + 1
-		wg.Add(1)
+		writersWG.Add(1)
 		go func(id int) {
-			defer wg.Done()
+			defer writersWG.Done()
 			if err := asyncDatabaseWriter(fmt.Sprintf("snapshot-%d", id), snapDB, snapChannel, stats, version); err != nil {
 				errorChannel <- fmt.Errorf("snapshot writer %d error: %v", id, err)
 			}
 		}(writerID)
 	}
 
-	// Transaction index database writers (10 threads)
+	// Transaction index database writers (11 threads)
 	for i := 0; i < 11; i++ {
 		writerID := i + 1
-		wg.Add(1)
+		writersWG.Add(1)
 		go func(id int) {
-			defer wg.Done()
+			defer writersWG.Done()
 			if err := asyncDatabaseWriter(fmt.Sprintf("txindex-%d", id), indexDB, indexChannel, stats, version); err != nil {
 				errorChannel <- fmt.Errorf("txindex writer %d error: %v", id, err)
 			}
@@ -2705,135 +2705,157 @@ func extractAllDataInOnePassExpand(sourceDB, chainDB, stateDB, snapDB, indexDB e
 	}
 
 	// Main reader goroutine - process source database with transformation
-	log.Info("📖 Starting main reader thread with 18 async writers...")
-	processed := 0
-	skipped := 0
+	log.Info("📖 Starting main reader thread with 51 async writers...")
 
-	it := sourceDB.NewIterator(nil, nil)
-	defer it.Release()
+	var processed, skipped int64
 
-	for it.Next() {
-		// Create copies of key and value since iterator reuses underlying memory
-		originalKey := make([]byte, len(it.Key()))
-		originalValue := make([]byte, len(it.Value()))
-		copy(originalKey, it.Key())
-		copy(originalValue, it.Value())
+	readersWG.Add(1)
+	go func() {
+		defer readersWG.Done()
 
-		processed++
+		localProcessed := 0
+		localSkipped := 0
 
-		// Generate new key and value with timing
-		keyGenStart := time.Now()
-		newKey := generateNewKey(originalKey, version)
-		keyGenDuration := time.Since(keyGenStart)
+		it := sourceDB.NewIterator(nil, nil)
+		defer it.Release()
 
-		// Skip if new key is the same as original key
-		if bytes.Equal(newKey, originalKey) {
-			skipped++
-			continue
-		}
+		for it.Next() {
+			// Create copies of key and value since iterator reuses underlying memory
+			originalKey := make([]byte, len(it.Key()))
+			originalValue := make([]byte, len(it.Value()))
+			copy(originalKey, it.Key())
+			copy(originalValue, it.Value())
 
-		valueShuffleStart := time.Now()
-		newValue := shuffleValue(originalValue)
-		valueShuffleDuration := time.Since(valueShuffleStart)
+			localProcessed++
 
-		// Accumulate timing statistics (every 10000 operations to avoid overhead)
-		if processed%10000 == 0 {
-			atomic.AddInt64(&stats.totalKeyGenTime, keyGenDuration.Nanoseconds())
-			atomic.AddInt64(&stats.totalValueShuffleTime, valueShuffleDuration.Nanoseconds())
-			atomic.AddInt64(&stats.keyGenCount, 1)
-			atomic.AddInt64(&stats.valueShuffleCount, 1)
-		}
+			// Generate new key and value with timing
+			keyGenStart := time.Now()
+			newKey := generateNewKey(originalKey, version)
+			keyGenDuration := time.Since(keyGenStart)
 
-		// Debug: Verify data size consistency (first 100 items)
-		if processed <= 100 {
-			originalSize := len(originalKey) + len(originalValue)
-			newSize := len(newKey) + len(newValue)
-			if originalSize != newSize {
-				log.Warn("Data size mismatch detected",
-					"processed", processed,
-					"originalKeyLen", len(originalKey),
-					"originalValueLen", len(originalValue),
-					"originalTotal", originalSize,
-					"newKeyLen", len(newKey),
-					"newValueLen", len(newValue),
-					"newTotal", newSize,
-					"diff", newSize-originalSize)
+			// Skip if new key is the same as original key
+			if bytes.Equal(newKey, originalKey) {
+				localSkipped++
+				continue
+			}
+
+			valueShuffleStart := time.Now()
+			newValue := shuffleValue(originalValue)
+			valueShuffleDuration := time.Since(valueShuffleStart)
+
+			// Accumulate timing statistics (every 10000 operations to avoid overhead)
+			if processed%10000 == 0 {
+				atomic.AddInt64(&stats.totalKeyGenTime, keyGenDuration.Nanoseconds())
+				atomic.AddInt64(&stats.totalValueShuffleTime, valueShuffleDuration.Nanoseconds())
+				atomic.AddInt64(&stats.keyGenCount, 1)
+				atomic.AddInt64(&stats.valueShuffleCount, 1)
+			}
+
+			// Debug: Verify data size consistency (first 100 items)
+			if processed <= 100 {
+				originalSize := len(originalKey) + len(originalValue)
+				newSize := len(newKey) + len(newValue)
+				if originalSize != newSize {
+					log.Warn("Data size mismatch detected",
+						"processed", processed,
+						"originalKeyLen", len(originalKey),
+						"originalValueLen", len(originalValue),
+						"originalTotal", originalSize,
+						"newKeyLen", len(newKey),
+						"newValueLen", len(newValue),
+						"newTotal", newSize,
+						"diff", newSize-originalSize)
+				}
+			}
+
+			// Determine the category for this key-value pair based on original key
+			category := categorizeDataByKey(originalKey, originalValue)
+
+			// Create transformed data package
+			data := CategorizedData{
+				Key:      newKey,
+				Value:    newValue,
+				Category: category,
+			}
+
+			// Route to correct writer channel based on category
+			switch category {
+			case "state":
+				select {
+				case stateChannel <- data:
+				case err := <-errorChannel:
+					errorChannel <- err
+					return
+				}
+			case "snapshot":
+				select {
+				case snapChannel <- data:
+				case err := <-errorChannel:
+					errorChannel <- err
+					return
+				}
+			case "txindex":
+				select {
+				case indexChannel <- data:
+				case err := <-errorChannel:
+					errorChannel <- err
+					return
+				}
+			default:
+				// Everything else goes to chain database
+				data.Category = "chain" // Update category for stats
+				select {
+				case chainChannel <- data:
+				case err := <-errorChannel:
+					errorChannel <- err
+					return
+				}
+			}
+
+			// Debug: Log first few transformations
+			if processed <= 30 && skipped < 10 {
+				log.Info("📝 Queuing transformed data for async processing",
+					"category", category,
+					"originalKeyHex", fmt.Sprintf("%x", originalKey[:min(16, len(originalKey))]),
+					"newKeyHex", fmt.Sprintf("%x", newKey[:min(16, len(newKey))]),
+					"keyLen", len(newKey),
+					"valueLen", len(newValue),
+					"version", version)
+			}
+
+			// Progress update every 10000 items
+			if localProcessed%10000 == 0 && localProcessed > 0 {
+				log.Info("Reader progress", "processed", localProcessed, "skipped", localSkipped)
 			}
 		}
 
-		// Determine the category for this key-value pair based on original key
-		category := categorizeDataByKey(originalKey, originalValue)
-
-		// Create transformed data package
-		data := CategorizedData{
-			Key:      newKey,
-			Value:    newValue,
-			Category: category,
+		// Check for iterator errors
+		if err := it.Error(); err != nil {
+			errorChannel <- fmt.Errorf("iterator error: %v", err)
+			return
 		}
 
-		// Route to correct writer channel based on category
-		switch category {
-		case "state":
-			select {
-			case stateChannel <- data:
-			case err := <-errorChannel:
-				return err
-			}
-		case "snapshot":
-			select {
-			case snapChannel <- data:
-			case err := <-errorChannel:
-				return err
-			}
-		case "txindex":
-			select {
-			case indexChannel <- data:
-			case err := <-errorChannel:
-				return err
-			}
-		default:
-			// Everything else goes to chain database
-			data.Category = "chain" // Update category for stats
-			select {
-			case chainChannel <- data:
-			case err := <-errorChannel:
-				return err
-			}
-		}
+		// Update external variables
+		atomic.StoreInt64(&processed, int64(localProcessed))
+		atomic.StoreInt64(&skipped, int64(localSkipped))
 
-		// Debug: Log first few transformations
-		if processed <= 30 && skipped < 10 {
-			log.Info("📝 Queuing transformed data for async processing",
-				"category", category,
-				"originalKeyHex", fmt.Sprintf("%x", originalKey[:min(16, len(originalKey))]),
-				"newKeyHex", fmt.Sprintf("%x", newKey[:min(16, len(newKey))]),
-				"keyLen", len(newKey),
-				"valueLen", len(newValue),
-				"version", version)
-		}
+		log.Info("📖 Reader completed", "processed", localProcessed, "skipped", localSkipped)
+	}()
 
-		// Progress update every 10000 items
-		if processed%10000 == 0 && processed > 0 {
-			log.Info("Reader progress", "processed", processed, "skipped", skipped)
-		}
-	}
+	// Wait for reader to complete first
+	log.Info("⏳ Waiting for reader to complete...")
+	readersWG.Wait()
 
-	// Check for iterator errors
-	if err := it.Error(); err != nil {
-		return fmt.Errorf("iterator error: %v", err)
-	}
-
-	log.Info("📖 Reader completed, closing channels...", "processed", processed, "skipped", skipped)
-
-	// Close channels to signal completion to worker goroutines
+	// Close channels to signal completion to writer goroutines
+	log.Info("📖 Reader completed, closing channels...")
 	close(chainChannel)
 	close(stateChannel)
 	close(snapChannel)
 	close(indexChannel)
 
-	// Wait for all goroutines to complete
+	// Wait for all writers to complete
 	log.Info("⏳ Waiting for all async writers to complete...")
-	wg.Wait()
+	writersWG.Wait()
 
 	// Check for any errors from worker goroutines
 	close(errorChannel)
@@ -2844,10 +2866,10 @@ func extractAllDataInOnePassExpand(sourceDB, chainDB, stateDB, snapDB, indexDB e
 	}
 
 	log.Info("✅ Multi-threaded async data extraction with transformation completed",
-		"totalProcessed", processed,
-		"totalSkipped", skipped,
-		"totalTransformed", processed-skipped,
-		"threadsUsed", "19 (1 reader + 18 writers)",
+		"totalProcessed", atomic.LoadInt64(&processed),
+		"totalSkipped", atomic.LoadInt64(&skipped),
+		"totalTransformed", atomic.LoadInt64(&processed)-atomic.LoadInt64(&skipped),
+		"threadsUsed", "52 (1 reader + 51 writers)",
 		"version", version)
 	return nil
 }
