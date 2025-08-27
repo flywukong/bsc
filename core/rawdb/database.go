@@ -738,13 +738,6 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 			newValue[i], newValue[j] = newValue[j], newValue[i]
 		}
 
-		// XOR with a random 1-byte key to add more entropy
-		var xorKey [1]byte
-		rand.Read(xorKey[:])
-		for i := range newValue {
-			newValue[i] ^= xorKey[0]
-		}
-
 		return newValue
 	}
 
