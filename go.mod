@@ -324,7 +324,7 @@ require (
 )
 
 replace (
-	github.com/cockroachdb/pebble => github.com/galaio/pebble v0.0.0-20250828065034-48f78420a117
+	github.com/cockroachdb/pebble => github.com/galaio/pebble v0.0.0-20250828092757-9df126cc5df5
 	github.com/cometbft/cometbft => github.com/bnb-chain/greenfield-cometbft v1.3.2
 	github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.17
 )

@@ -188,10 +188,16 @@ func New(cfg *Config, cache int, handles int, readonly bool, f ShardIndexFunc) (
 	switch cfg.DBType {
 	case DBTypePebble:
 		blockCache := pebble2.NewCache(int64(cache * 1024 * 1024 * 8 / 10))
-		filterCache := pebble2.NewCache(int64(cache * 1024 * 1024 * 2 / 10))
+		filterCache := pebble2.NewCache(int64(cache * 1024 * 1024 * 1 / 10))
+		indexCache := pebble2.NewCache(int64(cache * 1024 * 1024 * 1 / 10))
+		defer func() {
+			blockCache.Unref()
+			filterCache.Unref()
+			indexCache.Unref()
+		}()
 		for i, shardCfg := range shardCfgs {
 			namespace := fmt.Sprintf("%s%s/", cfg.Namespace, ShardSuffix(i))
-			db, err := pebble.NewWithCache(shardCfg.DBPath, cache, shardHandles, namespace, readonly, blockCache, filterCache)
+			db, err := pebble.NewWithCache(shardCfg.DBPath, cache, shardHandles, namespace, readonly, blockCache, filterCache, indexCache)
 			if err != nil {
 				return nil, err
 			}
