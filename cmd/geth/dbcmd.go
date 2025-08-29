@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"math"
 	"math/rand"
 	"os"
@@ -36,6 +37,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/cmd/utils"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/console/prompt"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -1841,6 +1843,10 @@ func isTrieKey(key, value []byte) bool {
 		return true
 	case rawdb.IsStorageTrieNode(key):
 		return true
+	case bytes.HasPrefix(key, []byte("X")): // Custom X prefix keys for testing
+		return true
+	case bytes.HasPrefix(key, []byte("Y")): // Custom Y prefix keys for testing
+		return true
 	case bytes.HasPrefix(key, rawdb.PreimagePrefix) && len(key) == (len(rawdb.PreimagePrefix)+common.HashLength):
 		return true
 	case bytes.HasPrefix(key, []byte("c")) && len(key) == (1+common.HashLength): // CodePrefix - contract code
@@ -2808,6 +2814,7 @@ func initMultiDBsWithDataDir(srcStack *node.Node, cfg gethConfig, datadir string
 
 	nodeCfg := *srcStack.Config()
 	nodeCfg.DataDir = datadir
+
 	nodeCfg.Storage.ChainDB.DBPath = ""
 	nodeCfg.Storage.SnapDB.DBPath = ""
 	nodeCfg.Storage.IndexDB.DBPath = ""
@@ -2893,13 +2900,92 @@ func (s *stat) Add(size int) {
 	s.count++
 }
 
+// calculateXYShardIndex calculates which shard a X/Y prefixed key should go to
+// using hash function to ensure even distribution across shards
+func calculateXYShardIndex(key []byte, shardNum int) int {
+	if len(key) < 2 {
+		return 0
+	}
+	// Use CRC32 hash of the key (excluding the first byte prefix) to determine shard
+	hash := crc32.ChecksumIEEE(key[1:])
+	return int(hash) % shardNum
+}
+
+// BatchWriteRequest represents a batch write request for async processing
+type BatchWriteRequest struct {
+	BatchType  string // "shard", "state", "snap", "index", "chain"
+	ShardIndex int    // only used for shard batches
+	Batch      ethdb.Batch
+}
+
 func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
+	log.Info("🚀 Starting traverseAndMigrateWithSharding with async thread pool", "threadCount", 20)
+
 	it := chainDB.NewIterator(nil, nil)
 	defer it.Release()
 
+	// Check if StateStore is a ShardingDB and get shard info
+	stateStore := chainDB.GetStateStore()
+	var shardingDB ethdb.ShardingDB
+	var isShardingDB bool
+	var shardNum int
+	var shardBatches []ethdb.Batch
+	var shardXYStats []map[string]int64 // Statistics for X/Y prefix keys per shard
+
+	if db, ok := stateStore.(ethdb.ShardingDB); ok {
+		shardingDB = db
+		isShardingDB = true
+		shardNum = shardingDB.ShardNum()
+		log.Info("StateStore is a ShardingDB", "shardNum", shardNum)
+
+		// Create batch for each shard
+		shardBatches = make([]ethdb.Batch, shardNum)
+		// Initialize statistics for each shard
+		shardXYStats = make([]map[string]int64, shardNum)
+		for i := 0; i < shardNum; i++ {
+			shard := shardingDB.ShardByIndex(i)
+			shardBatches[i] = rawdb.NewDatabase(shard).NewBatch()
+			shardXYStats[i] = make(map[string]int64)
+			shardXYStats[i]["X"] = 0
+			shardXYStats[i]["Y"] = 0
+			shardXYStats[i]["total"] = 0
+		}
+	} else {
+		log.Info("StateStore is not a ShardingDB, using regular batch")
+	}
+
+	// Create channels and synchronization structures for async processing
+	const (
+		threadPoolSize    = 20
+		channelBufferSize = 1000
+	)
+
+	writeRequestChannel := make(chan BatchWriteRequest, channelBufferSize)
+	errorChannel := make(chan error, threadPoolSize)
+	var wg sync.WaitGroup
+	var writeError atomic.Value // Store first write error
+
+	// Start 20 async writer goroutines
+	log.Info("🚀 Starting async writer goroutines", "threadCount", threadPoolSize)
+	for i := 0; i < threadPoolSize; i++ {
+		wg.Add(1)
+		gopool.Submit(func() {
+			defer wg.Done()
+			for req := range writeRequestChannel {
+				if err := req.Batch.Write(); err != nil {
+					// Store first error and continue processing to avoid deadlock
+					writeError.CompareAndSwap(nil, fmt.Errorf("failed to write %s batch (shard %d): %v", req.BatchType, req.ShardIndex, err))
+					errorChannel <- err
+					continue
+				}
+				req.Batch.Reset()
+			}
+		})
+	}
+
 	var (
 		chainBatch = chainDB.NewBatch()
-		stateBatch = chainDB.GetStateStore().NewBatch()
+		stateBatch = chainDB.GetStateStore().NewBatch() // fallback for non-X/Y keys
 		snapBatch  = chainDB.GetSnapStore().NewBatch()
 		indexBatch = chainDB.GetTxIndexStore().NewBatch()
 		batchSize  = 0
@@ -2907,7 +2993,12 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 		stateStat  = &stat{}
 		snapStat   = &stat{}
 		indexStat  = &stat{}
+
+		// Delete operation tracking for compaction optimization
+		deletedBytesTotal   int64 = 0                       // Total bytes of deleted keys
+		compactionThreshold int64 = 10 * 1024 * 1024 * 1024 // 10GB threshold
 	)
+
 	for it.Next() {
 		key := make([]byte, len(it.Key()))
 		value := make([]byte, len(it.Value()))
@@ -2921,73 +3012,278 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 		category := categorizeDataByKey(key, value)
 		switch category {
 		case "state":
-			stateBatch.Put(key, value)
+			// Check if this is X or Y prefixed key and if we have sharding enabled
+			if isShardingDB && len(key) > 0 && (key[0] == 'X' || key[0] == 'Y') {
+				// Distribute X and Y prefixed keys evenly across shards
+				shardIndex := calculateXYShardIndex(key, shardNum)
+				shardBatches[shardIndex].Put(key, value)
+
+				// Update statistics for X/Y prefix keys
+				prefix := string(key[0])
+				shardXYStats[shardIndex][prefix]++
+				shardXYStats[shardIndex]["total"]++
+
+				log.Debug("Distributed X/Y key to shard", "prefix", prefix, "shardIndex", shardIndex, "keyHex", fmt.Sprintf("%x", key[:min(8, len(key))]))
+			} else {
+				// Use regular state batch for other state keys
+				stateBatch.Put(key, value)
+			}
 			chainBatch.Delete(key)
+			deletedBytesTotal += int64(kvSize) // Track delete bytes
 			stateStat.Add(kvSize)
 		case "snapshot":
 			snapBatch.Put(key, value)
 			chainBatch.Delete(key)
+			deletedBytesTotal += int64(kvSize) // Track delete bytes
 			snapStat.Add(kvSize)
 		case "txindex":
 			indexBatch.Put(key, value)
 			chainBatch.Delete(key)
+			deletedBytesTotal += int64(kvSize) // Track delete bytes
 			indexStat.Add(kvSize)
 		}
 
 		// flush the batch if it's too large
 		if batchSize >= 256*1024*1024 {
-			log.Info("flushing kvs...", "chain count", chainStat.count, "chain size", chainStat.size,
+			log.Info("sending batches to async thread pool...", "chain count", chainStat.count, "chain size", chainStat.size,
 				"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
 				"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
-			if err := stateBatch.Write(); err != nil {
-				return fmt.Errorf("failed to write state batch: %v", err)
+
+			// Send all shard batches to async writers if sharding is enabled
+			if isShardingDB && len(shardBatches) > 0 {
+				for i, shardBatch := range shardBatches {
+					if shardBatch.ValueSize() > 0 {
+						select {
+						case writeRequestChannel <- BatchWriteRequest{
+							BatchType:  "shard",
+							ShardIndex: i,
+							Batch:      shardBatch,
+						}:
+							// Create new batch for this shard
+							shard := shardingDB.ShardByIndex(i)
+							shardBatches[i] = rawdb.NewDatabase(shard).NewBatch()
+						case err := <-errorChannel:
+							return fmt.Errorf("async write error during shard batch processing: %v", err)
+						}
+					}
+				}
 			}
-			if err := snapBatch.Write(); err != nil {
-				return fmt.Errorf("failed to write snap batch: %v", err)
+
+			// Send other batches to async writers
+			if stateBatch.ValueSize() > 0 {
+				select {
+				case writeRequestChannel <- BatchWriteRequest{BatchType: "state", Batch: stateBatch}:
+					stateBatch = chainDB.GetStateStore().NewBatch()
+				case err := <-errorChannel:
+					return fmt.Errorf("async write error during state batch processing: %v", err)
+				}
 			}
-			if err := indexBatch.Write(); err != nil {
-				return fmt.Errorf("failed to write index batch: %v", err)
+
+			if snapBatch.ValueSize() > 0 {
+				select {
+				case writeRequestChannel <- BatchWriteRequest{BatchType: "snap", Batch: snapBatch}:
+					snapBatch = chainDB.GetSnapStore().NewBatch()
+				case err := <-errorChannel:
+					return fmt.Errorf("async write error during snap batch processing: %v", err)
+				}
 			}
+
+			if indexBatch.ValueSize() > 0 {
+				select {
+				case writeRequestChannel <- BatchWriteRequest{BatchType: "index", Batch: indexBatch}:
+					indexBatch = chainDB.GetTxIndexStore().NewBatch()
+				case err := <-errorChannel:
+					return fmt.Errorf("async write error during index batch processing: %v", err)
+				}
+			}
+
 			// save first, then delete
-			if err := chainBatch.Write(); err != nil {
-				return fmt.Errorf("failed to write chain batch: %v", err)
+			if chainBatch.ValueSize() > 0 {
+				select {
+				case writeRequestChannel <- BatchWriteRequest{BatchType: "chain", Batch: chainBatch}:
+					chainBatch = chainDB.NewBatch()
+				case err := <-errorChannel:
+					return fmt.Errorf("async write error during chain batch processing: %v", err)
+				}
 			}
-			chainBatch.Reset()
-			stateBatch.Reset()
-			snapBatch.Reset()
-			indexBatch.Reset()
+
 			batchSize = 0
+		}
+
+		// Check if compaction is needed (10GB of deletes from chainDB)
+		if deletedBytesTotal >= compactionThreshold {
+			log.Info("🔄 Delete threshold reached, triggering chainDB compaction",
+				"deletedBytesTotal", deletedBytesTotal,
+				"deletedBytesGB", float64(deletedBytesTotal)/(1024*1024*1024),
+				"thresholdGB", float64(compactionThreshold)/(1024*1024*1024))
+
+			// CRITICAL: Release iterator to free file handles for effective compaction
+			// This mimics the condition when manual 'db compaction' works
+			log.Info("⏸️ Preparing for chainDB compaction (release iterator, keep async writes running)")
+
+			// 1. Send pending chainBatch to avoid data loss
+			if chainBatch.ValueSize() > 0 {
+				select {
+				case writeRequestChannel <- BatchWriteRequest{BatchType: "chain", Batch: chainBatch}:
+					chainBatch = chainDB.NewBatch()
+					log.Info("📤 Flushed pending chainBatch before compaction")
+				case err := <-errorChannel:
+					return fmt.Errorf("failed to flush chainBatch before compaction: %v", err)
+				}
+			}
+
+			// 2. Save current iterator position before releasing
+			var resumeKey []byte
+			if it.Key() != nil {
+				resumeKey = make([]byte, len(it.Key()))
+				copy(resumeKey, it.Key())
+				keyLen := len(resumeKey)
+				if keyLen > 8 {
+					keyLen = 8
+				}
+				log.Info("💾 Saved iterator position for resume", "keyPrefix", fmt.Sprintf("%x", resumeKey[:keyLen]))
+			}
+
+			// Release iterator to free file handles (critical for space reclamation)
+			it.Release()
+			log.Info("🔓 Released database iterator and file handles")
+
+			// 3. Perform compaction while async writes continue (they don't conflict)
+			log.Info("🔧 Starting chainDB compaction (async writes continue)")
+			start := time.Now()
+			if err := chainDB.Compact(nil, nil); err != nil {
+				return fmt.Errorf("chainDB compaction failed: %v", err)
+			}
+			duration := time.Since(start)
+			log.Info("✅ ChainDB compaction completed",
+				"duration", duration,
+				"targetReclaimedGB", float64(deletedBytesTotal)/(1024*1024*1024))
+
+			// 4. Recreate iterator and restore position (async writers keep running)
+			if resumeKey != nil {
+				it = chainDB.NewIterator(nil, resumeKey)
+				keyLen := len(resumeKey)
+				if keyLen > 8 {
+					keyLen = 8
+				}
+				log.Info("🔄 Recreated iterator from saved position", "keyPrefix", fmt.Sprintf("%x", resumeKey[:keyLen]))
+			} else {
+				it = chainDB.NewIterator(nil, nil)
+				log.Info("🔄 Recreated iterator (no previous position to resume)")
+			}
+
+			// Reset counter and continue migration
+			deletedBytesTotal = 0
+			log.Info("✅ Iterator restored, resuming migration (async writes never stopped)")
+		}
+
+		// Check for errors periodically
+		select {
+		case err := <-errorChannel:
+			return fmt.Errorf("async write error during processing: %v", err)
+		default:
+			// Continue processing
 		}
 	}
 
 	// flush the remaining kvs
 	if batchSize > 0 {
-		log.Info("flushing leftover kvs...", "chain count", chainStat.count, "chain size", chainStat.size,
+		log.Info("sending remaining batches to async thread pool...", "chain count", chainStat.count, "chain size", chainStat.size,
 			"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
 			"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
-		if err := stateBatch.Write(); err != nil {
-			return fmt.Errorf("failed to write state batch: %v", err)
+
+		// Send all remaining shard batches to async writers if sharding is enabled
+		if isShardingDB && len(shardBatches) > 0 {
+			for i, shardBatch := range shardBatches {
+				if shardBatch.ValueSize() > 0 {
+					writeRequestChannel <- BatchWriteRequest{
+						BatchType:  "shard",
+						ShardIndex: i,
+						Batch:      shardBatch,
+					}
+				}
+			}
 		}
-		if err := snapBatch.Write(); err != nil {
-			return fmt.Errorf("failed to write snap batch: %v", err)
+
+		if stateBatch.ValueSize() > 0 {
+			writeRequestChannel <- BatchWriteRequest{BatchType: "state", Batch: stateBatch}
 		}
-		if err := indexBatch.Write(); err != nil {
-			return fmt.Errorf("failed to write index batch: %v", err)
+		if snapBatch.ValueSize() > 0 {
+			writeRequestChannel <- BatchWriteRequest{BatchType: "snap", Batch: snapBatch}
 		}
-		// save first, then delete
-		if err := chainBatch.Write(); err != nil {
-			return fmt.Errorf("failed to write chain batch: %v", err)
+		if indexBatch.ValueSize() > 0 {
+			writeRequestChannel <- BatchWriteRequest{BatchType: "index", Batch: indexBatch}
 		}
-		chainBatch.Reset()
-		stateBatch.Reset()
-		snapBatch.Reset()
-		indexBatch.Reset()
-		batchSize = 0
+		if chainBatch.ValueSize() > 0 {
+			writeRequestChannel <- BatchWriteRequest{BatchType: "chain", Batch: chainBatch}
+		}
+	}
+
+	// Close the channel and wait for all writers to finish
+	close(writeRequestChannel)
+	log.Info("⏳ Waiting for async writers to complete...")
+	wg.Wait()
+
+	// Check for any stored errors
+	if err := writeError.Load(); err != nil {
+		return err.(error)
+	}
+
+	// Check for remaining errors in channel
+	close(errorChannel)
+	for err := range errorChannel {
+		return fmt.Errorf("final async write error: %v", err)
+	}
+
+	// Perform final chainDB compaction if there are remaining deleted bytes
+	if deletedBytesTotal > 0 {
+		log.Info("🔄 Performing final chainDB compaction for remaining deletes",
+			"deletedBytesGB", float64(deletedBytesTotal)/(1024*1024*1024))
+		if err := chainDB.Compact(nil, nil); err != nil {
+			log.Warn("Final chainDB compaction failed (non-fatal)", "error", err)
+		} else {
+			log.Info("✅ Final chainDB compaction completed successfully")
+		}
 	}
 
 	log.Info("migration completed", "chain count", chainStat.count, "chain size", chainStat.size,
 		"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
-		"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
+		"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size,
+		"total deleted bytes", deletedBytesTotal)
+
+	// Log X/Y key distribution across shards if sharding is enabled
+	if isShardingDB && len(shardBatches) > 0 {
+		log.Info("X/Y key distribution completed", "shardNum", shardNum, "distributionMethod", "CRC32_hash_modulo")
+
+		// Print detailed X/Y prefix statistics for each shard
+		log.Info("📊 X/Y prefix key distribution statistics:")
+		var totalXKeys, totalYKeys int64
+
+		for i := 0; i < shardNum; i++ {
+			xCount := shardXYStats[i]["X"]
+			yCount := shardXYStats[i]["Y"]
+			totalCount := shardXYStats[i]["total"]
+
+			totalXKeys += xCount
+			totalYKeys += yCount
+
+			log.Info("Shard detailed statistics",
+				"shardIndex", i,
+				"X_prefix_keys", xCount,
+				"Y_prefix_keys", yCount,
+				"total_XY_keys", totalCount,
+				"method", "X/Y_key_distribution")
+		}
+
+		// Print overall summary
+		log.Info("📈 Overall X/Y prefix key summary",
+			"total_X_keys", totalXKeys,
+			"total_Y_keys", totalYKeys,
+			"total_XY_keys", totalXKeys+totalYKeys,
+			"shards_used", shardNum)
+	}
+
+	log.Info("🎉 Async thread pool migration completed successfully", "threadCount", threadPoolSize)
 	return nil
 }
 
