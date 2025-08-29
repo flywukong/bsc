@@ -24,6 +24,8 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
 	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/log"
+
+	pebble2 "github.com/cockroachdb/pebble"
 )
 
 // openOptions contains the options to apply when opening a database.
@@ -129,7 +131,16 @@ func newLevelDBDatabase(file string, cache int, handles int, namespace string, r
 // newPebbleDBDatabase creates a persistent key-value database without a freezer
 // moving immutable chain segments into cold storage.
 func newPebbleDBDatabase(file string, cache int, handles int, namespace string, readonly bool) (ethdb.Database, error) {
-	db, err := pebble.New(file, cache, handles, namespace, readonly)
+	// TODO(galaio): add split cache for block, filter, index
+	blockCache := pebble2.NewCache(int64(cache * 1024 * 1024 * 8 / 10))
+	filterCache := pebble2.NewCache(int64(cache * 1024 * 1024 * 1 / 10))
+	indexCache := pebble2.NewCache(int64(cache * 1024 * 1024 * 1 / 10))
+	defer func() {
+		blockCache.Unref()
+		filterCache.Unref()
+		indexCache.Unref()
+	}()
+	db, err := pebble.NewWithCache(file, cache, handles, namespace, readonly, blockCache, filterCache, indexCache)
 	if err != nil {
 		return nil, err
 	}
