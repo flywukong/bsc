@@ -1999,11 +1999,11 @@ type CategorizedData struct {
 // extractAllDataInOnePass extracts all data types using multi-threaded async processing
 func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.Database, stats *MigrationStats) error {
 	log.Info("🚀 Starting multi-threaded async data extraction",
-		"architecture", "1 reader + 20 unified writers = 21 threads")
+		"architecture", "1 reader + 50 unified writers = 51 threads")
 
-	// Channel buffer sizes - balance memory usage vs throughput
-	const channelBufferSize = 10000
-	const threadPoolSize = 20
+	// Channel buffer sizes - optimized for 120GB memory usage
+	const channelBufferSize = 1500
+	const threadPoolSize = 40
 
 	// Create unified channel for all write requests
 	writeRequestChannel := make(chan BatchWriteRequest, channelBufferSize)
@@ -2895,8 +2895,8 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 
 	// Create channels and synchronization structures for async processing
 	const (
-		threadPoolSize    = 20
-		channelBufferSize = 1000
+		threadPoolSize    = 40
+		channelBufferSize = 1200
 	)
 
 	writeRequestChannel := make(chan BatchWriteRequest, channelBufferSize)
