@@ -2002,8 +2002,8 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 		"architecture", "1 reader + 20 unified writers = 21 threads")
 
 	// Channel buffer sizes - balance memory usage vs throughput
-	const channelBufferSize = 50000
-	const threadPoolSize = 50
+	const channelBufferSize = 10000
+	const threadPoolSize = 20
 
 	// Create unified channel for all write requests
 	writeRequestChannel := make(chan BatchWriteRequest, channelBufferSize)
@@ -2083,7 +2083,7 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 		}
 
 		// flush the batch if it's too large
-		if batchSize >= 512*1024*1024 {
+		if batchSize >= 256*1024*1024 {
 			log.Info("sending batches to async thread pool...", "chain count", chainStat.count, "chain size", chainStat.size,
 				"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
 				"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
