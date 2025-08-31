@@ -2073,12 +2073,18 @@ func extractAllDataInOnePass(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 
 	// Compaction tracking variables
 	deletedBytesTotal := int64(0)
-	const compactionThreshold = int64(50 * 1024 * 1024) // 10GB
+	const compactionThreshold = int64(50 * 1024 * 1024) // 50MB for testing
 
 	it := sourceDB.NewIterator(nil, nil)
 	defer it.Release()
 
-	for it.Next() {
+	// Flag to track if we already have the next key after compaction resume
+	hasNextKey := false
+
+	for hasNextKey || it.Next() {
+		// Reset the flag after first use
+		hasNextKey = false
+
 		// Create copies of key and value since iterator reuses underlying memory
 		key := make([]byte, len(it.Key()))
 		value := make([]byte, len(it.Value()))
@@ -2199,6 +2205,15 @@ func extractAllDataInOnePass(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 					keyLen = 8
 				}
 				log.Info("🔄 Recreated iterator from saved position", "keyPrefix", fmt.Sprintf("%x", resumeKey[:keyLen]))
+
+				// CRITICAL: Skip to the next key to avoid reprocessing the same key
+				// The iterator is positioned at resumeKey, we need to advance to the next key
+				if it.Next() {
+					log.Info("⏭️ Advanced iterator to next key to avoid duplicate processing")
+					hasNextKey = true // Mark that we already have the next key
+				} else {
+					log.Info("⚠️ No more keys after resume position, iterator will end naturally")
+				}
 			} else {
 				it = sourceDB.NewIterator(nil, nil)
 				log.Info("🔄 Recreated iterator (no previous position to resume)")
@@ -3042,10 +3057,16 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 
 		// Delete operation tracking for compaction optimization
 		deletedBytesTotal   int64 = 0                // Total bytes of deleted keys
-		compactionThreshold int64 = 50 * 1024 * 1024 // 10GB threshold
+		compactionThreshold int64 = 50 * 1024 * 1024 // 50MB threshold for testing
 	)
 
-	for it.Next() {
+	// Flag to track if we already have the next key after compaction resume
+	hasNextKey := false
+
+	for hasNextKey || it.Next() {
+		// Reset the flag after first use
+		hasNextKey = false
+
 		key := make([]byte, len(it.Key()))
 		value := make([]byte, len(it.Value()))
 		copy(key, it.Key())
@@ -3213,6 +3234,15 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 					keyLen = 8
 				}
 				log.Info("🔄 Recreated iterator from saved position", "keyPrefix", fmt.Sprintf("%x", resumeKey[:keyLen]))
+
+				// CRITICAL: Skip to the next key to avoid reprocessing the same key
+				// The iterator is positioned at resumeKey, we need to advance to the next key
+				if it.Next() {
+					log.Info("⏭️ Advanced iterator to next key to avoid duplicate processing")
+					hasNextKey = true // Mark that we already have the next key
+				} else {
+					log.Info("⚠️ No more keys after resume position, iterator will end naturally")
+				}
 			} else {
 				it = chainDB.NewIterator(nil, nil)
 				log.Info("🔄 Recreated iterator (no previous position to resume)")
