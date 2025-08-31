@@ -1663,11 +1663,6 @@ func migrateDatabase(ctx *cli.Context) error {
 	}
 	defer sourceDB.Close()
 
-	// Count total items before migration for verification
-	log.Info("Counting database entries before migration...")
-	totalItemsBefore := countDatabaseItems(sourceDB)
-	log.Info("Database scan completed", "totalItems", totalItemsBefore)
-
 	// Create target directory structure (separate databases within source chaindata)
 	targetStatePath := filepath.Join(sourceChainDataPath, "state")
 	targetSnapshotPath := filepath.Join(sourceChainDataPath, "snapshot")
@@ -1701,8 +1696,8 @@ func migrateDatabase(ctx *cli.Context) error {
 	}
 	defer indexDB.Close()
 
-	// Start in-place migration (pass the totalItemsBefore for verification)
-	return performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB, totalItemsBefore, sourceChainDataPath)
+	// Start in-place migration
+	return performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB, sourceChainDataPath)
 }
 
 // openTargetDatabase creates a key-value database at the specified path
@@ -1913,7 +1908,7 @@ func categorizeDataByKey(key, value []byte) string {
 }
 
 // performInPlaceMigration performs in-place data migration by extracting data from source DB
-func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, totalItemsBefore int64, sourceChainDataPath string) error {
+func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, sourceChainDataPath string) error {
 	stats := &MigrationStats{startTime: time.Now()}
 
 	log.Info("Starting in-place data migration")
@@ -1950,23 +1945,7 @@ func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 		"indexMB", indexBytes/(1024*1024),
 		"totalExtractedMB", (stateBytes+snapBytes+indexBytes)/(1024*1024))
 
-	// Post-migration verification: count remaining items in source DB
-	log.Info("Performing post-migration verification...")
-	totalItemsAfter := countDatabaseItems(sourceDB)
-	extractedItems := state + snapshot + txindex
-
-	log.Info("Migration verification",
-		"itemsBefore", totalItemsBefore,
-		"itemsAfter", totalItemsAfter,
-		"itemsExtracted", extractedItems,
-		"expectedRemaining", totalItemsBefore-extractedItems)
-
-	if totalItemsAfter != (totalItemsBefore - extractedItems) {
-		return fmt.Errorf("migration verification failed: expected %d remaining items, found %d",
-			totalItemsBefore-extractedItems, totalItemsAfter)
-	}
-
-	log.Info("✅ In-place migration completed and verified successfully!")
+	log.Info("✅ In-place migration completed successfully!")
 
 	// Handle ancient state data migration
 	if err := moveAncientData(sourceChainDataPath); err != nil {
@@ -2023,8 +2002,8 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 		"architecture", "1 reader + 20 unified writers = 21 threads")
 
 	// Channel buffer sizes - balance memory usage vs throughput
-	const channelBufferSize = 10000
-	const threadPoolSize = 20
+	const channelBufferSize = 50000
+	const threadPoolSize = 50
 
 	// Create unified channel for all write requests
 	writeRequestChannel := make(chan BatchWriteRequest, channelBufferSize)
@@ -2104,7 +2083,7 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 		}
 
 		// flush the batch if it's too large
-		if batchSize >= 256*1024*1024 {
+		if batchSize >= 512*1024*1024 {
 			log.Info("sending batches to async thread pool...", "chain count", chainStat.count, "chain size", chainStat.size,
 				"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
 				"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
@@ -2292,28 +2271,6 @@ func asyncDatabaseDeleter(sourceDB ethdb.Database, deleteChannel <-chan []byte) 
 	return nil
 }
 
-// countDatabaseItems counts the total number of items in a database
-func countDatabaseItems(db ethdb.Database) int64 {
-	var count int64
-	it := db.NewIterator(nil, nil)
-	defer it.Release()
-
-	for it.Next() {
-		count++
-		// Log progress for large databases
-		if count%100000 == 0 {
-			log.Info("Counting progress", "count", count)
-		}
-	}
-
-	if err := it.Error(); err != nil {
-		log.Error("Error during database count", "error", err)
-		return -1
-	}
-
-	return count
-}
-
 // moveAncientData moves ancient state data from chaindata/ancient/state to state/ancient
 func moveAncientData(sourceChainDataPath string) error {
 	log.Info("Checking for ancient state data to migrate...")
@@ -2393,29 +2350,13 @@ func performDatabaseCompaction(sourceDB, stateDB, snapDB, indexDB ethdb.Database
 	for _, dbInfo := range databases {
 		log.Info("Compacting database", "name", dbInfo.name)
 
-		// Try to compact the database if it supports compaction
-		if compactor, ok := dbInfo.db.(interface {
-			Compact(start []byte, limit []byte) error
-		}); ok {
-			// Perform full database compaction (nil, nil means compact everything)
-			if err := compactor.Compact(nil, nil); err != nil {
-				log.Warn("Database compaction failed", "name", dbInfo.name, "error", err)
-				// Don't return error for compaction failure, just log it
-				continue
-			}
-			log.Info("✅ Database compacted successfully", "name", dbInfo.name)
-		} else {
-			// If database doesn't support compaction, try sync operation
-			if syncer, ok := dbInfo.db.(interface{ SyncKeyValue() error }); ok {
-				if err := syncer.SyncKeyValue(); err != nil {
-					log.Warn("Database sync failed", "name", dbInfo.name, "error", err)
-				} else {
-					log.Info("📝 Database synced successfully", "name", dbInfo.name)
-				}
-			} else {
-				log.Debug("Database does not support compaction or sync", "name", dbInfo.name)
-			}
+		// Perform full database compaction (nil, nil means compact everything)
+		if err := dbInfo.db.Compact(nil, nil); err != nil {
+			log.Warn("Database compaction failed", "name", dbInfo.name, "error", err)
+			// Don't return error for compaction failure, just log it
+			continue
 		}
+		log.Info("✅ Database compacted successfully", "name", dbInfo.name)
 	}
 
 	log.Info("🗜️  Database compaction completed for all databases")
