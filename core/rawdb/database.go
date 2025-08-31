@@ -778,6 +778,10 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		cliqueSnaps     stat
 		parliaSnaps     stat
 
+		// X/Y prefix statistics
+		xPrefixKeys stat
+		yPrefixKeys stat
+
 		// Verkle statistics
 		verkleTries        stat
 		verkleStateLookups stat
@@ -845,6 +849,10 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			cliqueSnaps.Add(size)
 		case bytes.HasPrefix(key, ParliaSnapshotPrefix) && len(key) == 7+common.HashLength:
 			parliaSnaps.Add(size)
+		case len(key) > 0 && key[0] == 'X':
+			xPrefixKeys.Add(size)
+		case len(key) > 0 && key[0] == 'Y':
+			yPrefixKeys.Add(size)
 		case bytes.HasPrefix(key, ChtTablePrefix) ||
 			bytes.HasPrefix(key, ChtIndexTablePrefix) ||
 			bytes.HasPrefix(key, ChtPrefix): // Canonical hash trie
@@ -920,6 +928,8 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		{"Key-Value store", "Storage snapshot", storageSnaps.Size(), storageSnaps.Count()},
 		{"Key-Value store", "Clique snapshots", cliqueSnaps.Size(), cliqueSnaps.Count()},
 		{"Key-Value store", "Parlia snapshots", parliaSnaps.Size(), parliaSnaps.Count()},
+		{"Key-Value store", "X prefix keys", xPrefixKeys.Size(), xPrefixKeys.Count()},
+		{"Key-Value store", "Y prefix keys", yPrefixKeys.Size(), yPrefixKeys.Count()},
 		{"Key-Value store", "Singleton metadata", metadata.Size(), metadata.Count()},
 		{"Light client", "CHT trie nodes", chtTrieNodes.Size(), chtTrieNodes.Count()},
 		{"Light client", "Bloom trie nodes", bloomTrieNodes.Size(), bloomTrieNodes.Count()},
