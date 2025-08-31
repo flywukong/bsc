@@ -2073,7 +2073,7 @@ func extractAllDataInOnePass(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 
 	// Compaction tracking variables
 	deletedBytesTotal := int64(0)
-	const compactionThreshold = int64(1 * 1024 * 1024 * 1024) // 10GB
+	const compactionThreshold = int64(50 * 1024 * 1024) // 10GB
 
 	it := sourceDB.NewIterator(nil, nil)
 	defer it.Release()
@@ -3041,8 +3041,8 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 		indexStat  = &stat{}
 
 		// Delete operation tracking for compaction optimization
-		deletedBytesTotal   int64 = 0                      // Total bytes of deleted keys
-		compactionThreshold int64 = 1 * 1024 * 1024 * 1024 // 10GB threshold
+		deletedBytesTotal   int64 = 0                // Total bytes of deleted keys
+		compactionThreshold int64 = 50 * 1024 * 1024 // 10GB threshold
 	)
 
 	for it.Next() {
