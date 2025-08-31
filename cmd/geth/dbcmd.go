@@ -2132,6 +2132,10 @@ func extractAllDataInOnePass(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 			// Successfully sent to unified write channel, now send key to delete channel
 			select {
 			case deleteChannel <- key:
+				// Log when starting a new delete tracking cycle
+				if deletedBytesTotal == 0 {
+					log.Info("🗑️ Starting new delete tracking cycle", "category", category)
+				}
 				// Track bytes to be deleted for compaction threshold
 				deletedBytesTotal += int64(len(key) + len(value))
 			case err := <-errorChannel:
@@ -3075,16 +3079,28 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 				stateBatch.Put(key, value)
 			}
 			chainBatch.Delete(key)
+			// Log when starting a new delete tracking cycle
+			if deletedBytesTotal == 0 {
+				log.Info("🗑️ Starting new delete tracking cycle", "category", "state")
+			}
 			deletedBytesTotal += int64(kvSize) // Track delete bytes
 			stateStat.Add(kvSize)
 		case "snapshot":
 			snapBatch.Put(key, value)
 			chainBatch.Delete(key)
+			// Log when starting a new delete tracking cycle
+			if deletedBytesTotal == 0 {
+				log.Info("🗑️ Starting new delete tracking cycle", "category", "snapshot")
+			}
 			deletedBytesTotal += int64(kvSize) // Track delete bytes
 			snapStat.Add(kvSize)
 		case "txindex":
 			indexBatch.Put(key, value)
 			chainBatch.Delete(key)
+			// Log when starting a new delete tracking cycle
+			if deletedBytesTotal == 0 {
+				log.Info("🗑️ Starting new delete tracking cycle", "category", "txindex")
+			}
 			deletedBytesTotal += int64(kvSize) // Track delete bytes
 			indexStat.Add(kvSize)
 		}
@@ -3167,18 +3183,7 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 			// This mimics the condition when manual 'db compaction' works
 			log.Info("⏸️ Preparing for chainDB compaction (release iterator, keep async writes running)")
 
-			// 1. Send pending chainBatch to avoid data loss
-			if chainBatch.ValueSize() > 0 {
-				select {
-				case writeRequestChannel <- BatchWriteRequest{BatchType: "chain", Batch: chainBatch}:
-					chainBatch = chainDB.NewBatch()
-					log.Info("📤 Flushed pending chainBatch before compaction")
-				case err := <-errorChannel:
-					return fmt.Errorf("failed to flush chainBatch before compaction: %v", err)
-				}
-			}
-
-			// 2. Save current iterator position before releasing
+			// 1. Save current iterator position before releasing
 			var resumeKey []byte
 			if it.Key() != nil {
 				resumeKey = make([]byte, len(it.Key()))
@@ -3190,7 +3195,7 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 				log.Info("💾 Saved iterator position for resume", "keyPrefix", fmt.Sprintf("%x", resumeKey[:keyLen]))
 			}
 
-			// Release iterator to free file handles (critical for space reclamation)
+			// 2. Release iterator to free file handles (critical for space reclamation)
 			it.Release()
 			log.Info("🔓 Released database iterator and file handles")
 
