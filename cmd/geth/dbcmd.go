@@ -1924,7 +1924,7 @@ func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 
 	// Extract all data in single pass
 	log.Info("🔍 Starting single-pass data extraction...")
-	if err := extractAllDataInOnePass(sourceDB, stateDB, snapDB, indexDB, stats); err != nil {
+	if err := extractAllDataInOnePass(sourceDB, sourceDB, stateDB, snapDB, indexDB, stats); err != nil {
 		close(stopProgress)
 		return fmt.Errorf("failed to extract data: %v", err)
 	}
@@ -2018,9 +2018,9 @@ type CategorizedData struct {
 }
 
 // extractAllDataInOnePass extracts all data types using multi-threaded async processing
-func extractAllDataInOnePass(sourceDB, stateDB, snapDB, indexDB ethdb.Database, stats *MigrationStats) error {
+func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.Database, stats *MigrationStats) error {
 	log.Info("🚀 Starting multi-threaded async data extraction",
-		"architecture", "1 reader + 20 unified writers + 1 deleter = 22 threads")
+		"architecture", "1 reader + 20 unified writers = 21 threads")
 
 	// Channel buffer sizes - balance memory usage vs throughput
 	const channelBufferSize = 10000
@@ -2028,10 +2028,9 @@ func extractAllDataInOnePass(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 
 	// Create unified channel for all write requests
 	writeRequestChannel := make(chan BatchWriteRequest, channelBufferSize)
-	deleteChannel := make(chan []byte, channelBufferSize)
 
 	// Error channels to collect errors from goroutines
-	errorChannel := make(chan error, threadPoolSize+2) // threadPoolSize writers + 1 deleter + 1 reader
+	errorChannel := make(chan error, threadPoolSize+1) // threadPoolSize writers + 1 reader
 
 	// WaitGroup to coordinate all goroutines
 	var wg sync.WaitGroup
@@ -2057,160 +2056,106 @@ func extractAllDataInOnePass(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 		})
 	}
 
-	// Source database deleter
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if err := asyncDatabaseDeleter(sourceDB, deleteChannel); err != nil {
-			errorChannel <- fmt.Errorf("deleter error: %v", err)
-		}
-	}()
+	// Main reader goroutine - process source database (same as traverseAndMigrateWithSharding)
+	log.Info("📖 Starting main reader thread with unified async writers...")
 
-	// Main reader goroutine - process source database
-	log.Info("📖 Starting main reader thread with 7 async workers (6 writers + 1 deleter)...")
-	processed := 0
-	extracted := 0
-
-	// Compaction tracking variables
-	deletedBytesTotal := int64(0)
-	const compactionThreshold = int64(50 * 1024 * 1024) // 10GB
+	var (
+		chainBatch = chainDB.NewBatch()
+		stateBatch = stateDB.NewBatch()
+		snapBatch  = snapDB.NewBatch()
+		indexBatch = indexDB.NewBatch()
+		batchSize  = 0
+		chainStat  = &stat{}
+		stateStat  = &stat{}
+		snapStat   = &stat{}
+		indexStat  = &stat{}
+	)
 
 	it := sourceDB.NewIterator(nil, nil)
 	defer it.Release()
 
 	for it.Next() {
-		// Create copies of key and value since iterator reuses underlying memory
 		key := make([]byte, len(it.Key()))
 		value := make([]byte, len(it.Value()))
 		copy(key, it.Key())
 		copy(value, it.Value())
+		kvSize := len(key) + len(value)
+		batchSize += kvSize
+		chainStat.Add(kvSize)
 
-		processed++
-
-		// Determine the category for this key-value pair
+		// put the key into the state, snap, or index database and delete from chaindb
 		category := categorizeDataByKey(key, value)
-
-		// Skip if it should stay in original chaindata
-		if category == "" {
-			continue
-		}
-
-		extracted++
-
-		// Create write request with batch
-		var targetDB ethdb.Database
 		switch category {
 		case "state":
-			targetDB = stateDB
+			stateBatch.Put(key, value)
+			chainBatch.Delete(key)
+			stateStat.Add(kvSize)
+			stats.Add(category, len(key), len(value))
 		case "snapshot":
-			targetDB = snapDB
+			snapBatch.Put(key, value)
+			chainBatch.Delete(key)
+			snapStat.Add(kvSize)
+			stats.Add(category, len(key), len(value))
 		case "txindex":
-			targetDB = indexDB
-		default:
-			log.Warn("Unknown category in async processing", "category", category, "keyHex", fmt.Sprintf("%x", key[:min(16, len(key))]))
-			continue
+			indexBatch.Put(key, value)
+			chainBatch.Delete(key)
+			indexStat.Add(kvSize)
+			stats.Add(category, len(key), len(value))
 		}
 
-		// Create batch and add the key-value pair
-		batch := targetDB.NewBatch()
-		if err := batch.Put(key, value); err != nil {
-			return fmt.Errorf("failed to put key-value to batch: %v", err)
+		// flush the batch if it's too large
+		if batchSize >= 256*1024*1024 {
+			log.Info("sending batches to async thread pool...", "chain count", chainStat.count, "chain size", chainStat.size,
+				"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
+				"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
+
+			// Send other batches to async writers
+			if stateBatch.ValueSize() > 0 {
+				select {
+				case writeRequestChannel <- BatchWriteRequest{BatchType: "state", Batch: stateBatch}:
+					stateBatch = stateDB.NewBatch()
+				case err := <-errorChannel:
+					return fmt.Errorf("async write error during state batch processing: %v", err)
+				}
+			}
+
+			if snapBatch.ValueSize() > 0 {
+				select {
+				case writeRequestChannel <- BatchWriteRequest{BatchType: "snap", Batch: snapBatch}:
+					snapBatch = snapDB.NewBatch()
+				case err := <-errorChannel:
+					return fmt.Errorf("async write error during snap batch processing: %v", err)
+				}
+			}
+
+			if indexBatch.ValueSize() > 0 {
+				select {
+				case writeRequestChannel <- BatchWriteRequest{BatchType: "index", Batch: indexBatch}:
+					indexBatch = indexDB.NewBatch()
+				case err := <-errorChannel:
+					return fmt.Errorf("async write error during index batch processing: %v", err)
+				}
+			}
+
+			// save first, then delete
+			if chainBatch.ValueSize() > 0 {
+				select {
+				case writeRequestChannel <- BatchWriteRequest{BatchType: "chain", Batch: chainBatch}:
+					chainBatch = chainDB.NewBatch()
+				case err := <-errorChannel:
+					return fmt.Errorf("async write error during chain batch processing: %v", err)
+				}
+			}
+
+			batchSize = 0
 		}
 
-		// Update stats for this extracted item
-		stats.Add(category, len(key), len(value))
-
-		// Create write request
-		req := BatchWriteRequest{
-			BatchType: category,
-			Batch:     batch,
-		}
-
-		// Send write request to unified writer pool
+		// Check for errors periodically
 		select {
-		case writeRequestChannel <- req:
-			// Successfully sent to unified write channel, now send key to delete channel
-			select {
-			case deleteChannel <- key:
-				// Log when starting a new delete tracking cycle
-				if deletedBytesTotal == 0 {
-					log.Info("🗑️ Starting new delete tracking cycle", "category", category)
-				}
-				// Track bytes to be deleted for compaction threshold
-				deletedBytesTotal += int64(len(key) + len(value))
-			case err := <-errorChannel:
-				return err
-			}
 		case err := <-errorChannel:
-			return err
-		}
-
-		// Debug: Log first few extractions
-		if extracted <= 30 {
-			log.Info("📝 Queuing data for async processing",
-				"category", category,
-				"keyHex", fmt.Sprintf("%x", key[:min(16, len(key))]),
-				"keyStr", string(key[:min(32, len(key))]),
-				"keyLen", len(key),
-				"valueLen", len(value))
-		}
-
-		// Progress update every 10000 items
-		if processed%10000 == 0 && processed > 0 {
-			log.Info("Reader progress", "processed", processed, "extracted", extracted,
-				"deletedBytesGB", float64(deletedBytesTotal)/(1024*1024*1024))
-		}
-
-		// Check if compaction is needed (10GB of deletes)
-		if deletedBytesTotal >= compactionThreshold {
-			log.Info("🔄 Delete threshold reached, triggering compaction",
-				"deletedBytesTotal", deletedBytesTotal,
-				"deletedBytesGB", float64(deletedBytesTotal)/(1024*1024*1024),
-				"thresholdGB", float64(compactionThreshold)/(1024*1024*1024))
-
-			// Save current iterator position for resume
-			var resumeKey []byte
-			if it.Key() != nil {
-				resumeKey = make([]byte, len(it.Key()))
-				copy(resumeKey, it.Key())
-				keyLen := len(resumeKey)
-				if keyLen > 8 {
-					keyLen = 8
-				}
-				log.Info("💾 Saved iterator position for resume", "keyPrefix", fmt.Sprintf("%x", resumeKey[:keyLen]))
-			}
-
-			// Release iterator to free file handles (async operations continue)
-			it.Release()
-			log.Info("🔓 Released database iterator and file handles")
-
-			// Perform compaction while async operations continue
-			log.Info("🔧 Starting sourceDB compaction (async operations continue)")
-			start := time.Now()
-			if err := sourceDB.Compact(nil, nil); err != nil {
-				return fmt.Errorf("sourceDB compaction failed: %v", err)
-			}
-			duration := time.Since(start)
-			log.Info("✅ SourceDB compaction completed",
-				"duration", duration,
-				"targetReclaimedGB", float64(deletedBytesTotal)/(1024*1024*1024))
-
-			// Recreate iterator and restore position (async workers keep running)
-			if resumeKey != nil {
-				it = sourceDB.NewIterator(nil, resumeKey)
-				keyLen := len(resumeKey)
-				if keyLen > 8 {
-					keyLen = 8
-				}
-				log.Info("🔄 Recreated iterator from saved position", "keyPrefix", fmt.Sprintf("%x", resumeKey[:keyLen]))
-			} else {
-				it = sourceDB.NewIterator(nil, nil)
-				log.Info("🔄 Recreated iterator (no previous position to resume)")
-			}
-
-			// Reset counter and continue
-			deletedBytesTotal = 0
-			log.Info("✅ Iterator restored, resuming data extraction (async operations never stopped)")
+			return fmt.Errorf("async write error during processing: %v", err)
+		default:
+			// Continue processing
 		}
 	}
 
@@ -2219,11 +2164,29 @@ func extractAllDataInOnePass(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 		return fmt.Errorf("iterator error: %v", err)
 	}
 
-	log.Info("📖 Reader completed, closing channels...", "processed", processed, "extracted", extracted)
+	// flush the remaining kvs (same as traverseAndMigrateWithSharding)
+	if batchSize > 0 {
+		log.Info("sending remaining batches to async thread pool...", "chain count", chainStat.count, "chain size", chainStat.size,
+			"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
+			"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
+
+		// Send remaining batches to async writers
+		if stateBatch.ValueSize() > 0 {
+			writeRequestChannel <- BatchWriteRequest{BatchType: "state", Batch: stateBatch}
+		}
+		if snapBatch.ValueSize() > 0 {
+			writeRequestChannel <- BatchWriteRequest{BatchType: "snap", Batch: snapBatch}
+		}
+		if indexBatch.ValueSize() > 0 {
+			writeRequestChannel <- BatchWriteRequest{BatchType: "index", Batch: indexBatch}
+		}
+		if chainBatch.ValueSize() > 0 {
+			writeRequestChannel <- BatchWriteRequest{BatchType: "chain", Batch: chainBatch}
+		}
+	}
 
 	// Close channels to signal completion to worker goroutines
 	close(writeRequestChannel)
-	close(deleteChannel)
 
 	// Wait for all goroutines to complete
 	log.Info("⏳ Waiting for all async workers to complete...")
@@ -2237,26 +2200,11 @@ func extractAllDataInOnePass(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 		}
 	}
 
-	// Perform final compaction if there are remaining deletes
-	if deletedBytesTotal > 0 {
-		log.Info("🔧 Performing final sourceDB compaction",
-			"remainingDeletedBytesGB", float64(deletedBytesTotal)/(1024*1024*1024))
-		start := time.Now()
-		if err := sourceDB.Compact(nil, nil); err != nil {
-			log.Warn("Final sourceDB compaction failed", "error", err)
-		} else {
-			duration := time.Since(start)
-			log.Info("✅ Final sourceDB compaction completed",
-				"duration", duration,
-				"reclaimedGB", float64(deletedBytesTotal)/(1024*1024*1024))
-		}
-	}
-
 	log.Info("✅ Multi-threaded async data extraction completed",
-		"totalProcessed", processed,
-		"totalExtracted", extracted,
-		"finalDeletedBytesGB", float64(deletedBytesTotal)/(1024*1024*1024),
-		"threadsUsed", fmt.Sprintf("%d (1 reader + %d unified writers + 1 deleter)", threadPoolSize+2, threadPoolSize))
+		"chain count", chainStat.count, "chain size", chainStat.size,
+		"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
+		"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size,
+		"threadsUsed", fmt.Sprintf("%d (1 reader + %d unified writers)", threadPoolSize+1, threadPoolSize))
 	return nil
 }
 
