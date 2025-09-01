@@ -673,7 +673,7 @@ func expandDatabase(sourceDb, targetDb ethdb.Database, keyPrefix, keyStart []byt
 	log.Info("Starting database expansion with focused concurrent scanning",
 		"sourceDb", "read-only", "targetDb", "write-only", "suffix", suffix,
 		"mode", "focused_concurrent_prefix_based",
-		"targetDataTypes", "accountTrie,storageTrie,code,txLookup,accountSnapshot,storageSnapshot,headers,blockBodies,blockReceipts,headerTDs,blobSidecars,headerHashes,headerNumbers,stateIDs,bloomBits")
+		"targetDataTypes", "accountTrie,storageTrie,code,accountSnapshot,storageSnapshot,headers,blockBodies,blockReceipts,headerTDs,blobSidecars,headerHashes,headerNumbers,stateIDs,bloomBits")
 
 	// Use the new focused expansion implementation for better performance
 	return expandDatabaseFocused(sourceDb, targetDb, suffix)
@@ -707,9 +707,6 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 		{TrieNodeStoragePrefix, "storageTrie", IsStorageTrieNode},
 		{CodePrefix, "code", func(key []byte) bool {
 			return bytes.HasPrefix(key, CodePrefix) && len(key) == len(CodePrefix)+common.HashLength
-		}},
-		{txLookupPrefix, "txLookup", func(key []byte) bool {
-			return bytes.HasPrefix(key, txLookupPrefix) && len(key) == (len(txLookupPrefix)+common.HashLength)
 		}},
 		{SnapshotAccountPrefix, "accountSnapshot", func(key []byte) bool {
 			return bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)
@@ -763,7 +760,7 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 		"writers", numWriters, "maxBatchSize", "512MB", "expectedKeys", totalExpectedKeys,
 		"focusedPrefixes", len(prefixes), "sourceDb", "read-only", "targetDb", "write-only",
 		"version", suffix, "scanStrategy", "focused_concurrent_prefix_based",
-		"targetDataTypes", "accountTrie,storageTrie,code,txLookup,accountSnapshot,storageSnapshot,headers,blockBodies,blockReceipts,headerTDs,blobSidecars,headerHashes,headerNumbers,stateIDs,bloomBits")
+		"targetDataTypes", "accountTrie,storageTrie,code,accountSnapshot,storageSnapshot,headers,blockBodies,blockReceipts,headerTDs,blobSidecars,headerHashes,headerNumbers,stateIDs,bloomBits")
 
 	// Helper functions (same transformation logic as before)
 	shuffleValue := func(originalValue []byte, version byte) []byte {
@@ -1033,7 +1030,7 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 		"duplicateKeys", finalDuplicates,
 		"duplicateValues", finalDuplicateValues,
 		"skippedKeys", finalSkipped,
-		"focusedDataTypes", "accountTrie,storageTrie,code,txLookup,accountSnapshot,storageSnapshot")
+		"focusedDataTypes", "accountTrie,storageTrie,code,accountSnapshot,storageSnapshot")
 
 	if finalDuplicates > 0 {
 		log.Warn("Duplicate key generation detected", "duplicateCount", finalDuplicates)
