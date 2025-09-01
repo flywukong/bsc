@@ -2921,7 +2921,6 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 			}
 		})
 	}
-
 	var (
 		chainBatch = chainDB.NewBatch()
 		stateBatch = chainDB.GetStateStore().NewBatch() // fallback for non-X/Y keys
@@ -2932,10 +2931,6 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 		stateStat  = &stat{}
 		snapStat   = &stat{}
 		indexStat  = &stat{}
-
-		// Delete operation tracking for compaction optimization
-		deletedBytesTotal   int64 = 0                // Total bytes of deleted keys
-		compactionThreshold int64 = 50 * 1024 * 1024 // 10GB threshold
 	)
 
 	for it.Next() {
@@ -2968,29 +2963,14 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 				stateBatch.Put(key, value)
 			}
 			chainBatch.Delete(key)
-			// Log when starting a new delete tracking cycle
-			if deletedBytesTotal == 0 {
-				log.Info("🗑️ Starting new delete tracking cycle", "category", "state")
-			}
-			deletedBytesTotal += int64(kvSize) // Track delete bytes
 			stateStat.Add(kvSize)
 		case "snapshot":
 			snapBatch.Put(key, value)
 			chainBatch.Delete(key)
-			// Log when starting a new delete tracking cycle
-			if deletedBytesTotal == 0 {
-				log.Info("🗑️ Starting new delete tracking cycle", "category", "snapshot")
-			}
-			deletedBytesTotal += int64(kvSize) // Track delete bytes
 			snapStat.Add(kvSize)
 		case "txindex":
 			indexBatch.Put(key, value)
 			chainBatch.Delete(key)
-			// Log when starting a new delete tracking cycle
-			if deletedBytesTotal == 0 {
-				log.Info("🗑️ Starting new delete tracking cycle", "category", "txindex")
-			}
-			deletedBytesTotal += int64(kvSize) // Track delete bytes
 			indexStat.Add(kvSize)
 		}
 
@@ -3061,62 +3041,6 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 			batchSize = 0
 		}
 
-		// Check if compaction is needed (10GB of deletes from chainDB)
-		if deletedBytesTotal >= compactionThreshold {
-			log.Info("🔄 Delete threshold reached, triggering chainDB compaction",
-				"deletedBytesTotal", deletedBytesTotal,
-				"deletedBytesGB", float64(deletedBytesTotal)/(1024*1024*1024),
-				"thresholdGB", float64(compactionThreshold)/(1024*1024*1024))
-
-			// CRITICAL: Release iterator to free file handles for effective compaction
-			// This mimics the condition when manual 'db compaction' works
-			log.Info("⏸️ Preparing for chainDB compaction (release iterator, keep async writes running)")
-
-			// 1. Save current iterator position before releasing
-			var resumeKey []byte
-			if it.Key() != nil {
-				resumeKey = make([]byte, len(it.Key()))
-				copy(resumeKey, it.Key())
-				keyLen := len(resumeKey)
-				if keyLen > 8 {
-					keyLen = 8
-				}
-				log.Info("💾 Saved iterator position for resume", "keyPrefix", fmt.Sprintf("%x", resumeKey[:keyLen]))
-			}
-
-			// 2. Release iterator to free file handles (critical for space reclamation)
-			it.Release()
-			log.Info("🔓 Released database iterator and file handles")
-
-			// 3. Perform compaction while async writes continue (they don't conflict)
-			log.Info("🔧 Starting chainDB compaction (async writes continue)")
-			start := time.Now()
-			if err := chainDB.Compact(nil, nil); err != nil {
-				return fmt.Errorf("chainDB compaction failed: %v", err)
-			}
-			duration := time.Since(start)
-			log.Info("✅ ChainDB compaction completed",
-				"duration", duration,
-				"targetReclaimedGB", float64(deletedBytesTotal)/(1024*1024*1024))
-
-			// 4. Recreate iterator and restore position (async writers keep running)
-			if resumeKey != nil {
-				it = chainDB.NewIterator(nil, resumeKey)
-				keyLen := len(resumeKey)
-				if keyLen > 8 {
-					keyLen = 8
-				}
-				log.Info("🔄 Recreated iterator from saved position", "keyPrefix", fmt.Sprintf("%x", resumeKey[:keyLen]))
-			} else {
-				it = chainDB.NewIterator(nil, nil)
-				log.Info("🔄 Recreated iterator (no previous position to resume)")
-			}
-
-			// Reset counter and continue migration
-			deletedBytesTotal = 0
-			log.Info("✅ Iterator restored, resuming migration (async writes never stopped)")
-		}
-
 		// Check for errors periodically
 		select {
 		case err := <-errorChannel:
@@ -3175,21 +3099,9 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 		return fmt.Errorf("final async write error: %v", err)
 	}
 
-	// Perform final chainDB compaction if there are remaining deleted bytes
-	if deletedBytesTotal > 0 {
-		log.Info("🔄 Performing final chainDB compaction for remaining deletes",
-			"deletedBytesGB", float64(deletedBytesTotal)/(1024*1024*1024))
-		if err := chainDB.Compact(nil, nil); err != nil {
-			log.Warn("Final chainDB compaction failed (non-fatal)", "error", err)
-		} else {
-			log.Info("✅ Final chainDB compaction completed successfully")
-		}
-	}
-
 	log.Info("migration completed", "chain count", chainStat.count, "chain size", chainStat.size,
 		"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
-		"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size,
-		"total deleted bytes", deletedBytesTotal)
+		"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
 
 	// Log X/Y key distribution across shards if sharding is enabled
 	if isShardingDB && len(shardBatches) > 0 {
