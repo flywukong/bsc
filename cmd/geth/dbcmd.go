@@ -2076,7 +2076,7 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 			snapStat.Add(kvSize)
 			stats.Add(category, len(key), len(value))
 		case "txindex":
-			indexBatch.Put(key, value)
+			// indexBatch.Put(key, value)
 			chainBatch.Delete(key)
 			indexStat.Add(kvSize)
 			stats.Add(category, len(key), len(value))
@@ -2927,7 +2927,7 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 			chainBatch.Delete(key)
 			snapStat.Add(kvSize)
 		case "txindex":
-			indexBatch.Put(key, value)
+			// indexBatch.Put(key, value)
 			chainBatch.Delete(key)
 			indexStat.Add(kvSize)
 		}
