@@ -23,10 +23,12 @@ import (
 	"hash/crc32"
 	"math"
 	"math/rand"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -56,6 +58,8 @@ import (
 	"github.com/ethereum/go-ethereum/triedb/pathdb"
 	"github.com/olekukonko/tablewriter"
 	"github.com/urfave/cli/v2"
+
+	_ "net/http/pprof" // 导入pprof
 )
 
 var (
@@ -1572,6 +1576,15 @@ func inspectHistory(ctx *cli.Context) error {
 
 // migrateDatabase migrates a single database to multi-database format
 func migrateDatabase(ctx *cli.Context) error {
+	// 启动pprof HTTP服务器
+	go func() {
+		log.Info("🔍 Starting pprof server on :6060")
+		log.Info("You can access pprof at: http://localhost:6060/debug/pprof/")
+		if err := http.ListenAndServe("localhost:6060", nil); err != nil {
+			log.Error("Failed to start pprof server", "error", err)
+		}
+	}()
+
 	var (
 		targetDataDir string
 		version       byte = 1 // default version
@@ -2055,7 +2068,9 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 	it := sourceDB.NewIterator(nil, nil)
 	defer it.Release()
 
+	processedCount := 0
 	for it.Next() {
+		processedCount++
 		key := make([]byte, len(it.Key()))
 		value := make([]byte, len(it.Value()))
 		copy(key, it.Key())
@@ -2129,6 +2144,24 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 			}
 
 			batchSize = 0
+		}
+		// Force GC every 100k processed items to prevent memory accumulation
+		if processedCount%100000 == 0 {
+			start := time.Now()
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			currentMemMB := m.Alloc / (1024 * 1024)
+
+			runtime.GC()
+
+			runtime.ReadMemStats(&m)
+			afterGCMemMB := m.Alloc / (1024 * 1024)
+
+			log.Info("🧠 Memory monitoring & GC",
+				"processed", processedCount,
+				"beforeGC_MB", currentMemMB,
+				"afterGC_MB", afterGCMemMB,
+				"duration", time.Since(start))
 		}
 
 		// Check for errors periodically
