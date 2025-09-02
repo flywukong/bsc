@@ -2076,7 +2076,7 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 			snapStat.Add(kvSize)
 			stats.Add(category, len(key), len(value))
 		case "txindex":
-			indexBatch.Put(key, value)
+			// indexBatch.Put(key, value)
 			chainBatch.Delete(key)
 			indexStat.Add(kvSize)
 			stats.Add(category, len(key), len(value))
@@ -2859,39 +2859,8 @@ type BatchWriteRequest struct {
 
 func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 	log.Info("🚀 Starting traverseAndMigrateWithSharding with async thread pool", "threadCount", 20)
-
 	it := chainDB.NewIterator(nil, nil)
 	defer it.Release()
-
-	// Check if StateStore is a ShardingDB and get shard info
-	stateStore := chainDB.GetStateStore()
-	var shardingDB ethdb.ShardingDB
-	var isShardingDB bool
-	var shardNum int
-	var shardBatches []ethdb.Batch
-	var shardXYStats []map[string]int64 // Statistics for X/Y prefix keys per shard
-
-	if db, ok := stateStore.(ethdb.ShardingDB); ok {
-		shardingDB = db
-		isShardingDB = true
-		shardNum = shardingDB.ShardNum()
-		log.Info("StateStore is a ShardingDB", "shardNum", shardNum)
-
-		// Create batch for each shard
-		shardBatches = make([]ethdb.Batch, shardNum)
-		// Initialize statistics for each shard
-		shardXYStats = make([]map[string]int64, shardNum)
-		for i := 0; i < shardNum; i++ {
-			shard := shardingDB.ShardByIndex(i)
-			shardBatches[i] = rawdb.NewDatabase(shard).NewBatch()
-			shardXYStats[i] = make(map[string]int64)
-			shardXYStats[i]["X"] = 0
-			shardXYStats[i]["Y"] = 0
-			shardXYStats[i]["total"] = 0
-		}
-	} else {
-		log.Info("StateStore is not a ShardingDB, using regular batch")
-	}
 
 	// Create channels and synchronization structures for async processing
 	const (
@@ -2899,7 +2868,7 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 		channelBufferSize = 1200
 	)
 
-	writeRequestChannel := make(chan BatchWriteRequest, channelBufferSize)
+	writeRequestChannel := make(chan []ethdb.Batch, channelBufferSize)
 	errorChannel := make(chan error, threadPoolSize)
 	var wg sync.WaitGroup
 	var writeError atomic.Value // Store first write error
@@ -2910,14 +2879,18 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 		wg.Add(1)
 		gopool.Submit(func() {
 			defer wg.Done()
-			for req := range writeRequestChannel {
-				if err := req.Batch.Write(); err != nil {
-					// Store first error and continue processing to avoid deadlock
-					writeError.CompareAndSwap(nil, fmt.Errorf("failed to write %s batch (shard %d): %v", req.BatchType, req.ShardIndex, err))
-					errorChannel <- err
-					continue
+			for batches := range writeRequestChannel {
+				for _, batch := range batches {
+					if batch.ValueSize() == 0 {
+						continue
+					}
+					if err := batch.Write(); err != nil {
+						writeError.CompareAndSwap(nil, fmt.Errorf("failed to write batch: %v", err))
+						errorChannel <- err
+						continue
+					}
+					batch.Reset()
 				}
-				req.Batch.Reset()
 			}
 		})
 	}
@@ -2946,22 +2919,7 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 		category := categorizeDataByKey(key, value)
 		switch category {
 		case "state":
-			// Check if this is X or Y prefixed key and if we have sharding enabled
-			if isShardingDB && len(key) > 0 && (key[0] == 'X' || key[0] == 'Y') {
-				// Distribute X and Y prefixed keys evenly across shards
-				shardIndex := calculateXYShardIndex(key, shardNum)
-				shardBatches[shardIndex].Put(key, value)
-
-				// Update statistics for X/Y prefix keys
-				prefix := string(key[0])
-				shardXYStats[shardIndex][prefix]++
-				shardXYStats[shardIndex]["total"]++
-
-				log.Debug("Distributed X/Y key to shard", "prefix", prefix, "shardIndex", shardIndex, "keyHex", fmt.Sprintf("%x", key[:min(8, len(key))]))
-			} else {
-				// Use regular state batch for other state keys
-				stateBatch.Put(key, value)
-			}
+			stateBatch.Put(key, value)
 			chainBatch.Delete(key)
 			stateStat.Add(kvSize)
 		case "snapshot":
@@ -2969,7 +2927,7 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 			chainBatch.Delete(key)
 			snapStat.Add(kvSize)
 		case "txindex":
-			indexBatch.Put(key, value)
+			// indexBatch.Put(key, value)
 			chainBatch.Delete(key)
 			indexStat.Add(kvSize)
 		}
@@ -2980,62 +2938,14 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 				"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
 				"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
 
-			// Send all shard batches to async writers if sharding is enabled
-			if isShardingDB && len(shardBatches) > 0 {
-				for i, shardBatch := range shardBatches {
-					if shardBatch.ValueSize() > 0 {
-						select {
-						case writeRequestChannel <- BatchWriteRequest{
-							BatchType:  "shard",
-							ShardIndex: i,
-							Batch:      shardBatch,
-						}:
-							// Create new batch for this shard
-							shard := shardingDB.ShardByIndex(i)
-							shardBatches[i] = rawdb.NewDatabase(shard).NewBatch()
-						case err := <-errorChannel:
-							return fmt.Errorf("async write error during shard batch processing: %v", err)
-						}
-					}
-				}
-			}
-
-			// Send other batches to async writers
-			if stateBatch.ValueSize() > 0 {
-				select {
-				case writeRequestChannel <- BatchWriteRequest{BatchType: "state", Batch: stateBatch}:
-					stateBatch = chainDB.GetStateStore().NewBatch()
-				case err := <-errorChannel:
-					return fmt.Errorf("async write error during state batch processing: %v", err)
-				}
-			}
-
-			if snapBatch.ValueSize() > 0 {
-				select {
-				case writeRequestChannel <- BatchWriteRequest{BatchType: "snap", Batch: snapBatch}:
-					snapBatch = chainDB.GetSnapStore().NewBatch()
-				case err := <-errorChannel:
-					return fmt.Errorf("async write error during snap batch processing: %v", err)
-				}
-			}
-
-			if indexBatch.ValueSize() > 0 {
-				select {
-				case writeRequestChannel <- BatchWriteRequest{BatchType: "index", Batch: indexBatch}:
-					indexBatch = chainDB.GetTxIndexStore().NewBatch()
-				case err := <-errorChannel:
-					return fmt.Errorf("async write error during index batch processing: %v", err)
-				}
-			}
-
-			// save first, then delete
-			if chainBatch.ValueSize() > 0 {
-				select {
-				case writeRequestChannel <- BatchWriteRequest{BatchType: "chain", Batch: chainBatch}:
-					chainBatch = chainDB.NewBatch()
-				case err := <-errorChannel:
-					return fmt.Errorf("async write error during chain batch processing: %v", err)
-				}
+			select {
+			case writeRequestChannel <- []ethdb.Batch{stateBatch, snapBatch, indexBatch, chainBatch}:
+				stateBatch = chainDB.GetStateStore().NewBatch()
+				snapBatch = chainDB.GetSnapStore().NewBatch()
+				indexBatch = chainDB.GetTxIndexStore().NewBatch()
+				chainBatch = chainDB.NewBatch()
+			case err := <-errorChannel:
+				return fmt.Errorf("async write error during state batch processing: %v", err)
 			}
 
 			batchSize = 0
@@ -3056,31 +2966,16 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 			"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
 			"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
 
-		// Send all remaining shard batches to async writers if sharding is enabled
-		if isShardingDB && len(shardBatches) > 0 {
-			for i, shardBatch := range shardBatches {
-				if shardBatch.ValueSize() > 0 {
-					writeRequestChannel <- BatchWriteRequest{
-						BatchType:  "shard",
-						ShardIndex: i,
-						Batch:      shardBatch,
-					}
-				}
-			}
+		select {
+		case writeRequestChannel <- []ethdb.Batch{stateBatch, snapBatch, indexBatch, chainBatch}:
+			stateBatch = chainDB.GetStateStore().NewBatch()
+			snapBatch = chainDB.GetSnapStore().NewBatch()
+			indexBatch = chainDB.GetTxIndexStore().NewBatch()
+			chainBatch = chainDB.NewBatch()
+		case err := <-errorChannel:
+			return fmt.Errorf("async write error during state batch processing: %v", err)
 		}
-
-		if stateBatch.ValueSize() > 0 {
-			writeRequestChannel <- BatchWriteRequest{BatchType: "state", Batch: stateBatch}
-		}
-		if snapBatch.ValueSize() > 0 {
-			writeRequestChannel <- BatchWriteRequest{BatchType: "snap", Batch: snapBatch}
-		}
-		if indexBatch.ValueSize() > 0 {
-			writeRequestChannel <- BatchWriteRequest{BatchType: "index", Batch: indexBatch}
-		}
-		if chainBatch.ValueSize() > 0 {
-			writeRequestChannel <- BatchWriteRequest{BatchType: "chain", Batch: chainBatch}
-		}
+		batchSize = 0
 	}
 
 	// Close the channel and wait for all writers to finish
@@ -3102,40 +2997,6 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 	log.Info("migration completed", "chain count", chainStat.count, "chain size", chainStat.size,
 		"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
 		"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
-
-	// Log X/Y key distribution across shards if sharding is enabled
-	if isShardingDB && len(shardBatches) > 0 {
-		log.Info("X/Y key distribution completed", "shardNum", shardNum, "distributionMethod", "CRC32_hash_modulo")
-
-		// Print detailed X/Y prefix statistics for each shard
-		log.Info("📊 X/Y prefix key distribution statistics:")
-		var totalXKeys, totalYKeys int64
-
-		for i := 0; i < shardNum; i++ {
-			xCount := shardXYStats[i]["X"]
-			yCount := shardXYStats[i]["Y"]
-			totalCount := shardXYStats[i]["total"]
-
-			totalXKeys += xCount
-			totalYKeys += yCount
-
-			log.Info("Shard detailed statistics",
-				"shardIndex", i,
-				"X_prefix_keys", xCount,
-				"Y_prefix_keys", yCount,
-				"total_XY_keys", totalCount,
-				"method", "X/Y_key_distribution")
-		}
-
-		// Print overall summary
-		log.Info("📈 Overall X/Y prefix key summary",
-			"total_X_keys", totalXKeys,
-			"total_Y_keys", totalYKeys,
-			"total_XY_keys", totalXKeys+totalYKeys,
-			"shards_used", shardNum)
-	}
-
-	log.Info("🎉 Async thread pool migration completed successfully", "threadCount", threadPoolSize)
 	return nil
 }
 
