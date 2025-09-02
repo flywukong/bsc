@@ -2003,7 +2003,7 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 
 	// Channel buffer sizes - focused on txIndex extraction
 	const channelBufferSize = 80
-	const threadPoolSize = 8
+	const threadPoolSize = 2
 
 	// Create unified channel for write requests (txIndex only)
 	writeRequestChannel := make(chan BatchWriteRequest, channelBufferSize)
@@ -2074,7 +2074,7 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 		}
 
 		// flush the txIndex batch if it's too large
-		if batchSize >= 256*1024*1024 {
+		if batchSize >= 50*1024*1024 {
 			log.Info("sending txIndex batch to async thread pool...",
 				"index count", indexStat.count, "index size", indexStat.size)
 
