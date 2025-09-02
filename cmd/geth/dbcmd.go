@@ -1689,15 +1689,16 @@ func migrateDatabase(ctx *cli.Context) error {
 	}
 	defer snapDB.Close()
 
-	// TxIndex database
-	indexDB, err := openTargetDatabase(targetTxIndexPath, cacheSize*cacheDB*15/100, 32)
-	if err != nil {
-		return fmt.Errorf("failed to create target txindex database: %v", err)
-	}
-	defer indexDB.Close()
-
+	/*
+		// TxIndex database
+		indexDB, err := openTargetDatabase(targetTxIndexPath, cacheSize*cacheDB*15/100, 32)
+		if err != nil {
+			return fmt.Errorf("failed to create target txindex database: %v", err)
+		}
+		defer indexDB.Close()
+	*/
 	// Start in-place migration
-	return performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB, sourceChainDataPath)
+	return performInPlaceMigration(sourceDB, stateDB, snapDB, nil, sourceChainDataPath)
 }
 
 // openTargetDatabase creates a key-value database at the specified path
@@ -1996,16 +1997,16 @@ type CategorizedData struct {
 	Category string
 }
 
-// extractAllDataInOnePass extracts all data types using multi-threaded async processing
+// extractAllDataInOnePass extracts snapshot data using multi-threaded async processing
 func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.Database, stats *MigrationStats) error {
-	log.Info("🚀 Starting TX lookup data extraction with async thread pool",
-		"architecture", "1 reader + async writers focusing on txIndex only")
+	log.Info("🚀 Starting snapshot data extraction with async thread pool",
+		"architecture", "1 reader + async writers focusing on snapshot only")
 
-	// Channel buffer sizes - focused on txIndex extraction
+	// Channel buffer sizes - focused on snapshot extraction
 	const channelBufferSize = 4
 	const threadPoolSize = 1
 
-	// Create unified channel for write requests (txIndex only)
+	// Create unified channel for write requests (snapshot only)
 	writeRequestChannel := make(chan BatchWriteRequest, channelBufferSize)
 
 	// Error channels to collect errors from goroutines
@@ -2017,8 +2018,8 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 	// Error handling for async writes
 	var writeError atomic.Value
 
-	// Start async writer goroutines for txIndex batch processing
-	log.Info("🚀 Starting async txIndex writer goroutines", "threadCount", threadPoolSize)
+	// Start async writer goroutines for snapshot batch processing
+	log.Info("🚀 Starting async snapshot writer goroutines", "threadCount", threadPoolSize)
 	for i := 0; i < threadPoolSize; i++ {
 		wg.Add(1)
 		gopool.Submit(func() {
@@ -2034,24 +2035,24 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 		})
 	}
 
-	// TX index data extraction - includes both txLookup data and metadata
-	log.Info("📖 Starting TX index data extraction", "types", "txLookup_data + metadata")
+	// Snapshot data extraction - includes both snapshot data and metadata
+	log.Info("📖 Starting snapshot data extraction", "types", "account_snapshots + storage_snapshots + metadata")
 
 	var (
-		indexBatch    = indexDB.NewBatch()
-		batchSize     = 0
-		indexStat     = &stat{}
-		totalScanned  = 0
-		txLookupCount = 0
-		metadataCount = 0
+		snapBatch        = snapDB.NewBatch()
+		batchSize        = 0
+		snapStat         = &stat{}
+		totalScanned     = 0
+		accountSnapCount = 0
+		storageSnapCount = 0
+		metadataCount    = 0
 	)
 
-	// Step 1: Extract txLookup data (transaction hash to block lookups)
-	txLookupPrefix := []byte("l") // txLookupPrefix is 'l'
-	log.Info("🔍 Phase 1: Scanning txLookup data", "prefix", "txLookupPrefix", "prefixHex", fmt.Sprintf("%x", txLookupPrefix))
+	// Step 1: Extract snapshot account data
+	log.Info("🔍 Phase 1: Scanning snapshot account data", "prefix", "SnapshotAccountPrefix")
 
-	// Create iterator specifically for txLookupPrefix
-	it := sourceDB.NewIterator(txLookupPrefix, nil)
+	// Create iterator specifically for snapshot account prefix
+	it := sourceDB.NewIterator(rawdb.SnapshotAccountPrefix, nil)
 	defer it.Release()
 
 	for it.Next() {
@@ -2062,29 +2063,29 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 		kvSize := len(key) + len(value)
 		totalScanned++
 
-		// Verify this is actually a txLookup key (safety check)
-		if len(key) == (1+common.HashLength) && bytes.HasPrefix(key, txLookupPrefix) {
-			indexBatch.Put(key, value)
-			indexStat.Add(kvSize)
+		// Verify this is actually a snapshot account key (safety check)
+		if len(key) == (len(rawdb.SnapshotAccountPrefix)+common.HashLength) && bytes.HasPrefix(key, rawdb.SnapshotAccountPrefix) {
+			snapBatch.Put(key, value)
+			snapStat.Add(kvSize)
 			batchSize += kvSize
-			stats.Add("txindex", len(key), len(value))
-			txLookupCount++
+			stats.Add("snapshot", len(key), len(value))
+			accountSnapCount++
 
 			// Note: We do NOT delete from source database - keeping original data intact
 		}
 
-		// flush the txIndex batch if it's too large
+		// flush the snapshot batch if it's too large
 		if batchSize >= 16*1024*1024 {
-			log.Info("sending txIndex batch to async thread pool...",
-				"index count", indexStat.count, "index size", indexStat.size)
+			log.Info("sending snapshot batch to async thread pool...",
+				"snap count", snapStat.count, "snap size", snapStat.size)
 
-			// Send txIndex batch to async writer (only txIndex processing)
-			if indexBatch.ValueSize() > 0 {
+			// Send snapshot batch to async writer (only snapshot processing)
+			if snapBatch.ValueSize() > 0 {
 				select {
-				case writeRequestChannel <- BatchWriteRequest{BatchType: "index", Batch: indexBatch}:
-					indexBatch = indexDB.NewBatch()
+				case writeRequestChannel <- BatchWriteRequest{BatchType: "snapshot", Batch: snapBatch}:
+					snapBatch = snapDB.NewBatch()
 				case err := <-errorChannel:
-					return fmt.Errorf("async write error during txIndex batch processing: %v", err)
+					return fmt.Errorf("async write error during snapshot batch processing: %v", err)
 				}
 			}
 
@@ -2105,41 +2106,102 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 		return fmt.Errorf("iterator error: %v", err)
 	}
 
-	log.Info("✅ Phase 1 completed", "txLookupScanned", totalScanned, "txLookupExtracted", txLookupCount)
+	log.Info("✅ Phase 1 completed", "accountSnapScanned", totalScanned, "accountSnapExtracted", accountSnapCount)
 
-	// Step 2: Extract txindex metadata (TransactionIndexTail, etc.)
-	log.Info("🔍 Phase 2: Scanning txIndex metadata", "types", "TransactionIndexTail")
+	// Step 2: Extract snapshot storage data
+	log.Info("🔍 Phase 2: Scanning snapshot storage data", "prefix", "SnapshotStoragePrefix")
 
-	txIndexMetadataKeys := []string{
-		"TransactionIndexTail", // txIndexTailKey - tracks the oldest indexed block
-	}
+	storageIt := sourceDB.NewIterator(rawdb.SnapshotStoragePrefix, nil)
+	defer storageIt.Release()
 
-	for _, metaKey := range txIndexMetadataKeys {
-		if data, err := sourceDB.Get([]byte(metaKey)); err == nil && data != nil {
-			indexBatch.Put([]byte(metaKey), data)
-			kvSize := len(metaKey) + len(data)
-			indexStat.Add(kvSize)
+	storageScanned := 0
+	for storageIt.Next() {
+		key := make([]byte, len(storageIt.Key()))
+		value := make([]byte, len(storageIt.Value()))
+		copy(key, storageIt.Key())
+		copy(value, storageIt.Value())
+		kvSize := len(key) + len(value)
+		storageScanned++
+
+		// Verify this is actually a snapshot storage key (safety check)
+		if len(key) == (len(rawdb.SnapshotStoragePrefix)+2*common.HashLength) && bytes.HasPrefix(key, rawdb.SnapshotStoragePrefix) {
+			snapBatch.Put(key, value)
+			snapStat.Add(kvSize)
 			batchSize += kvSize
-			stats.Add("txindex", len(metaKey), len(data))
-			metadataCount++
+			stats.Add("snapshot", len(key), len(value))
+			storageSnapCount++
 
-			log.Info("📋 Extracted txIndex metadata", "key", metaKey, "valueSize", len(data))
 			// Note: We do NOT delete from source database - keeping original data intact
-		} else if err != nil {
-			log.Debug("txIndex metadata key not found (this may be normal)", "key", metaKey, "error", err)
+		}
+
+		// flush the snapshot batch if it's too large
+		if batchSize >= 16*1024*1024 {
+			log.Info("sending snapshot storage batch to async thread pool...",
+				"snap count", snapStat.count, "snap size", snapStat.size)
+
+			// Send snapshot batch to async writer
+			if snapBatch.ValueSize() > 0 {
+				select {
+				case writeRequestChannel <- BatchWriteRequest{BatchType: "snapshot", Batch: snapBatch}:
+					snapBatch = snapDB.NewBatch()
+				case err := <-errorChannel:
+					return fmt.Errorf("async write error during snapshot storage batch processing: %v", err)
+				}
+			}
+
+			batchSize = 0
+		}
+
+		// Check for errors periodically
+		select {
+		case err := <-errorChannel:
+			return fmt.Errorf("async write error during storage processing: %v", err)
+		default:
+			// Continue processing
 		}
 	}
 
-	log.Info("✅ Phase 2 completed", "metadataExtracted", metadataCount)
+	// Check for storage iterator errors
+	if err := storageIt.Error(); err != nil {
+		return fmt.Errorf("storage iterator error: %v", err)
+	}
 
-	// flush the remaining txIndex batch
+	log.Info("✅ Phase 2 completed", "storageSnapScanned", storageScanned, "storageSnapExtracted", storageSnapCount)
+
+	// Step 3: Extract snapshot metadata
+	log.Info("🔍 Phase 3: Scanning snapshot metadata", "types", "SnapshotRoot,SnapshotJournal,SnapshotGenerator,etc")
+
+	snapshotMetadataKeys := []string{
+		"SnapshotRoot", "SnapshotJournal", "SnapshotGenerator",
+		"SnapshotRecovery", "SnapshotSyncStatus",
+	}
+
+	for _, metaKey := range snapshotMetadataKeys {
+		if data, err := sourceDB.Get([]byte(metaKey)); err == nil && data != nil {
+			snapBatch.Put([]byte(metaKey), data)
+			kvSize := len(metaKey) + len(data)
+			snapStat.Add(kvSize)
+			batchSize += kvSize
+			stats.Add("snapshot", len(metaKey), len(data))
+			metadataCount++
+
+			log.Info("📋 Extracted snapshot metadata", "key", metaKey, "valueSize", len(data))
+			// Note: We do NOT delete from source database - keeping original data intact
+		} else if err != nil {
+			log.Debug("snapshot metadata key not found (this may be normal)", "key", metaKey, "error", err)
+		}
+	}
+
+	log.Info("✅ Phase 3 completed", "metadataExtracted", metadataCount)
+
+	// flush the remaining snapshot batch
 	if batchSize > 0 {
-		log.Info("sending remaining txIndex batch to async thread pool...",
-			"index count", indexStat.count, "index size", indexStat.size)
+		log.Info("sending remaining snapshot batch to async thread pool...",
+			"snap count", snapStat.count, "snap size", snapStat.size)
 
-		// Send remaining txIndex batch to async writer (only txIndex)
-		if indexBatch.ValueSize() > 0 {
-			writeRequestChannel <- BatchWriteRequest{BatchType: "index", Batch: indexBatch}
+		// Send remaining snapshot batch to async writer (only snapshot)
+		if snapBatch.ValueSize() > 0 {
+			writeRequestChannel <- BatchWriteRequest{BatchType: "snapshot", Batch: snapBatch}
 		}
 	}
 
@@ -2158,13 +2220,13 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 		}
 	}
 
-	log.Info("✅ TX index data extraction completed",
-		"txLookupData", txLookupCount, "metadata", metadataCount,
-		"totalTxIndex", indexStat.count, "totalSize", indexStat.size,
-		"operation", "txLookupPrefix_scanning + metadata_extraction",
+	log.Info("✅ Snapshot data extraction completed",
+		"accountSnapshots", accountSnapCount, "storageSnapshots", storageSnapCount, "metadata", metadataCount,
+		"totalSnapshots", snapStat.count, "totalSize", snapStat.size,
+		"operation", "snapshot_account_scanning + snapshot_storage_scanning + metadata_extraction",
 		"originalDataIntact", "true (no deletions performed)",
-		"phases", "2 (txLookup data + metadata)",
-		"threadsUsed", fmt.Sprintf("%d (1 reader + %d txIndex writers)", threadPoolSize+1, threadPoolSize))
+		"phases", "3 (account snapshots + storage snapshots + metadata)",
+		"threadsUsed", fmt.Sprintf("%d (1 reader + %d snapshot writers)", threadPoolSize+1, threadPoolSize))
 	return nil
 }
 
