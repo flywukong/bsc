@@ -1998,34 +1998,33 @@ type CategorizedData struct {
 
 // extractAllDataInOnePass extracts all data types using multi-threaded async processing
 func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.Database, stats *MigrationStats) error {
-	log.Info("🚀 Starting multi-threaded async data extraction",
-		"architecture", "1 reader + 50 unified writers = 51 threads")
+	log.Info("🚀 Starting TX lookup data extraction with async thread pool",
+		"architecture", "1 reader + async writers focusing on txIndex only")
 
-	// Channel buffer sizes - optimized for 120GB memory usage
-	const channelBufferSize = 1500
-	const threadPoolSize = 40
+	// Channel buffer sizes - focused on txIndex extraction
+	const channelBufferSize = 2000
+	const threadPoolSize = 20
 
-	// Create unified channel for all write requests
+	// Create unified channel for write requests (txIndex only)
 	writeRequestChannel := make(chan BatchWriteRequest, channelBufferSize)
 
 	// Error channels to collect errors from goroutines
-	errorChannel := make(chan error, threadPoolSize+1) // threadPoolSize writers + 1 reader
+	errorChannel := make(chan error, threadPoolSize+1)
 
 	// WaitGroup to coordinate all goroutines
 	var wg sync.WaitGroup
 
 	// Error handling for async writes
-	var writeError atomic.Value // stores first write error
+	var writeError atomic.Value
 
-	// Start 20 unified async writer goroutines using thread pool
-	log.Info("🚀 Starting async writer goroutines", "threadCount", threadPoolSize)
+	// Start async writer goroutines for txIndex batch processing
+	log.Info("🚀 Starting async txIndex writer goroutines", "threadCount", threadPoolSize)
 	for i := 0; i < threadPoolSize; i++ {
 		wg.Add(1)
 		gopool.Submit(func() {
 			defer wg.Done()
 			for req := range writeRequestChannel {
 				if err := req.Batch.Write(); err != nil {
-					// Store first error and continue processing to avoid deadlock
 					writeError.CompareAndSwap(nil, fmt.Errorf("failed to write %s batch: %v", req.BatchType, err))
 					errorChannel <- err
 					continue
@@ -2035,22 +2034,24 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 		})
 	}
 
-	// Main reader goroutine - process source database (same as traverseAndMigrateWithSharding)
-	log.Info("📖 Starting main reader thread with unified async writers...")
+	// TX index data extraction - includes both txLookup data and metadata
+	log.Info("📖 Starting TX index data extraction", "types", "txLookup_data + metadata")
 
 	var (
-		chainBatch = chainDB.NewBatch()
-		stateBatch = stateDB.NewBatch()
-		snapBatch  = snapDB.NewBatch()
-		indexBatch = indexDB.NewBatch()
-		batchSize  = 0
-		chainStat  = &stat{}
-		stateStat  = &stat{}
-		snapStat   = &stat{}
-		indexStat  = &stat{}
+		indexBatch    = indexDB.NewBatch()
+		batchSize     = 0
+		indexStat     = &stat{}
+		totalScanned  = 0
+		txLookupCount = 0
+		metadataCount = 0
 	)
 
-	it := sourceDB.NewIterator(nil, nil)
+	// Step 1: Extract txLookup data (transaction hash to block lookups)
+	txLookupPrefix := []byte("l") // txLookupPrefix is 'l'
+	log.Info("🔍 Phase 1: Scanning txLookup data", "prefix", "txLookupPrefix", "prefixHex", fmt.Sprintf("%x", txLookupPrefix))
+
+	// Create iterator specifically for txLookupPrefix
+	it := sourceDB.NewIterator(txLookupPrefix, nil)
 	defer it.Release()
 
 	for it.Next() {
@@ -2059,70 +2060,31 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 		copy(key, it.Key())
 		copy(value, it.Value())
 		kvSize := len(key) + len(value)
-		batchSize += kvSize
-		chainStat.Add(kvSize)
+		totalScanned++
 
-		// put the key into the state, snap, or index database and delete from chaindb
-		category := categorizeDataByKey(key, value)
-		switch category {
-		case "state":
-			stateBatch.Put(key, value)
-			chainBatch.Delete(key)
-			stateStat.Add(kvSize)
-			stats.Add(category, len(key), len(value))
-		case "snapshot":
-			snapBatch.Put(key, value)
-			chainBatch.Delete(key)
-			snapStat.Add(kvSize)
-			stats.Add(category, len(key), len(value))
-		case "txindex":
+		// Verify this is actually a txLookup key (safety check)
+		if len(key) == (1+common.HashLength) && bytes.HasPrefix(key, txLookupPrefix) {
 			indexBatch.Put(key, value)
-			chainBatch.Delete(key)
 			indexStat.Add(kvSize)
-			stats.Add(category, len(key), len(value))
+			batchSize += kvSize
+			stats.Add("txindex", len(key), len(value))
+			txLookupCount++
+
+			// Note: We do NOT delete from source database - keeping original data intact
 		}
 
-		// flush the batch if it's too large
+		// flush the txIndex batch if it's too large
 		if batchSize >= 256*1024*1024 {
-			log.Info("sending batches to async thread pool...", "chain count", chainStat.count, "chain size", chainStat.size,
-				"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
-				"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
+			log.Info("sending txIndex batch to async thread pool...",
+				"index count", indexStat.count, "index size", indexStat.size)
 
-			// Send other batches to async writers
-			if stateBatch.ValueSize() > 0 {
-				select {
-				case writeRequestChannel <- BatchWriteRequest{BatchType: "state", Batch: stateBatch}:
-					stateBatch = stateDB.NewBatch()
-				case err := <-errorChannel:
-					return fmt.Errorf("async write error during state batch processing: %v", err)
-				}
-			}
-
-			if snapBatch.ValueSize() > 0 {
-				select {
-				case writeRequestChannel <- BatchWriteRequest{BatchType: "snap", Batch: snapBatch}:
-					snapBatch = snapDB.NewBatch()
-				case err := <-errorChannel:
-					return fmt.Errorf("async write error during snap batch processing: %v", err)
-				}
-			}
-
+			// Send txIndex batch to async writer (only txIndex processing)
 			if indexBatch.ValueSize() > 0 {
 				select {
 				case writeRequestChannel <- BatchWriteRequest{BatchType: "index", Batch: indexBatch}:
 					indexBatch = indexDB.NewBatch()
 				case err := <-errorChannel:
-					return fmt.Errorf("async write error during index batch processing: %v", err)
-				}
-			}
-
-			// save first, then delete
-			if chainBatch.ValueSize() > 0 {
-				select {
-				case writeRequestChannel <- BatchWriteRequest{BatchType: "chain", Batch: chainBatch}:
-					chainBatch = chainDB.NewBatch()
-				case err := <-errorChannel:
-					return fmt.Errorf("async write error during chain batch processing: %v", err)
+					return fmt.Errorf("async write error during txIndex batch processing: %v", err)
 				}
 			}
 
@@ -2143,24 +2105,41 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 		return fmt.Errorf("iterator error: %v", err)
 	}
 
-	// flush the remaining kvs (same as traverseAndMigrateWithSharding)
-	if batchSize > 0 {
-		log.Info("sending remaining batches to async thread pool...", "chain count", chainStat.count, "chain size", chainStat.size,
-			"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
-			"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
+	log.Info("✅ Phase 1 completed", "txLookupScanned", totalScanned, "txLookupExtracted", txLookupCount)
 
-		// Send remaining batches to async writers
-		if stateBatch.ValueSize() > 0 {
-			writeRequestChannel <- BatchWriteRequest{BatchType: "state", Batch: stateBatch}
+	// Step 2: Extract txindex metadata (TransactionIndexTail, etc.)
+	log.Info("🔍 Phase 2: Scanning txIndex metadata", "types", "TransactionIndexTail")
+
+	txIndexMetadataKeys := []string{
+		"TransactionIndexTail", // txIndexTailKey - tracks the oldest indexed block
+	}
+
+	for _, metaKey := range txIndexMetadataKeys {
+		if data, err := sourceDB.Get([]byte(metaKey)); err == nil && data != nil {
+			indexBatch.Put([]byte(metaKey), data)
+			kvSize := len(metaKey) + len(data)
+			indexStat.Add(kvSize)
+			batchSize += kvSize
+			stats.Add("txindex", len(metaKey), len(data))
+			metadataCount++
+
+			log.Info("📋 Extracted txIndex metadata", "key", metaKey, "valueSize", len(data))
+			// Note: We do NOT delete from source database - keeping original data intact
+		} else if err != nil {
+			log.Debug("txIndex metadata key not found (this may be normal)", "key", metaKey, "error", err)
 		}
-		if snapBatch.ValueSize() > 0 {
-			writeRequestChannel <- BatchWriteRequest{BatchType: "snap", Batch: snapBatch}
-		}
+	}
+
+	log.Info("✅ Phase 2 completed", "metadataExtracted", metadataCount)
+
+	// flush the remaining txIndex batch
+	if batchSize > 0 {
+		log.Info("sending remaining txIndex batch to async thread pool...",
+			"index count", indexStat.count, "index size", indexStat.size)
+
+		// Send remaining txIndex batch to async writer (only txIndex)
 		if indexBatch.ValueSize() > 0 {
 			writeRequestChannel <- BatchWriteRequest{BatchType: "index", Batch: indexBatch}
-		}
-		if chainBatch.ValueSize() > 0 {
-			writeRequestChannel <- BatchWriteRequest{BatchType: "chain", Batch: chainBatch}
 		}
 	}
 
@@ -2179,11 +2158,13 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 		}
 	}
 
-	log.Info("✅ Multi-threaded async data extraction completed",
-		"chain count", chainStat.count, "chain size", chainStat.size,
-		"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
-		"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size,
-		"threadsUsed", fmt.Sprintf("%d (1 reader + %d unified writers)", threadPoolSize+1, threadPoolSize))
+	log.Info("✅ TX index data extraction completed",
+		"txLookupData", txLookupCount, "metadata", metadataCount,
+		"totalTxIndex", indexStat.count, "totalSize", indexStat.size,
+		"operation", "txLookupPrefix_scanning + metadata_extraction",
+		"originalDataIntact", "true (no deletions performed)",
+		"phases", "2 (txLookup data + metadata)",
+		"threadsUsed", fmt.Sprintf("%d (1 reader + %d txIndex writers)", threadPoolSize+1, threadPoolSize))
 	return nil
 }
 
