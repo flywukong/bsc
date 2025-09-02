@@ -2003,7 +2003,7 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 
 	// Channel buffer sizes - focused on txIndex extraction
 	const channelBufferSize = 10
-	const threadPoolSize = 3
+	const threadPoolSize = 2
 
 	// Create unified channel for write requests (txIndex only)
 	writeRequestChannel := make(chan BatchWriteRequest, channelBufferSize)
