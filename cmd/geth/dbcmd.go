@@ -2146,7 +2146,7 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 			batchSize = 0
 		}
 		// Force GC every 100k processed items to prevent memory accumulation
-		if processedCount%100000 == 0 {
+		if processedCount%1000000 == 0 {
 			start := time.Now()
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
@@ -2935,7 +2935,9 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 		indexStat  = &stat{}
 	)
 
+	processedCount := 0
 	for it.Next() {
+		processedCount++
 		key := make([]byte, len(it.Key()))
 		value := make([]byte, len(it.Value()))
 		copy(key, it.Key())
@@ -2980,6 +2982,24 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 			batchSize = 0
 		}
 
+		// Force GC every 100k processed items to prevent memory accumulation
+		if processedCount%1000000 == 0 {
+			start := time.Now()
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			currentMemMB := m.Alloc / (1024 * 1024)
+
+			runtime.GC()
+
+			runtime.ReadMemStats(&m)
+			afterGCMemMB := m.Alloc / (1024 * 1024)
+
+			log.Info("🧠 Memory monitoring & GC",
+				"processed", processedCount,
+				"beforeGC_MB", currentMemMB,
+				"afterGC_MB", afterGCMemMB,
+				"duration", time.Since(start))
+		}
 		// Check for errors periodically
 		select {
 		case err := <-errorChannel:
