@@ -2004,7 +2004,7 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 
 	// Channel buffer sizes - focused on snapshot extraction
 	const channelBufferSize = 4
-	const threadPoolSize = 1
+	const threadPoolSize = 2
 
 	// Create unified channel for write requests (snapshot only)
 	writeRequestChannel := make(chan BatchWriteRequest, channelBufferSize)
