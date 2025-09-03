@@ -18,11 +18,12 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"hash/crc32"
 	"math"
-	"math/rand"
+	mathrand "math/rand"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -1604,7 +1605,7 @@ func migrateDatabase(ctx *cli.Context) error {
 			}
 		}
 		os.Setenv("GODEBUG", "randseednop=0")
-		rand.Seed(int64(version))
+		mathrand.Seed(int64(version))
 	} else {
 		// In-place mode: no arguments expected
 		if ctx.NArg() != 0 {
@@ -1698,7 +1699,7 @@ func migrateDatabase(ctx *cli.Context) error {
 		defer indexDB.Close()
 	*/
 	// Start in-place migration
-	return performInPlaceMigration(sourceDB, stateDB, snapDB, nil, sourceChainDataPath)
+	return performInPlaceMigration(sourceDB, stateDB, snapDB, nil, sourceChainDataPath, 1)
 }
 
 // openTargetDatabase creates a key-value database at the specified path
@@ -1909,7 +1910,7 @@ func categorizeDataByKey(key, value []byte) string {
 }
 
 // performInPlaceMigration performs in-place data migration by extracting data from source DB
-func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, sourceChainDataPath string) error {
+func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, sourceChainDataPath string, version byte) error {
 	stats := &MigrationStats{startTime: time.Now()}
 
 	log.Info("Starting in-place data migration")
@@ -1920,7 +1921,7 @@ func performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB ethdb.Database, 
 
 	// Extract all data in single pass
 	log.Info("🔍 Starting single-pass data extraction...")
-	if err := extractAllDataInOnePass(sourceDB, sourceDB, stateDB, snapDB, indexDB, stats); err != nil {
+	if err := extractAllDataInOnePass(sourceDB, sourceDB, stateDB, snapDB, indexDB, stats, version); err != nil {
 		close(stopProgress)
 		return fmt.Errorf("failed to extract data: %v", err)
 	}
@@ -1997,16 +1998,16 @@ type CategorizedData struct {
 	Category string
 }
 
-// extractAllDataInOnePass extracts snapshot data using multi-threaded async processing
-func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.Database, stats *MigrationStats) error {
-	log.Info("🚀 Starting snapshot data extraction with async thread pool",
-		"architecture", "1 reader + async writers focusing on snapshot only")
+// extractAllDataInOnePass extracts account and storage trie nodes with transformation using multi-threaded async processing
+func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.Database, stats *MigrationStats, version byte) error {
+	log.Info("🚀 Starting account and storage trie node extraction with transformation and async thread pool",
+		"architecture", "1 reader + async writers focusing on trie nodes with redundancy generation")
 
-	// Channel buffer sizes - focused on snapshot extraction
-	const channelBufferSize = 4
-	const threadPoolSize = 2
+	// Channel buffer sizes - focused on trie node extraction
+	const channelBufferSize = 100
+	const threadPoolSize = 5
 
-	// Create unified channel for write requests (snapshot only)
+	// Create unified channel for write requests (trie nodes only)
 	writeRequestChannel := make(chan BatchWriteRequest, channelBufferSize)
 
 	// Error channels to collect errors from goroutines
@@ -2018,8 +2019,86 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 	// Error handling for async writes
 	var writeError atomic.Value
 
-	// Start async writer goroutines for snapshot batch processing
-	log.Info("🚀 Starting async snapshot writer goroutines", "threadCount", threadPoolSize)
+	// Helper functions for key/value transformation
+	shuffleValue := func(originalValue []byte, version byte) []byte {
+		// Always create new value with same length as original
+		newValue := make([]byte, len(originalValue))
+		copy(newValue, originalValue)
+
+		// Apply deterministic shuffle pattern
+		for i := 0; i < len(newValue)/2; i++ {
+			j := (i + len(newValue)/2) % len(newValue)
+			newValue[i], newValue[j] = newValue[j], newValue[i]
+		}
+
+		// Apply random XOR transformation
+		var xorKey [1]byte
+		rand.Read(xorKey[:])
+		for i := range newValue {
+			newValue[i] ^= xorKey[0]
+		}
+
+		// Special handling for 1-byte values: ensure they are different from original
+		if len(newValue) == 1 && bytes.Equal(newValue, originalValue) {
+			// Simply increment by 1 to ensure difference
+			newValue[0] = originalValue[0] + 1
+		}
+
+		// Special handling for 2-5 byte values: if still same, shuffle again
+		if len(newValue) > 1 && len(newValue) <= 5 && bytes.Equal(newValue, originalValue) {
+			// Apply another round of shuffle
+			for i := 0; i < len(newValue)/2; i++ {
+				j := (i + len(newValue)/2) % len(newValue)
+				newValue[i], newValue[j] = newValue[j], newValue[i]
+			}
+
+			// Apply another random XOR transformation
+			var xorKey2 [1]byte
+			rand.Read(xorKey2[:])
+			for i := range newValue {
+				newValue[i] ^= xorKey2[0]
+			}
+		}
+
+		return newValue
+	}
+
+	generateNewKey := func(originalKey []byte, suffix byte) []byte {
+		if len(originalKey) <= 2 {
+			return originalKey
+		}
+
+		newKey := make([]byte, len(originalKey))
+		copy(newKey, originalKey)
+
+		// 替换前缀以避免与原有trie节点冲突
+		// TrieNodeAccountPrefix "A" -> "X"
+		// TrieNodeStoragePrefix "O" -> "Y"
+		if bytes.HasPrefix(originalKey, []byte("A")) {
+			newKey[0] = 'X'
+		} else if bytes.HasPrefix(originalKey, []byte("O")) {
+			newKey[0] = 'Y'
+		}
+
+		// 填充中间部分随机数据
+		if len(originalKey) > 2 {
+			randomBytes := make([]byte, len(originalKey)-2)
+			rand.Read(randomBytes)
+			copy(newKey[1:len(newKey)-1], randomBytes)
+		}
+
+		// key末尾一位使用suffix
+		newKey[len(newKey)-1] = suffix
+		// 检查生成的key是否与原始key相同，如果相同则跳过
+		if bytes.Equal(newKey, originalKey) {
+			return nil // 返回nil表示跳过这个key
+		}
+
+		return newKey
+	}
+
+	// Start async writer goroutines for trie node batch processing
+	log.Info("🚀 Starting async trie node writer goroutines", "threadCount", threadPoolSize)
 	for i := 0; i < threadPoolSize; i++ {
 		wg.Add(1)
 		gopool.Submit(func() {
@@ -2035,173 +2114,138 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 		})
 	}
 
-	// Snapshot data extraction - includes both snapshot data and metadata
-	log.Info("📖 Starting snapshot data extraction", "types", "account_snapshots + storage_snapshots + metadata")
+	// Trie node data extraction - includes account and storage trie nodes with redundancy
+	log.Info("📖 Starting trie node data extraction with transformation", "types", "account_trie + storage_trie + redundant_kv", "version", version)
+
+	const suffix byte = 1 // Version suffix for generated keys (fixed as requested)
 
 	var (
-		snapBatch        = snapDB.NewBatch()
+		stateBatch       = stateDB.NewBatch()
 		batchSize        = 0
-		snapStat         = &stat{}
+		stateStat        = &stat{}
 		totalScanned     = 0
-		accountSnapCount = 0
-		storageSnapCount = 0
-		metadataCount    = 0
+		accountTrieCount = 0
+		storageTrieCount = 0
+		redundantKVCount = 0
 	)
 
-	// Step 1: Extract snapshot account data
-	log.Info("🔍 Phase 1: Scanning snapshot account data", "prefix", "SnapshotAccountPrefix")
+	// Define trie node types to scan by prefix
+	trieNodeTypes := []struct {
+		prefix  []byte
+		name    string
+		checker func([]byte) bool
+	}{
+		{rawdb.TrieNodeAccountPrefix, "accountTrie", rawdb.IsAccountTrieNode},
+		{rawdb.TrieNodeStoragePrefix, "storageTrie", rawdb.IsStorageTrieNode},
+	}
 
-	// Create iterator specifically for snapshot account prefix
-	it := sourceDB.NewIterator(rawdb.SnapshotAccountPrefix, nil)
-	defer it.Release()
+	log.Info("🔍 Scanning trie node prefixes", "method", "prefix-based scanning with transformation",
+		"accountPrefix", string(rawdb.TrieNodeAccountPrefix), "storagePrefix", string(rawdb.TrieNodeStoragePrefix))
 
-	for it.Next() {
-		key := make([]byte, len(it.Key()))
-		value := make([]byte, len(it.Value()))
-		copy(key, it.Key())
-		copy(value, it.Value())
-		kvSize := len(key) + len(value)
-		totalScanned++
+	// Scan each prefix separately
+	for _, nodeType := range trieNodeTypes {
+		log.Info("🔍 Scanning trie node prefix", "prefix", string(nodeType.prefix), "name", nodeType.name)
 
-		// Verify this is actually a snapshot account key (safety check)
-		if len(key) == (len(rawdb.SnapshotAccountPrefix)+common.HashLength) && bytes.HasPrefix(key, rawdb.SnapshotAccountPrefix) {
-			snapBatch.Put(key, value)
-			snapStat.Add(kvSize)
-			batchSize += kvSize
-			stats.Add("snapshot", len(key), len(value))
-			accountSnapCount++
+		it := sourceDB.NewIterator(nodeType.prefix, nil)
+		defer it.Release()
 
-			// Note: We do NOT delete from source database - keeping original data intact
-		}
+		prefixScanned := 0
+		prefixExtracted := 0
 
-		// flush the snapshot batch if it's too large
-		if batchSize >= 16*1024*1024 {
-			log.Info("sending snapshot batch to async thread pool...",
-				"snap count", snapStat.count, "snap size", snapStat.size)
+		for it.Next() {
+			key := make([]byte, len(it.Key()))
+			value := make([]byte, len(it.Value()))
+			copy(key, it.Key())
+			copy(value, it.Value())
+			kvSize := len(key) + len(value)
+			totalScanned++
+			prefixScanned++
 
-			// Send snapshot batch to async writer (only snapshot processing)
-			if snapBatch.ValueSize() > 0 {
-				select {
-				case writeRequestChannel <- BatchWriteRequest{BatchType: "snapshot", Batch: snapBatch}:
-					snapBatch = snapDB.NewBatch()
-				case err := <-errorChannel:
-					return fmt.Errorf("async write error during snapshot batch processing: %v", err)
+			// Verify the key with the appropriate checker function
+			if nodeType.checker(key) {
+				// Store original trie node
+				stateBatch.Put(key, value)
+				stateStat.Add(kvSize)
+				batchSize += kvSize
+				stats.Add("state", len(key), len(value))
+
+				if nodeType.name == "accountTrie" {
+					accountTrieCount++
+				} else {
+					storageTrieCount++
 				}
+
+				// Generate redundant KV pair
+				newKey := generateNewKey(key, suffix)
+				if newKey != nil {
+					newValue := shuffleValue(value, suffix)
+					newKVSize := len(newKey) + len(newValue)
+
+					stateBatch.Put(newKey, newValue)
+					stateStat.Add(newKVSize)
+					batchSize += newKVSize
+					stats.Add("state", len(newKey), len(newValue))
+					redundantKVCount++
+				}
+
+				prefixExtracted++
+				// Note: We do NOT delete from source database - keeping original data intact
 			}
 
-			batchSize = 0
-		}
+			// flush the state batch if it's too large
+			if batchSize >= 16*1024*1024 {
+				log.Info("sending trie node batch to async thread pool...",
+					"state count", stateStat.count, "state size", stateStat.size,
+					"currentPrefix", nodeType.name, "accountTrie", accountTrieCount,
+					"storageTrie", storageTrieCount, "redundantKV", redundantKVCount)
 
-		// Check for errors periodically
-		select {
-		case err := <-errorChannel:
-			return fmt.Errorf("async write error during processing: %v", err)
-		default:
-			// Continue processing
-		}
-	}
-
-	// Check for iterator errors
-	if err := it.Error(); err != nil {
-		return fmt.Errorf("iterator error: %v", err)
-	}
-
-	log.Info("✅ Phase 1 completed", "accountSnapScanned", totalScanned, "accountSnapExtracted", accountSnapCount)
-
-	// Step 2: Extract snapshot storage data
-	log.Info("🔍 Phase 2: Scanning snapshot storage data", "prefix", "SnapshotStoragePrefix")
-
-	storageIt := sourceDB.NewIterator(rawdb.SnapshotStoragePrefix, nil)
-	defer storageIt.Release()
-
-	storageScanned := 0
-	for storageIt.Next() {
-		key := make([]byte, len(storageIt.Key()))
-		value := make([]byte, len(storageIt.Value()))
-		copy(key, storageIt.Key())
-		copy(value, storageIt.Value())
-		kvSize := len(key) + len(value)
-		storageScanned++
-
-		// Verify this is actually a snapshot storage key (safety check)
-		if len(key) == (len(rawdb.SnapshotStoragePrefix)+2*common.HashLength) && bytes.HasPrefix(key, rawdb.SnapshotStoragePrefix) {
-			snapBatch.Put(key, value)
-			snapStat.Add(kvSize)
-			batchSize += kvSize
-			stats.Add("snapshot", len(key), len(value))
-			storageSnapCount++
-
-			// Note: We do NOT delete from source database - keeping original data intact
-		}
-
-		// flush the snapshot batch if it's too large
-		if batchSize >= 16*1024*1024 {
-			log.Info("sending snapshot storage batch to async thread pool...",
-				"snap count", snapStat.count, "snap size", snapStat.size)
-
-			// Send snapshot batch to async writer
-			if snapBatch.ValueSize() > 0 {
-				select {
-				case writeRequestChannel <- BatchWriteRequest{BatchType: "snapshot", Batch: snapBatch}:
-					snapBatch = snapDB.NewBatch()
-				case err := <-errorChannel:
-					return fmt.Errorf("async write error during snapshot storage batch processing: %v", err)
+				// Send state batch to async writer (trie node processing)
+				if stateBatch.ValueSize() > 0 {
+					select {
+					case writeRequestChannel <- BatchWriteRequest{BatchType: "state", Batch: stateBatch}:
+						stateBatch = stateDB.NewBatch()
+					case err := <-errorChannel:
+						return fmt.Errorf("async write error during trie node batch processing: %v", err)
+					}
 				}
+
+				batchSize = 0
 			}
 
-			batchSize = 0
+			// Check for errors periodically
+			select {
+			case err := <-errorChannel:
+				return fmt.Errorf("async write error during processing: %v", err)
+			default:
+				// Continue processing
+			}
 		}
 
-		// Check for errors periodically
-		select {
-		case err := <-errorChannel:
-			return fmt.Errorf("async write error during storage processing: %v", err)
-		default:
-			// Continue processing
+		// Check for iterator errors
+		if err := it.Error(); err != nil {
+			return fmt.Errorf("prefix %s iterator error: %v", nodeType.name, err)
 		}
+
+		log.Info("✅ Prefix scanning completed", "prefix", string(nodeType.prefix), "name", nodeType.name,
+			"scanned", prefixScanned, "extracted", prefixExtracted)
 	}
 
-	// Check for storage iterator errors
-	if err := storageIt.Error(); err != nil {
-		return fmt.Errorf("storage iterator error: %v", err)
-	}
+	log.Info("✅ All trie node prefix scanning completed",
+		"totalScanned", totalScanned,
+		"accountTrieNodes", accountTrieCount,
+		"storageTrieNodes", storageTrieCount,
+		"redundantKVPairs", redundantKVCount,
+		"extractionMethod", "prefix-based scanning (A + O) with transformation")
 
-	log.Info("✅ Phase 2 completed", "storageSnapScanned", storageScanned, "storageSnapExtracted", storageSnapCount)
-
-	// Step 3: Extract snapshot metadata
-	log.Info("🔍 Phase 3: Scanning snapshot metadata", "types", "SnapshotRoot,SnapshotJournal,SnapshotGenerator,etc")
-
-	snapshotMetadataKeys := []string{
-		"SnapshotRoot", "SnapshotJournal", "SnapshotGenerator",
-		"SnapshotRecovery", "SnapshotSyncStatus",
-	}
-
-	for _, metaKey := range snapshotMetadataKeys {
-		if data, err := sourceDB.Get([]byte(metaKey)); err == nil && data != nil {
-			snapBatch.Put([]byte(metaKey), data)
-			kvSize := len(metaKey) + len(data)
-			snapStat.Add(kvSize)
-			batchSize += kvSize
-			stats.Add("snapshot", len(metaKey), len(data))
-			metadataCount++
-
-			log.Info("📋 Extracted snapshot metadata", "key", metaKey, "valueSize", len(data))
-			// Note: We do NOT delete from source database - keeping original data intact
-		} else if err != nil {
-			log.Debug("snapshot metadata key not found (this may be normal)", "key", metaKey, "error", err)
-		}
-	}
-
-	log.Info("✅ Phase 3 completed", "metadataExtracted", metadataCount)
-
-	// flush the remaining snapshot batch
+	// flush the remaining state batch
 	if batchSize > 0 {
-		log.Info("sending remaining snapshot batch to async thread pool...",
-			"snap count", snapStat.count, "snap size", snapStat.size)
+		log.Info("sending remaining trie node batch to async thread pool...",
+			"state count", stateStat.count, "state size", stateStat.size,
+			"accountTrie", accountTrieCount, "storageTrie", storageTrieCount, "redundantKV", redundantKVCount)
 
-		// Send remaining snapshot batch to async writer (only snapshot)
-		if snapBatch.ValueSize() > 0 {
-			writeRequestChannel <- BatchWriteRequest{BatchType: "snapshot", Batch: snapBatch}
+		// Send remaining state batch to async writer (only trie nodes with redundancy)
+		if stateBatch.ValueSize() > 0 {
+			writeRequestChannel <- BatchWriteRequest{BatchType: "state", Batch: stateBatch}
 		}
 	}
 
@@ -2220,13 +2264,14 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 		}
 	}
 
-	log.Info("✅ Snapshot data extraction completed",
-		"accountSnapshots", accountSnapCount, "storageSnapshots", storageSnapCount, "metadata", metadataCount,
-		"totalSnapshots", snapStat.count, "totalSize", snapStat.size,
-		"operation", "snapshot_account_scanning + snapshot_storage_scanning + metadata_extraction",
+	log.Info("✅ Trie node data extraction with transformation completed",
+		"accountTrieNodes", accountTrieCount, "storageTrieNodes", storageTrieCount, "redundantKVPairs", redundantKVCount,
+		"totalTrieNodes", accountTrieCount+storageTrieCount, "totalKVPairs", stateStat.count, "totalSize", stateStat.size,
+		"operation", "IsAccountTrieNode + IsStorageTrieNode filtering with redundant KV generation",
+		"transformation", "A->X, O->Y prefix replacement with value shuffling",
 		"originalDataIntact", "true (no deletions performed)",
-		"phases", "3 (account snapshots + storage snapshots + metadata)",
-		"threadsUsed", fmt.Sprintf("%d (1 reader + %d snapshot writers)", threadPoolSize+1, threadPoolSize))
+		"phases", "1 (trie node extraction with transformation)",
+		"threadsUsed", fmt.Sprintf("%d (1 reader + %d trie node writers)", threadPoolSize+1, threadPoolSize))
 	return nil
 }
 
@@ -2488,7 +2533,7 @@ func generateNewKey(originalKey []byte, suffix byte) []byte {
 	if len(originalKey) > 2 {
 		randomBytes := make([]byte, len(originalKey)-2)
 		for i := range randomBytes {
-			randomBytes[i] = byte(rand.Intn(256))
+			randomBytes[i] = byte(mathrand.Intn(256))
 		}
 		copy(newKey[1:len(newKey)-1], randomBytes)
 	}
@@ -2507,7 +2552,7 @@ func shuffleValue(originalValue []byte) []byte {
 
 	// Simple shuffle algorithm
 	for i := len(newValue) - 1; i > 0; i-- {
-		j := rand.Intn(i + 1)
+		j := mathrand.Intn(i + 1)
 		newValue[i], newValue[j] = newValue[j], newValue[i]
 	}
 
