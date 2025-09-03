@@ -3270,11 +3270,12 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 
 func deleteSnapshotData(db ethdb.Database) error {
 	var (
-		batch  = db.NewBatch()
-		start  = time.Now()
-		logged = time.Now()
-		count  int64
-		size   common.StorageSize
+		batch     = db.NewBatch()
+		start     = time.Now()
+		logged    = time.Now()
+		count     int64
+		size      common.StorageSize
+		batchSize = 0
 	)
 
 	prefixesToDelete := []struct {
@@ -3293,6 +3294,7 @@ func deleteSnapshotData(db ethdb.Database) error {
 			key := make([]byte, len(it.Key()))
 			copy(key, it.Key())
 			size += common.StorageSize(len(key) + len(it.Value()))
+			batchSize += len(key) + len(it.Value())
 			if bytes.HasPrefix(key, rawdb.SnapshotAccountPrefix) && len(key) == (len(rawdb.SnapshotAccountPrefix)+common.HashLength) {
 				if err := batch.Delete(key); err != nil {
 					it.Release()
@@ -3306,12 +3308,13 @@ func deleteSnapshotData(db ethdb.Database) error {
 				}
 			}
 
-			if batch.ValueSize() > 256*1024*1024 {
+			if batchSize > 256*1024*1024 {
 				if err := batch.Write(); err != nil {
 					it.Release()
 					return err
 				}
 				batch.Reset()
+				batchSize = 0
 			}
 
 			count++
@@ -3356,6 +3359,7 @@ func deleteTxIndexData(db ethdb.Database) error {
 		logged         = time.Now()
 		count          int64
 		size           common.StorageSize
+		batchSize      = 0
 		txLookupPrefix = []byte("l")
 	)
 
@@ -3367,18 +3371,20 @@ func deleteTxIndexData(db ethdb.Database) error {
 		key := make([]byte, len(it.Key()))
 		copy(key, it.Key())
 		size += common.StorageSize(len(key) + len(it.Value()))
+		batchSize += len(key) + len(it.Value())
 		if bytes.HasPrefix(key, txLookupPrefix) && len(key) == (1+common.HashLength) { // txLookupPrefix
 			if err := batch.Delete(key); err != nil {
 				it.Release()
 				return err
 			}
 		}
-		if batch.ValueSize() > 256*1024*1024 {
+		if batchSize > 256*1024*1024 {
 			if err := batch.Write(); err != nil {
 				it.Release()
 				return err
 			}
 			batch.Reset()
+			batchSize = 0
 		}
 
 		count++
