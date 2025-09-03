@@ -57,8 +57,8 @@ type PerfConfig struct {
 	Seed        int64         // Random seed (0 for random)
 	MetricsAddr string
 	MetricsPort int
-	CacheSize   int // Database cache size in MB
-	Handles     int // Number of file descriptor handles
+	CacheSize   int  // Database cache size in MB
+	Handles     int  // Number of file descriptor handles
 	ShardingDB  bool // Enable sharding database mode
 }
 
@@ -91,8 +91,8 @@ type PerfRunner struct {
 	db       ethdb.Database // Benchmark database for read/write/update operations
 	config   PerfConfig
 	taskChan chan *Task
-	ctx      *cli.Context   // CLI context for database operations
-	stack    *node.Node     // Node stack for database
+	ctx      *cli.Context // CLI context for database operations
+	stack    *node.Node   // Node stack for database
 
 	// Statistics
 	blockHeight     uint64
@@ -1199,8 +1199,6 @@ func (r *PerfRunner) resetCounters() {
 	r.lastUpdateSize = 0
 }
 
-
-
 // makeConfigNode creates a simplified node configuration for database access
 func makeConfigNode(ctx *cli.Context, benchDBPath string) (*node.Node, error) {
 	// Create a completely clean configuration to avoid any default interference
@@ -1214,7 +1212,7 @@ func makeConfigNode(ctx *cli.Context, benchDBPath string) (*node.Node, error) {
 		WSHost:    node.DefaultConfig.WSHost,
 		LogConfig: node.DefaultConfig.LogConfig,
 		// Enable sharding support if needed - copy default storage config
-		Storage: node.DefaultConfig.Storage,
+		Storage:        node.DefaultConfig.Storage,
 		EnableSharding: true, // Enable sharding capability
 	}
 
