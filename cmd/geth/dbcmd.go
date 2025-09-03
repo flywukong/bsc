@@ -2984,7 +2984,7 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 	// Create channels and synchronization structures for async processing
 	const (
 		threadPoolSize    = 40
-		channelBufferSize = 1200
+		channelBufferSize = 2000
 	)
 
 	writeRequestChannel := make(chan BatchWriteRequest, channelBufferSize)
@@ -3029,38 +3029,7 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 		kvSize := len(key) + len(value)
 		batchSize += kvSize
 		chainStat.Add(kvSize)
-
-		// put the key into the state, snap, or index database and delete from chaindb
-		category := categorizeDataByKey(key, value)
-		switch category {
-		case "state":
-			// Check if this is X or Y prefixed key and if we have sharding enabled
-			if isShardingDB && len(key) > 0 && (key[0] == 'X' || key[0] == 'Y') {
-				// Distribute X and Y prefixed keys evenly across shards
-				shardIndex := calculateXYShardIndex(key, shardNum)
-				shardBatches[shardIndex].Put(key, value)
-
-				// Update statistics for X/Y prefix keys
-				prefix := string(key[0])
-				shardXYStats[shardIndex][prefix]++
-				shardXYStats[shardIndex]["total"]++
-
-				log.Debug("Distributed X/Y key to shard", "prefix", prefix, "shardIndex", shardIndex, "keyHex", fmt.Sprintf("%x", key[:min(8, len(key))]))
-			} else {
-				// Use regular state batch for other state keys
-				stateBatch.Put(key, value)
-			}
-			chainBatch.Delete(key)
-			stateStat.Add(kvSize)
-		case "snapshot":
-			snapBatch.Put(key, value)
-			chainBatch.Delete(key)
-			snapStat.Add(kvSize)
-		case "txindex":
-			indexBatch.Put(key, value)
-			chainBatch.Delete(key)
-			indexStat.Add(kvSize)
-		}
+		stateBatch.Put(key, value)
 
 		// flush the batch if it's too large
 		if batchSize >= 256*1024*1024 {
