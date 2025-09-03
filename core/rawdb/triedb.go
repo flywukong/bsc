@@ -151,6 +151,15 @@ func ShardIndexInTrieDB(key []byte, shardNum int) int {
 	if len(key) < 1 {
 		return 0
 	}
+	if (key[0] == TrieNodeAccountPrefix[0] || key[0] == TrieNodeStoragePrefix[0]) &&
+		(!IsAccountTrieNode(key) && !IsStorageTrieNode(key)) {
+		if len(key) < 2 {
+			return 0
+		}
+		// Use CRC32 hash of the key (excluding the first byte prefix) to determine shard
+		hash := crc32.ChecksumIEEE(key[1:])
+		return int(hash) % shardNum
+	}
 	if key[0] == 'X' || key[0] == 'Y' {
 		if len(key) < 2 {
 			return 0
