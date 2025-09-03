@@ -337,6 +337,7 @@ of ancientStore, will also displays the reserved number of blocks in ancientStor
 			utils.CacheFlag,
 			utils.CacheDatabaseFlag,
 			utils.ExpandModeFlag,
+			utils.DeleteSnapIndexFlag,
 		}, utils.NetworkFlags),
 		Description: `This command migrates a single chaindb database to multi-database format.
 
@@ -1592,6 +1593,7 @@ func migrateDatabase(ctx *cli.Context) error {
 
 	// Parse arguments based on expand mode
 	expandMode := ctx.Bool(utils.ExpandModeFlag.Name)
+	deleteSnapIndex := ctx.Bool(utils.DeleteSnapIndexFlag.Name)
 
 	if expandMode {
 		// Expand mode: expect [target-datadir] [version]
@@ -1618,6 +1620,13 @@ func migrateDatabase(ctx *cli.Context) error {
 		}
 		os.Setenv("GODEBUG", "randseednop=0")
 		rand.Seed(int64(version))
+	} else if deleteSnapIndex {
+		log.Info("migrateDatabase with deleting snap and index data")
+		if err := migrateDBWithDeletingSnapIndex(ctx); err != nil {
+			log.Error("failed to migrate database with deleting snap and index data", "error", err)
+			return err
+		}
+		return nil
 	} else {
 		// In-place mode: no arguments expected
 		if ctx.NArg() != 0 {
@@ -1711,6 +1720,79 @@ func migrateDatabase(ctx *cli.Context) error {
 
 	// Start in-place migration
 	return performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB, sourceChainDataPath)
+}
+
+func migrateDBWithDeletingSnapIndex(ctx *cli.Context) error {
+	cacheSize := ctx.Int(utils.CacheFlag.Name)
+	cacheDB := ctx.Int(utils.CacheDatabaseFlag.Name)
+	// Create source stack using standard geth configuration (handles --datadir)
+	sourceStack, _ := makeConfigNode(ctx)
+	defer sourceStack.Close()
+
+	// Get source database path
+	sourceChainDataPath := sourceStack.ResolvePath("chaindata")
+
+	log.Info("Starting in-place database migration", "source", sourceChainDataPath)
+
+	// Open source database for read/write (NOT readonly) without using the
+	// Node helper to avoid auto-opening separate state/snapshot/txindex DBs.
+	// We only need the hot key-value store for in-place extraction & deletion.
+	sourceDB, err := openTargetDatabase(sourceChainDataPath, cacheSize*cacheDB*7/100, 64)
+	if err != nil {
+		return fmt.Errorf("failed to open source chain database: %v", err)
+	}
+	defer sourceDB.Close()
+
+	// // Snapshot data - account snapshots
+	// if bytes.HasPrefix(key, rawdb.SnapshotAccountPrefix) && len(key) == (len(rawdb.SnapshotAccountPrefix)+common.HashLength) {
+	// 	return "snapshot"
+	// }
+	// // Snapshot data - storage snapshots
+	// if bytes.HasPrefix(key, rawdb.SnapshotStoragePrefix) && len(key) == (len(rawdb.SnapshotStoragePrefix)+2*common.HashLength) {
+	// 	return "snapshot"
+	// }
+
+	// // Snapshot metadata keys
+	// snapshotMetadataKeys := []string{
+	// 	"SnapshotRoot", "SnapshotJournal", "SnapshotGenerator",
+	// 	"SnapshotRecovery", "SnapshotSyncStatus",
+	// }
+	// for _, metaKey := range snapshotMetadataKeys {
+	// 	if keyStr == metaKey {
+	// 		return "snapshot"
+	// 	}
+	// }
+
+	// // Transaction index data
+	// if bytes.HasPrefix(key, []byte("l")) && len(key) == (1+common.HashLength) { // txLookupPrefix
+	// 	return "txindex"
+	// }
+
+	// // Transaction index metadata
+	// txIndexMetadataKeys := []string{
+	// 	"TransactionIndexTail", // txIndexTailKey - tracks the oldest indexed block
+	// }
+	// for _, metaKey := range txIndexMetadataKeys {
+	// 	if keyStr == metaKey {
+	// 		return "txindex"
+	// 	}
+	// }
+
+	// 删除 snapshot 数据
+	log.Info("开始删除 snapshot 数据")
+	err = deleteSnapshotData(sourceDB)
+	if err != nil {
+		return fmt.Errorf("删除 snapshot 数据失败: %v", err)
+	}
+
+	// 删除 transaction index 数据
+	log.Info("开始删除 transaction index 数据")
+	err = deleteTxIndexData(sourceDB)
+	if err != nil {
+		return fmt.Errorf("删除 transaction index 数据失败: %v", err)
+	}
+
+	return nil
 }
 
 // openTargetDatabase creates a key-value database at the specified path
@@ -3185,5 +3267,159 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 	if err := dstChainDB.GetTxIndexStore().Compact(nil, nil); err != nil {
 		return fmt.Errorf("failed to compact indexdb: %v", err)
 	}
+	return nil
+}
+
+// deleteSnapshotData 删除所有snapshot相关数据
+func deleteSnapshotData(db ethdb.Database) error {
+	var (
+		batch  = db.NewBatch()
+		start  = time.Now()
+		logged = time.Now()
+		count  int64
+		size   common.StorageSize
+	)
+
+	// 删除 snapshot 数据前缀
+	prefixesToDelete := []struct {
+		prefix []byte
+		name   string
+	}{
+		{rawdb.SnapshotAccountPrefix, "account snapshots"},
+		{rawdb.SnapshotStoragePrefix, "storage snapshots"},
+	}
+
+	// 遍历并删除前缀数据
+	for _, item := range prefixesToDelete {
+		it := db.NewIterator(item.prefix, nil)
+		log.Info("正在删除", "type", item.name, "prefix", string(item.prefix))
+
+		for it.Next() {
+			key := make([]byte, len(it.Key()))
+			copy(key, it.Key())
+			size += common.StorageSize(len(key) + len(it.Value()))
+			if bytes.HasPrefix(key, rawdb.SnapshotAccountPrefix) && len(key) == (len(rawdb.SnapshotAccountPrefix)+common.HashLength) {
+				if err := batch.Delete(key); err != nil {
+					it.Release()
+					return err
+				}
+			}
+			if bytes.HasPrefix(key, rawdb.SnapshotStoragePrefix) && len(key) == (len(rawdb.SnapshotStoragePrefix)+2*common.HashLength) {
+				if err := batch.Delete(key); err != nil {
+					it.Release()
+					return err
+				}
+			}
+
+			// 批量写入以避免内存占用过大
+			if batch.ValueSize() > 256*1024*1024 {
+				if err := batch.Write(); err != nil {
+					it.Release()
+					return err
+				}
+				batch.Reset()
+			}
+
+			count++
+			if time.Since(logged) > 8*time.Second {
+				log.Info("删除 snapshot 数据进度", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
+				logged = time.Now()
+			}
+		}
+		it.Release()
+	}
+
+	// 删除 snapshot 元数据键
+	snapshotMetadataKeys := [][]byte{
+		[]byte("SnapshotRoot"),
+		[]byte("SnapshotJournal"),
+		[]byte("SnapshotGenerator"),
+		[]byte("SnapshotRecovery"),
+		[]byte("SnapshotSyncStatus"),
+		[]byte("SnapSyncStatus"), // 从schema.go中发现的
+	}
+
+	for _, key := range snapshotMetadataKeys {
+		if err := batch.Delete(key); err != nil {
+			return err
+		}
+		count++
+	}
+
+	// 最终批量写入
+	if batch.ValueSize() > 0 {
+		if err := batch.Write(); err != nil {
+			return err
+		}
+	}
+
+	log.Info("删除 snapshot 数据完成", "total_count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
+	return nil
+}
+
+// deleteTxIndexData 删除所有transaction index相关数据
+func deleteTxIndexData(db ethdb.Database) error {
+	var (
+		batch         = db.NewBatch()
+		start         = time.Now()
+		logged        = time.Now()
+		count         int64
+		size          common.StorageSize
+		xLookupPrefix = []byte("l")
+	)
+
+	// 删除 transaction lookup 前缀数据 (txLookupPrefix = "l")
+	log.Info("正在删除transaction lookup数据", "prefix", xLookupPrefix)
+
+	// rawdb.TxLookupPrefix
+	it := db.NewIterator(xLookupPrefix, nil)
+	for it.Next() {
+		key := make([]byte, len(it.Key()))
+		copy(key, it.Key())
+		size += common.StorageSize(len(key) + len(it.Value()))
+		if bytes.HasPrefix(key, xLookupPrefix) && len(key) == (1+common.HashLength) { // txLookupPrefix
+			if err := batch.Delete(key); err != nil {
+				it.Release()
+				return err
+			}
+		}
+		// 批量写入以避免内存占用过大
+		if batch.ValueSize() > 256*1024*1024 {
+			if err := batch.Write(); err != nil {
+				it.Release()
+				return err
+			}
+			batch.Reset()
+		}
+
+		count++
+		if time.Since(logged) > 8*time.Second {
+			log.Info("删除 transaction index 数据进度", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
+			logged = time.Now()
+		}
+	}
+	it.Release()
+
+	// 删除 transaction index 元数据键
+	txIndexMetadataKeys := [][]byte{
+		[]byte("TransactionIndexTail"),       // txIndexTailKey
+		[]byte("FastTransactionLookupLimit"), // 已废弃但可能存在
+	}
+
+	for _, key := range txIndexMetadataKeys {
+		if err := batch.Delete(key); err != nil {
+			return err
+		}
+		count++
+	}
+
+	// 最终批量写入
+	if batch.ValueSize() > 0 {
+		if err := batch.Write(); err != nil {
+			return err
+		}
+	}
+
+	log.Info("删除 transaction index 数据完成", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
 	return nil
 }
