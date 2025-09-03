@@ -23,10 +23,12 @@ import (
 	"hash/crc32"
 	"math"
 	"math/rand"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -56,6 +58,8 @@ import (
 	"github.com/ethereum/go-ethereum/triedb/pathdb"
 	"github.com/olekukonko/tablewriter"
 	"github.com/urfave/cli/v2"
+
+	_ "net/http/pprof" // 导入pprof
 )
 
 var (
@@ -333,6 +337,7 @@ of ancientStore, will also displays the reserved number of blocks in ancientStor
 			utils.CacheFlag,
 			utils.CacheDatabaseFlag,
 			utils.ExpandModeFlag,
+			utils.DeleteSnapIndexFlag,
 		}, utils.NetworkFlags),
 		Description: `This command migrates a single chaindb database to multi-database format.
 
@@ -1572,6 +1577,15 @@ func inspectHistory(ctx *cli.Context) error {
 
 // migrateDatabase migrates a single database to multi-database format
 func migrateDatabase(ctx *cli.Context) error {
+	// 启动pprof HTTP服务器
+	go func() {
+		log.Info("🔍 Starting pprof server on :6060")
+		log.Info("You can access pprof at: http://localhost:6060/debug/pprof/")
+		if err := http.ListenAndServe("localhost:6060", nil); err != nil {
+			log.Error("Failed to start pprof server", "error", err)
+		}
+	}()
+
 	var (
 		targetDataDir string
 		version       byte = 1 // default version
@@ -1579,6 +1593,7 @@ func migrateDatabase(ctx *cli.Context) error {
 
 	// Parse arguments based on expand mode
 	expandMode := ctx.Bool(utils.ExpandModeFlag.Name)
+	deleteSnapIndex := ctx.Bool(utils.DeleteSnapIndexFlag.Name)
 
 	if expandMode {
 		// Expand mode: expect [target-datadir] [version]
@@ -1605,6 +1620,13 @@ func migrateDatabase(ctx *cli.Context) error {
 		}
 		os.Setenv("GODEBUG", "randseednop=0")
 		rand.Seed(int64(version))
+	} else if deleteSnapIndex {
+		log.Info("migrateDatabase with deleting snap and index data")
+		if err := migrateDBWithDeletingSnapIndex(ctx); err != nil {
+			log.Error("failed to migrate database with deleting snap and index data", "error", err)
+			return err
+		}
+		return nil
 	} else {
 		// In-place mode: no arguments expected
 		if ctx.NArg() != 0 {
@@ -1698,6 +1720,77 @@ func migrateDatabase(ctx *cli.Context) error {
 
 	// Start in-place migration
 	return performInPlaceMigration(sourceDB, stateDB, snapDB, indexDB, sourceChainDataPath)
+}
+
+func migrateDBWithDeletingSnapIndex(ctx *cli.Context) error {
+	cacheSize := ctx.Int(utils.CacheFlag.Name)
+	cacheDB := ctx.Int(utils.CacheDatabaseFlag.Name)
+	// Create source stack using standard geth configuration (handles --datadir)
+	sourceStack, _ := makeConfigNode(ctx)
+	defer sourceStack.Close()
+
+	// Get source database path
+	sourceChainDataPath := sourceStack.ResolvePath("chaindata")
+
+	log.Info("Starting in-place database migration", "source", sourceChainDataPath)
+
+	// Open source database for read/write (NOT readonly) without using the
+	// Node helper to avoid auto-opening separate state/snapshot/txindex DBs.
+	// We only need the hot key-value store for in-place extraction & deletion.
+	sourceDB, err := openTargetDatabase(sourceChainDataPath, cacheSize*cacheDB*7/100, 64)
+	if err != nil {
+		return fmt.Errorf("failed to open source chain database: %v", err)
+	}
+	defer sourceDB.Close()
+
+	// // Snapshot data - account snapshots
+	// if bytes.HasPrefix(key, rawdb.SnapshotAccountPrefix) && len(key) == (len(rawdb.SnapshotAccountPrefix)+common.HashLength) {
+	// 	return "snapshot"
+	// }
+	// // Snapshot data - storage snapshots
+	// if bytes.HasPrefix(key, rawdb.SnapshotStoragePrefix) && len(key) == (len(rawdb.SnapshotStoragePrefix)+2*common.HashLength) {
+	// 	return "snapshot"
+	// }
+
+	// // Snapshot metadata keys
+	// snapshotMetadataKeys := []string{
+	// 	"SnapshotRoot", "SnapshotJournal", "SnapshotGenerator",
+	// 	"SnapshotRecovery", "SnapshotSyncStatus",
+	// }
+	// for _, metaKey := range snapshotMetadataKeys {
+	// 	if keyStr == metaKey {
+	// 		return "snapshot"
+	// 	}
+	// }
+
+	// // Transaction index data
+	// if bytes.HasPrefix(key, []byte("l")) && len(key) == (1+common.HashLength) { // txLookupPrefix
+	// 	return "txindex"
+	// }
+
+	// // Transaction index metadata
+	// txIndexMetadataKeys := []string{
+	// 	"TransactionIndexTail", // txIndexTailKey - tracks the oldest indexed block
+	// }
+	// for _, metaKey := range txIndexMetadataKeys {
+	// 	if keyStr == metaKey {
+	// 		return "txindex"
+	// 	}
+	// }
+
+	log.Info("try to delete snapshot data")
+	err = deleteSnapshotData(sourceDB)
+	if err != nil {
+		return fmt.Errorf("failed to delete snapshot data: %v", err)
+	}
+
+	log.Info("try to delete transaction index data")
+	err = deleteTxIndexData(sourceDB)
+	if err != nil {
+		return fmt.Errorf("failed to delete transaction index data: %v", err)
+	}
+
+	return nil
 }
 
 // openTargetDatabase creates a key-value database at the specified path
@@ -1996,14 +2089,16 @@ type CategorizedData struct {
 	Category string
 }
 
+// Create channels and synchronization structures for async processing
+const (
+	threadPoolSize    = 40
+	channelBufferSize = 50
+)
+
 // extractAllDataInOnePass extracts all data types using multi-threaded async processing
 func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.Database, stats *MigrationStats) error {
 	log.Info("🚀 Starting multi-threaded async data extraction",
 		"architecture", "1 reader + 50 unified writers = 51 threads")
-
-	// Channel buffer sizes - optimized for 120GB memory usage
-	const channelBufferSize = 1500
-	const threadPoolSize = 40
 
 	// Create unified channel for all write requests
 	writeRequestChannel := make(chan BatchWriteRequest, channelBufferSize)
@@ -2053,7 +2148,9 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 	it := sourceDB.NewIterator(nil, nil)
 	defer it.Release()
 
+	processedCount := 0
 	for it.Next() {
+		processedCount++
 		key := make([]byte, len(it.Key()))
 		value := make([]byte, len(it.Value()))
 		copy(key, it.Key())
@@ -2127,6 +2224,24 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 			}
 
 			batchSize = 0
+		}
+		// Force GC every 100k processed items to prevent memory accumulation
+		if processedCount%1000000 == 0 {
+			start := time.Now()
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			currentMemMB := m.Alloc / (1024 * 1024)
+
+			runtime.GC()
+
+			runtime.ReadMemStats(&m)
+			afterGCMemMB := m.Alloc / (1024 * 1024)
+
+			log.Info("🧠 Memory monitoring & GC",
+				"processed", processedCount,
+				"beforeGC_MB", currentMemMB,
+				"afterGC_MB", afterGCMemMB,
+				"duration", time.Since(start))
 		}
 
 		// Check for errors periodically
@@ -2862,12 +2977,6 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 	it := chainDB.NewIterator(nil, nil)
 	defer it.Release()
 
-	// Create channels and synchronization structures for async processing
-	const (
-		threadPoolSize    = 40
-		channelBufferSize = 1200
-	)
-
 	writeRequestChannel := make(chan []ethdb.Batch, channelBufferSize)
 	errorChannel := make(chan error, threadPoolSize)
 	var wg sync.WaitGroup
@@ -2906,7 +3015,9 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 		indexStat  = &stat{}
 	)
 
+	processedCount := 0
 	for it.Next() {
+		processedCount++
 		key := make([]byte, len(it.Key()))
 		value := make([]byte, len(it.Value()))
 		copy(key, it.Key())
@@ -2951,6 +3062,24 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 			batchSize = 0
 		}
 
+		// Force GC every 100k processed items to prevent memory accumulation
+		if processedCount%1000000 == 0 {
+			start := time.Now()
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			currentMemMB := m.Alloc / (1024 * 1024)
+
+			runtime.GC()
+
+			runtime.ReadMemStats(&m)
+			afterGCMemMB := m.Alloc / (1024 * 1024)
+
+			log.Info("🧠 Memory monitoring & GC",
+				"processed", processedCount,
+				"beforeGC_MB", currentMemMB,
+				"afterGC_MB", afterGCMemMB,
+				"duration", time.Since(start))
+		}
 		// Check for errors periodically
 		select {
 		case err := <-errorChannel:
@@ -3136,5 +3265,154 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 	if err := dstChainDB.GetTxIndexStore().Compact(nil, nil); err != nil {
 		return fmt.Errorf("failed to compact indexdb: %v", err)
 	}
+	return nil
+}
+
+func deleteSnapshotData(db ethdb.Database) error {
+	var (
+		batch     = db.NewBatch()
+		start     = time.Now()
+		logged    = time.Now()
+		count     int64
+		size      common.StorageSize
+		batchSize = 0
+	)
+
+	prefixesToDelete := []struct {
+		prefix []byte
+		name   string
+	}{
+		{rawdb.SnapshotAccountPrefix, "account snapshots"},
+		{rawdb.SnapshotStoragePrefix, "storage snapshots"},
+	}
+
+	for _, item := range prefixesToDelete {
+		it := db.NewIterator(item.prefix, nil)
+		log.Info("deleting", "type", item.name, "prefix", string(item.prefix))
+
+		for it.Next() {
+			key := make([]byte, len(it.Key()))
+			copy(key, it.Key())
+			size += common.StorageSize(len(key) + len(it.Value()))
+			batchSize += len(key) + len(it.Value())
+			if bytes.HasPrefix(key, rawdb.SnapshotAccountPrefix) && len(key) == (len(rawdb.SnapshotAccountPrefix)+common.HashLength) {
+				if err := batch.Delete(key); err != nil {
+					it.Release()
+					return err
+				}
+			}
+			if bytes.HasPrefix(key, rawdb.SnapshotStoragePrefix) && len(key) == (len(rawdb.SnapshotStoragePrefix)+2*common.HashLength) {
+				if err := batch.Delete(key); err != nil {
+					it.Release()
+					return err
+				}
+			}
+
+			if batchSize > 256*1024*1024 {
+				if err := batch.Write(); err != nil {
+					it.Release()
+					return err
+				}
+				batch.Reset()
+				batchSize = 0
+			}
+
+			count++
+			if time.Since(logged) > 8*time.Second {
+				log.Info("deleting snapshot data progress", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
+				logged = time.Now()
+			}
+		}
+		it.Release()
+	}
+
+	snapshotMetadataKeys := [][]byte{
+		[]byte("SnapshotRoot"),
+		[]byte("SnapshotJournal"),
+		[]byte("SnapshotGenerator"),
+		[]byte("SnapshotRecovery"),
+		[]byte("SnapshotSyncStatus"),
+		[]byte("SnapSyncStatus"), // found in schema.go
+	}
+
+	for _, key := range snapshotMetadataKeys {
+		if err := batch.Delete(key); err != nil {
+			return err
+		}
+		count++
+	}
+
+	if batch.ValueSize() > 0 {
+		if err := batch.Write(); err != nil {
+			return err
+		}
+	}
+
+	log.Info("delete snapshot data completed", "total_count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
+	return nil
+}
+
+func deleteTxIndexData(db ethdb.Database) error {
+	var (
+		batch          = db.NewBatch()
+		start          = time.Now()
+		logged         = time.Now()
+		count          int64
+		size           common.StorageSize
+		batchSize      = 0
+		txLookupPrefix = []byte("l")
+	)
+
+	log.Info("try to delete transaction index data", "prefix", txLookupPrefix)
+
+	// rawdb.TxLookupPrefix
+	it := db.NewIterator(txLookupPrefix, nil)
+	for it.Next() {
+		key := make([]byte, len(it.Key()))
+		copy(key, it.Key())
+		size += common.StorageSize(len(key) + len(it.Value()))
+		batchSize += len(key) + len(it.Value())
+		if bytes.HasPrefix(key, txLookupPrefix) && len(key) == (1+common.HashLength) { // txLookupPrefix
+			if err := batch.Delete(key); err != nil {
+				it.Release()
+				return err
+			}
+		}
+		if batchSize > 256*1024*1024 {
+			if err := batch.Write(); err != nil {
+				it.Release()
+				return err
+			}
+			batch.Reset()
+			batchSize = 0
+		}
+
+		count++
+		if time.Since(logged) > 8*time.Second {
+			log.Info("deleting transaction index data progress", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
+			logged = time.Now()
+		}
+	}
+	it.Release()
+
+	txIndexMetadataKeys := [][]byte{
+		[]byte("TransactionIndexTail"),       // txIndexTailKey
+		[]byte("FastTransactionLookupLimit"), // deprecated but may exist
+	}
+
+	for _, key := range txIndexMetadataKeys {
+		if err := batch.Delete(key); err != nil {
+			return err
+		}
+		count++
+	}
+
+	if batch.ValueSize() > 0 {
+		if err := batch.Write(); err != nil {
+			return err
+		}
+	}
+
+	log.Info("delete transaction index data completed", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
 	return nil
 }

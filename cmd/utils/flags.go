@@ -139,6 +139,11 @@ var (
 		Usage:    "Enable expand mode for migration: write data to target database instead of in-place migration",
 		Category: flags.EthCategory,
 	}
+	DeleteSnapIndexFlag = &cli.BoolFlag{
+		Name:     "deletesnapindex",
+		Usage:    "Delete snap and index data from the source database",
+		Category: flags.EthCategory,
+	}
 	AncientFlag = &flags.DirectoryFlag{
 		Name:     "datadir.ancient",
 		Usage:    "Root directory for ancient data (default = inside chaindata)",
