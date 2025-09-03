@@ -34,6 +34,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/pebble"
+	"github.com/ethereum/go-ethereum/ethdb/shardingdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/urfave/cli/v2"
@@ -317,18 +318,69 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 	}
 	defer stack.Close()
 
-	// Create benchmark database using OpenDatabaseWithFreezer
-	benchDB, err := stack.OpenDatabaseWithFreezer("chaindata", config.CacheSize, config.Handles, "", "", false, false)
-	if err != nil {
-		return fmt.Errorf("failed to create benchmark database: %v", err)
-	}
+	var benchDB ethdb.Database
 
 	// Configure sharding database if enabled
 	if config.ShardingDB {
-		log.Info("Enabling sharding database for benchmark operations")
-		// Enable sharding by calling SetMultiDBs which will setup sharding for state, snap, and index stores
-		if err := stack.SetMultiDBs(benchDB, "chaindata", config.CacheSize, config.Handles, false, false); err != nil {
-			return fmt.Errorf("failed to setup sharding database: %v", err)
+		log.Info("Creating sharding database for benchmark operations")
+
+		// Create sharding database configuration
+		shardingConfig := &shardingdb.Config{
+			EnableSharding: true,
+			DBType:         shardingdb.DBTypePebble,
+			DBPath:         config.BenchDBPath,
+			Namespace:      "",
+			ShardNum:       8, // Use 8 shards for testing
+			Shards: []shardingdb.ShardConfig{
+				{
+					DBPath:  config.BenchDBPath + "/shard0",
+					Indexes: "0",
+				},
+				{
+					DBPath:  config.BenchDBPath + "/shard1",
+					Indexes: "1",
+				},
+				{
+					DBPath:  config.BenchDBPath + "/shard2",
+					Indexes: "2",
+				},
+				{
+					DBPath:  config.BenchDBPath + "/shard3",
+					Indexes: "3",
+				},
+				{
+					DBPath:  config.BenchDBPath + "/shard4",
+					Indexes: "4",
+				},
+				{
+					DBPath:  config.BenchDBPath + "/shard5",
+					Indexes: "5",
+				},
+				{
+					DBPath:  config.BenchDBPath + "/shard6",
+					Indexes: "6",
+				},
+				{
+					DBPath:  config.BenchDBPath + "/shard7",
+					Indexes: "7",
+				},
+			},
+		}
+
+		// Create sharding database
+		shardDB, err := shardingdb.New(shardingConfig, config.CacheSize, config.Handles, false, simpleShardIndex)
+		if err != nil {
+			return fmt.Errorf("failed to create sharding database: %v", err)
+		}
+
+		// Use rawdb.NewDatabase to wrap sharding database
+		benchDB = rawdb.NewDatabase(shardDB)
+		log.Info("Sharding database created successfully", "shards", shardingConfig.ShardNum)
+	} else {
+		// Create benchmark database using OpenDatabaseWithFreezer
+		benchDB, err = stack.OpenDatabaseWithFreezer("chaindata", config.CacheSize, config.Handles, "", "", false, false)
+		if err != nil {
+			return fmt.Errorf("failed to create benchmark database: %v", err)
 		}
 	}
 	defer benchDB.Close()
@@ -927,6 +979,19 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// simpleShardIndex provides a simple hash-based sharding function
+func simpleShardIndex(key []byte, shardNum int) int {
+	if len(key) == 0 || shardNum <= 1 {
+		return 0
+	}
+	// Use simple hash function for distribution
+	var hash uint32
+	for _, b := range key {
+		hash = hash*31 + uint32(b)
+	}
+	return int(hash) % shardNum
 }
 
 // updateMinMaxDuration safely updates min and max duration values using atomic operations
