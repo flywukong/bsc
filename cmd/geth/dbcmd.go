@@ -1778,18 +1778,16 @@ func migrateDBWithDeletingSnapIndex(ctx *cli.Context) error {
 	// 	}
 	// }
 
-	// 删除 snapshot 数据
-	log.Info("开始删除 snapshot 数据")
+	log.Info("try to delete snapshot data")
 	err = deleteSnapshotData(sourceDB)
 	if err != nil {
-		return fmt.Errorf("删除 snapshot 数据失败: %v", err)
+		return fmt.Errorf("failed to delete snapshot data: %v", err)
 	}
 
-	// 删除 transaction index 数据
-	log.Info("开始删除 transaction index 数据")
+	log.Info("try to delete transaction index data")
 	err = deleteTxIndexData(sourceDB)
 	if err != nil {
-		return fmt.Errorf("删除 transaction index 数据失败: %v", err)
+		return fmt.Errorf("failed to delete transaction index data: %v", err)
 	}
 
 	return nil
@@ -3270,7 +3268,6 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 	return nil
 }
 
-// deleteSnapshotData 删除所有snapshot相关数据
 func deleteSnapshotData(db ethdb.Database) error {
 	var (
 		batch  = db.NewBatch()
@@ -3280,7 +3277,6 @@ func deleteSnapshotData(db ethdb.Database) error {
 		size   common.StorageSize
 	)
 
-	// 删除 snapshot 数据前缀
 	prefixesToDelete := []struct {
 		prefix []byte
 		name   string
@@ -3289,10 +3285,9 @@ func deleteSnapshotData(db ethdb.Database) error {
 		{rawdb.SnapshotStoragePrefix, "storage snapshots"},
 	}
 
-	// 遍历并删除前缀数据
 	for _, item := range prefixesToDelete {
 		it := db.NewIterator(item.prefix, nil)
-		log.Info("正在删除", "type", item.name, "prefix", string(item.prefix))
+		log.Info("deleting", "type", item.name, "prefix", string(item.prefix))
 
 		for it.Next() {
 			key := make([]byte, len(it.Key()))
@@ -3311,7 +3306,6 @@ func deleteSnapshotData(db ethdb.Database) error {
 				}
 			}
 
-			// 批量写入以避免内存占用过大
 			if batch.ValueSize() > 256*1024*1024 {
 				if err := batch.Write(); err != nil {
 					it.Release()
@@ -3322,21 +3316,20 @@ func deleteSnapshotData(db ethdb.Database) error {
 
 			count++
 			if time.Since(logged) > 8*time.Second {
-				log.Info("删除 snapshot 数据进度", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
+				log.Info("deleting snapshot data progress", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
 				logged = time.Now()
 			}
 		}
 		it.Release()
 	}
 
-	// 删除 snapshot 元数据键
 	snapshotMetadataKeys := [][]byte{
 		[]byte("SnapshotRoot"),
 		[]byte("SnapshotJournal"),
 		[]byte("SnapshotGenerator"),
 		[]byte("SnapshotRecovery"),
 		[]byte("SnapshotSyncStatus"),
-		[]byte("SnapSyncStatus"), // 从schema.go中发现的
+		[]byte("SnapSyncStatus"), // found in schema.go
 	}
 
 	for _, key := range snapshotMetadataKeys {
@@ -3346,44 +3339,40 @@ func deleteSnapshotData(db ethdb.Database) error {
 		count++
 	}
 
-	// 最终批量写入
 	if batch.ValueSize() > 0 {
 		if err := batch.Write(); err != nil {
 			return err
 		}
 	}
 
-	log.Info("删除 snapshot 数据完成", "total_count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
+	log.Info("delete snapshot data completed", "total_count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
 	return nil
 }
 
-// deleteTxIndexData 删除所有transaction index相关数据
 func deleteTxIndexData(db ethdb.Database) error {
 	var (
-		batch         = db.NewBatch()
-		start         = time.Now()
-		logged        = time.Now()
-		count         int64
-		size          common.StorageSize
-		xLookupPrefix = []byte("l")
+		batch          = db.NewBatch()
+		start          = time.Now()
+		logged         = time.Now()
+		count          int64
+		size           common.StorageSize
+		txLookupPrefix = []byte("l")
 	)
 
-	// 删除 transaction lookup 前缀数据 (txLookupPrefix = "l")
-	log.Info("正在删除transaction lookup数据", "prefix", xLookupPrefix)
+	log.Info("try to delete transaction index data", "prefix", txLookupPrefix)
 
 	// rawdb.TxLookupPrefix
-	it := db.NewIterator(xLookupPrefix, nil)
+	it := db.NewIterator(txLookupPrefix, nil)
 	for it.Next() {
 		key := make([]byte, len(it.Key()))
 		copy(key, it.Key())
 		size += common.StorageSize(len(key) + len(it.Value()))
-		if bytes.HasPrefix(key, xLookupPrefix) && len(key) == (1+common.HashLength) { // txLookupPrefix
+		if bytes.HasPrefix(key, txLookupPrefix) && len(key) == (1+common.HashLength) { // txLookupPrefix
 			if err := batch.Delete(key); err != nil {
 				it.Release()
 				return err
 			}
 		}
-		// 批量写入以避免内存占用过大
 		if batch.ValueSize() > 256*1024*1024 {
 			if err := batch.Write(); err != nil {
 				it.Release()
@@ -3394,16 +3383,15 @@ func deleteTxIndexData(db ethdb.Database) error {
 
 		count++
 		if time.Since(logged) > 8*time.Second {
-			log.Info("删除 transaction index 数据进度", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
+			log.Info("deleting transaction index data progress", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
 			logged = time.Now()
 		}
 	}
 	it.Release()
 
-	// 删除 transaction index 元数据键
 	txIndexMetadataKeys := [][]byte{
 		[]byte("TransactionIndexTail"),       // txIndexTailKey
-		[]byte("FastTransactionLookupLimit"), // 已废弃但可能存在
+		[]byte("FastTransactionLookupLimit"), // deprecated but may exist
 	}
 
 	for _, key := range txIndexMetadataKeys {
@@ -3413,13 +3401,12 @@ func deleteTxIndexData(db ethdb.Database) error {
 		count++
 	}
 
-	// 最终批量写入
 	if batch.ValueSize() > 0 {
 		if err := batch.Write(); err != nil {
 			return err
 		}
 	}
 
-	log.Info("删除 transaction index 数据完成", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
+	log.Info("delete transaction index data completed", "count", count, "size", size, "elapsed", common.PrettyDuration(time.Since(start)))
 	return nil
 }
