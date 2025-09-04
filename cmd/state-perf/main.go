@@ -421,22 +421,15 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 		log.Info("Starting database compaction for benchmark database...")
 		compactionStart := time.Now()
 
-		// Use the Compact method to trigger database compaction
-		// For PebbleDB, this will compact all levels of the LSM tree
-		if compactor, ok := benchDB.(interface {
-			Compact(start, limit []byte) error
-		}); ok {
-			err = compactor.Compact(nil, nil) // nil, nil means compact entire database
-			if err != nil {
-				log.Warn("Failed to compact database", "error", err)
-			} else {
-				compactionDuration := time.Since(compactionStart)
-				log.Info("Database compaction completed successfully",
-					"duration", compactionDuration,
-					"durationMs", compactionDuration.Milliseconds())
-			}
+		// Direct call to db.Compact for entire database
+		err = benchDB.Compact(nil, nil) // nil, nil means compact entire database
+		if err != nil {
+			log.Warn("Failed to compact database", "error", err)
 		} else {
-			log.Warn("Database does not support compaction interface")
+			compactionDuration := time.Since(compactionStart)
+			log.Info("Database compaction completed successfully",
+				"duration", compactionDuration,
+				"durationMs", compactionDuration.Milliseconds())
 		}
 	}
 
