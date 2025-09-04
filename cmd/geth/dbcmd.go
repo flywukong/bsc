@@ -2001,7 +2001,8 @@ type CategorizedData struct {
 // extractAllDataInOnePass extracts account and storage trie nodes with transformation using multi-threaded async processing
 func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.Database, stats *MigrationStats, version byte) error {
 	log.Info("🚀 Starting account and storage trie node extraction with transformation and async thread pool",
-		"architecture", "1 reader + async writers focusing on trie nodes with redundancy generation")
+		"architecture", "1 reader + async writers focusing on trie nodes with redundancy generation",
+		"targetDB", "sourceDB (all new key-value pairs written back to source database)")
 
 	// Channel buffer sizes - focused on trie node extraction
 	const channelBufferSize = 100
@@ -2208,7 +2209,7 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 					stateStat.Add(newKVSize)
 					batchSize += newKVSize
 					totalWrittenBytes += uint64(newKVSize)
-					stats.Add("state", len(newKey), len(newValue))
+					stats.Add("chain", len(newKey), len(newValue)) // Writing to sourceDB (chain database)
 					redundantKVCount++
 
 					// Log progress every 10GB
@@ -2227,15 +2228,16 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 
 			// flush the state batch if it's too large
 			if batchSize >= 16*1024*1024 {
-				log.Info("sending trie node batch to async thread pool...",
+				log.Info("sending trie node batch to async thread pool (writing to sourceDB)...",
 					"state count", stateStat.count, "state size", stateStat.size,
 					"currentPrefix", nodeType.name, "accountTrie", accountTrieCount,
-					"storageTrie", storageTrieCount, "redundantKV", redundantKVCount)
+					"storageTrie", storageTrieCount, "redundantKV", redundantKVCount,
+					"targetDB", "sourceDB")
 
-				// Send state batch to async writer (trie node processing)
+				// Send state batch to async writer (trie node processing - writing to sourceDB)
 				if stateBatch.ValueSize() > 0 {
 					select {
-					case writeRequestChannel <- BatchWriteRequest{BatchType: "state", Batch: stateBatch}:
+					case writeRequestChannel <- BatchWriteRequest{BatchType: "sourceDB", Batch: stateBatch}:
 						stateBatch = sourceDB.NewBatch()
 					case err := <-errorChannel:
 						return fmt.Errorf("async write error during trie node batch processing: %v", err)
@@ -2272,13 +2274,14 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 
 	// flush the remaining state batch
 	if batchSize > 0 {
-		log.Info("sending remaining trie node batch to async thread pool...",
+		log.Info("sending remaining trie node batch to async thread pool (writing to sourceDB)...",
 			"state count", stateStat.count, "state size", stateStat.size,
-			"accountTrie", accountTrieCount, "storageTrie", storageTrieCount, "redundantKV", redundantKVCount)
+			"accountTrie", accountTrieCount, "storageTrie", storageTrieCount, "redundantKV", redundantKVCount,
+			"targetDB", "sourceDB")
 
-		// Send remaining state batch to async writer (only trie nodes with redundancy)
+		// Send remaining state batch to async writer (trie nodes with redundancy - writing to sourceDB)
 		if stateBatch.ValueSize() > 0 {
-			writeRequestChannel <- BatchWriteRequest{BatchType: "state", Batch: stateBatch}
+			writeRequestChannel <- BatchWriteRequest{BatchType: "sourceDB", Batch: stateBatch}
 		}
 	}
 
@@ -2304,6 +2307,7 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 		"limitReached", limitReached, "maxLimitGB", maxWriteBytes/(1024*1024*1024),
 		"operation", "IsAccountTrieNode + IsStorageTrieNode filtering with redundant KV generation",
 		"transformation", "A->X, O->Y prefix replacement with value shuffling",
+		"targetDatabase", "sourceDB (new key-value pairs written back to source database)",
 		"originalDataIntact", "true (no deletions performed)",
 		"phases", "1 (trie node extraction with transformation)",
 		"threadsUsed", fmt.Sprintf("%d (1 reader + %d trie node writers)", threadPoolSize+1, threadPoolSize))
