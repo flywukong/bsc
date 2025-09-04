@@ -2164,10 +2164,10 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 			// Verify the key with the appropriate checker function
 			if nodeType.checker(key) {
 				// Store original trie node
-				stateBatch.Put(key, value)
-				stateStat.Add(kvSize)
-				batchSize += kvSize
-				stats.Add("state", len(key), len(value))
+				//	stateBatch.Put(key, value)
+				///	stateStat.Add(kvSize)
+				//	batchSize += kvSize
+				//	stats.Add("state", len(key), len(value))
 
 				if nodeType.name == "accountTrie" {
 					accountTrieCount++
