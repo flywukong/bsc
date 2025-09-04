@@ -421,6 +421,7 @@ func loadDataSet(testCaseDir string) (*DataSet, error) {
 	}
 	defer db.Close()
 
+	log.Info("New pebble db finish")
 	dataSet := &DataSet{}
 
 	// Limit to 500 million keys
