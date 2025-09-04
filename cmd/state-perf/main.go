@@ -61,6 +61,7 @@ type PerfConfig struct {
 	CacheSize   int  // Database cache size in MB
 	Handles     int  // Number of file descriptor handles
 	ShardingDB  bool // Enable sharding database mode
+	Compaction  bool // Perform database compaction before testing
 }
 
 type DataType int
@@ -261,6 +262,11 @@ func main() {
 						Usage:       "Enable sharding database mode",
 						Destination: &config.ShardingDB,
 					},
+					&cli.BoolFlag{
+						Name:        "compaction",
+						Usage:       "Perform database compaction before testing",
+						Destination: &config.Compaction,
+					},
 				},
 				Before: func(c *cli.Context) error {
 					// Validate ratios sum to 1.0
@@ -299,7 +305,8 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 		"writeRatio", config.WriteRatio,
 		"updateRatio", config.UpdateRatio,
 		"runtime", config.RuntimeDur,
-		"shardingDB", config.ShardingDB)
+		"shardingDB", config.ShardingDB,
+		"compaction", config.Compaction)
 
 	// Load data-set from test-case directory
 	log.Info("Loading data-set from test-case directory", "path", config.TestCaseDir)
@@ -408,6 +415,30 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 		}
 	}
 	defer benchDB.Close()
+
+	// Perform database compaction if requested
+	if config.Compaction {
+		log.Info("Starting database compaction for benchmark database...")
+		compactionStart := time.Now()
+
+		// Use the Compact method to trigger database compaction
+		// For PebbleDB, this will compact all levels of the LSM tree
+		if compactor, ok := benchDB.(interface {
+			Compact(start, limit []byte) error
+		}); ok {
+			err = compactor.Compact(nil, nil) // nil, nil means compact entire database
+			if err != nil {
+				log.Warn("Failed to compact database", "error", err)
+			} else {
+				compactionDuration := time.Since(compactionStart)
+				log.Info("Database compaction completed successfully",
+					"duration", compactionDuration,
+					"durationMs", compactionDuration.Milliseconds())
+			}
+		} else {
+			log.Warn("Database does not support compaction interface")
+		}
+	}
 
 	// Verify that test data keys can be read from benchmark database
 	log.Info("Verifying test data accessibility in benchmark database...")
