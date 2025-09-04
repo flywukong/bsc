@@ -333,42 +333,42 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 			ShardNum:       8, // Use 8 shards for testing
 			Shards: []shardingdb.ShardConfig{
 				{
-					DBPath:  config.BenchDBPath + "/shard0",
+					DBPath:  config.BenchDBPath + "/shard0000",
 					Indexes: "0",
 				},
 				{
-					DBPath:  config.BenchDBPath + "/shard1",
+					DBPath:  config.BenchDBPath + "/shard0001",
 					Indexes: "1",
 				},
 				{
-					DBPath:  config.BenchDBPath + "/shard2",
+					DBPath:  config.BenchDBPath + "/shard0002",
 					Indexes: "2",
 				},
 				{
-					DBPath:  config.BenchDBPath + "/shard3",
+					DBPath:  config.BenchDBPath + "/shard0003",
 					Indexes: "3",
 				},
 				{
-					DBPath:  config.BenchDBPath + "/shard4",
+					DBPath:  config.BenchDBPath + "/shard0004",
 					Indexes: "4",
 				},
 				{
-					DBPath:  config.BenchDBPath + "/shard5",
+					DBPath:  config.BenchDBPath + "/shard0005",
 					Indexes: "5",
 				},
 				{
-					DBPath:  config.BenchDBPath + "/shard6",
+					DBPath:  config.BenchDBPath + "/shard0006",
 					Indexes: "6",
 				},
 				{
-					DBPath:  config.BenchDBPath + "/shard7",
+					DBPath:  config.BenchDBPath + "/shard0007",
 					Indexes: "7",
 				},
 			},
 		}
 
 		// Create sharding database
-		shardDB, err := shardingdb.New(shardingConfig, config.CacheSize, config.Handles, false, simpleShardIndex)
+		shardDB, err := shardingdb.New(shardingConfig, config.CacheSize, config.Handles, false, rawdb.ShardIndexInTrieDB)
 		if err != nil {
 			return fmt.Errorf("failed to create sharding database: %v", err)
 		}
