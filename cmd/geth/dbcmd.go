@@ -2236,7 +2236,7 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 				if stateBatch.ValueSize() > 0 {
 					select {
 					case writeRequestChannel <- BatchWriteRequest{BatchType: "state", Batch: stateBatch}:
-						stateBatch = stateDB.NewBatch()
+						stateBatch = sourceDB.NewBatch()
 					case err := <-errorChannel:
 						return fmt.Errorf("async write error during trie node batch processing: %v", err)
 					}
