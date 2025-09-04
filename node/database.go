@@ -47,18 +47,41 @@ type openOptions struct {
 // The passed o.AncientDir indicates the path of root ancient directory where
 // the chain freezer can be opened.
 func openDatabase(o openOptions) (ethdb.Database, error) {
+	log.Debug("Opening key-value database", 
+		"type", o.Type, 
+		"directory", o.Directory,
+		"cache", o.Cache,
+		"handles", o.Handles,
+		"readonly", o.ReadOnly)
+		
 	kvdb, err := openKeyValueDatabase(o)
 	if err != nil {
+		log.Error("Failed to open key-value database", "error", err, "directory", o.Directory)
 		return nil, err
 	}
+	
+	log.Debug("Key-value database opened successfully", "directory", o.Directory)
+	
 	if len(o.AncientsDirectory) == 0 {
+		log.Debug("No ancient directory specified, returning key-value database only")
 		return kvdb, nil
 	}
+	
+	log.Info("Attaching freezer to database",
+		"ancientDir", o.AncientsDirectory,
+		"namespace", o.Namespace,
+		"readonly", o.ReadOnly,
+		"disableFreeze", o.DisableFreeze,
+		"multiDataBase", o.MultiDataBase)
+		
 	frdb, err := rawdb.NewDatabaseWithFreezer(kvdb, o.AncientsDirectory, o.Namespace, o.ReadOnly, o.DisableFreeze, o.MultiDataBase)
 	if err != nil {
+		log.Error("Failed to attach freezer to database", "error", err, "ancientDir", o.AncientsDirectory)
 		kvdb.Close()
 		return nil, err
 	}
+	
+	log.Info("Database with freezer created successfully", "ancientDir", o.AncientsDirectory)
 	return frdb, nil
 }
 

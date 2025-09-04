@@ -412,6 +412,8 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 }
 
 func loadDataSet(testCaseDir string) (*DataSet, error) {
+	log.Info("Loading test data with prefix-based scanning", "testCaseDir", testCaseDir)
+
 	// Open test-case pebble database using simple pebble.New
 	db, err := pebble.New(testCaseDir, 4096, 32766, "", true) // readonly
 	if err != nil {
@@ -421,38 +423,134 @@ func loadDataSet(testCaseDir string) (*DataSet, error) {
 
 	dataSet := &DataSet{}
 
-	// Iterate through all keys and classify them
-	iter := db.NewIterator(nil, nil)
-	defer iter.Release()
+	// Limit to 500 million keys
+	const maxKeys = 500_000_000
+	totalScanned := 0
 
-	for iter.Next() {
-		key := make([]byte, len(iter.Key()))
-		value := make([]byte, len(iter.Value()))
-		copy(key, iter.Key())
-		copy(value, iter.Value())
+	// Load account trie nodes using prefix scan
+	log.Info("Scanning account trie nodes", "prefix", "TrieNodeAccountPrefix", "maxKeys", maxKeys)
+	accountIter := db.NewIterator(rawdb.TrieNodeAccountPrefix, nil)
+	defer accountIter.Release()
 
-		kv := KeyValue{Key: key, Value: value}
+	accountCount := 0
+	for accountIter.Next() && totalScanned < maxKeys {
+		key := make([]byte, len(accountIter.Key()))
+		value := make([]byte, len(accountIter.Value()))
+		copy(key, accountIter.Key())
+		copy(value, accountIter.Value())
 
-		// Classify data type based on key prefix - only trie data
-		switch {
-		case rawdb.IsAccountTrieNode(key):
-			kv.Type = AccountTries
+		totalScanned++
+
+		// Verify it's actually an account trie node
+		if rawdb.IsAccountTrieNode(key) {
+			kv := KeyValue{
+				Key:   key,
+				Value: value,
+				Type:  AccountTries,
+			}
 			dataSet.AccountTries = append(dataSet.AccountTries, kv)
-		case rawdb.IsStorageTrieNode(key):
-			kv.Type = StorageTries
-			dataSet.StorageTries = append(dataSet.StorageTries, kv)
+			accountCount++
+		}
+
+		if totalScanned%1000000 == 0 {
+			log.Info("Account trie scan progress",
+				"scanned", totalScanned,
+				"loaded", accountCount,
+				"progress", fmt.Sprintf("%.1f%%", float64(totalScanned)*100/float64(maxKeys)))
+		}
+
+		// Check if we've reached the limit
+		if totalScanned >= maxKeys {
+			log.Warn("Reached maximum key limit during account trie scan",
+				"limit", maxKeys,
+				"accountTriesLoaded", accountCount)
+			break
 		}
 	}
 
-	if err := iter.Error(); err != nil {
-		return nil, fmt.Errorf("iterator error: %v", err)
+	if err := accountIter.Error(); err != nil {
+		return nil, fmt.Errorf("account trie iterator error: %v", err)
 	}
 
-	// Log data set statistics
+	log.Info("Account trie scan completed",
+		"scanned", totalScanned,
+		"loaded", accountCount,
+		"reachedLimit", totalScanned >= maxKeys)
+
+	// Load storage trie nodes using prefix scan (only if we haven't reached the limit)
+	if totalScanned < maxKeys {
+		log.Info("Scanning storage trie nodes",
+			"prefix", "TrieNodeStoragePrefix",
+			"remaining", maxKeys-totalScanned)
+		storageIter := db.NewIterator(rawdb.TrieNodeStoragePrefix, nil)
+		defer storageIter.Release()
+
+		storageCount := 0
+		for storageIter.Next() && totalScanned < maxKeys {
+			key := make([]byte, len(storageIter.Key()))
+			value := make([]byte, len(storageIter.Value()))
+			copy(key, storageIter.Key())
+			copy(value, storageIter.Value())
+
+			totalScanned++
+
+			// Verify it's actually a storage trie node
+			if rawdb.IsStorageTrieNode(key) {
+				kv := KeyValue{
+					Key:   key,
+					Value: value,
+					Type:  StorageTries,
+				}
+				dataSet.StorageTries = append(dataSet.StorageTries, kv)
+				storageCount++
+			}
+
+			if totalScanned%1000000 == 0 {
+				log.Info("Storage trie scan progress",
+					"scanned", totalScanned,
+					"loaded", storageCount,
+					"progress", fmt.Sprintf("%.1f%%", float64(totalScanned)*100/float64(maxKeys)))
+			}
+
+			// Check if we've reached the limit
+			if totalScanned >= maxKeys {
+				log.Warn("Reached maximum key limit during storage trie scan",
+					"limit", maxKeys,
+					"storageTriesLoaded", storageCount)
+				break
+			}
+		}
+
+		if err := storageIter.Error(); err != nil {
+			return nil, fmt.Errorf("storage trie iterator error: %v", err)
+		}
+
+		log.Info("Storage trie scan completed",
+			"scanned", totalScanned,
+			"loaded", storageCount,
+			"reachedLimit", totalScanned >= maxKeys)
+	} else {
+		log.Info("Skipping storage trie scan - already reached key limit")
+	}
+
+	// Log final data set statistics
+	totalNodes := len(dataSet.AccountTries) + len(dataSet.StorageTries)
+	log.Info("Test data loading completed",
+		"totalScanned", totalScanned,
+		"maxKeys", maxKeys,
+		"accountTries", len(dataSet.AccountTries),
+		"storageTries", len(dataSet.StorageTries),
+		"totalTrieNodesLoaded", totalNodes,
+		"limitReached", totalScanned >= maxKeys)
+
 	fmt.Printf("Data set loaded successfully:\n")
+	fmt.Printf("  Total Scanned: %d (limit: %d)\n", totalScanned, maxKeys)
 	fmt.Printf("  Account Tries: %d\n", len(dataSet.AccountTries))
 	fmt.Printf("  Storage Tries: %d\n", len(dataSet.StorageTries))
-	fmt.Printf("  Total Trie nodes: %d\n", len(dataSet.AccountTries)+len(dataSet.StorageTries))
+	fmt.Printf("  Total Trie nodes: %d\n", totalNodes)
+	if totalScanned >= maxKeys {
+		fmt.Printf("  *** LIMIT REACHED - stopped at %d keys ***\n", maxKeys)
+	}
 
 	return dataSet, nil
 }
