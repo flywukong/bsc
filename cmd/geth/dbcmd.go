@@ -2123,7 +2123,7 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 	const maxWriteBytes = 640 * 1024 * 1024 * 1024 // 600GB in bytes
 
 	var (
-		stateBatch        = stateDB.NewBatch()
+		stateBatch        = sourceDB.NewBatch()
 		batchSize         = 0
 		stateStat         = &stat{}
 		totalScanned      = 0
@@ -2486,6 +2486,12 @@ func performDatabaseCompaction(sourceDB, stateDB, snapDB, indexDB ethdb.Database
 	}
 
 	for _, dbInfo := range databases {
+		// Skip compaction if database is nil
+		if dbInfo.db == nil {
+			log.Info("⚠️ Skipping compaction for nil database", "name", dbInfo.name)
+			continue
+		}
+
 		log.Info("Compacting database", "name", dbInfo.name)
 
 		// Perform full database compaction (nil, nil means compact everything)
