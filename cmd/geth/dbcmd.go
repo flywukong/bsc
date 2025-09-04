@@ -2119,14 +2119,18 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 
 	const suffix byte = 1 // Version suffix for generated keys (fixed as requested)
 
+	// 600GB write limit
+	const maxWriteBytes = 640 * 1024 * 1024 * 1024 // 600GB in bytes
+
 	var (
-		stateBatch       = stateDB.NewBatch()
-		batchSize        = 0
-		stateStat        = &stat{}
-		totalScanned     = 0
-		accountTrieCount = 0
-		storageTrieCount = 0
-		redundantKVCount = 0
+		stateBatch        = stateDB.NewBatch()
+		batchSize         = 0
+		stateStat         = &stat{}
+		totalScanned      = 0
+		accountTrieCount  = 0
+		storageTrieCount  = 0
+		redundantKVCount  = 0
+		totalWrittenBytes = uint64(0) // Track total bytes written for new key-value pairs
 	)
 
 	// Define trie node types to scan by prefix
@@ -2142,8 +2146,15 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 	log.Info("🔍 Scanning trie node prefixes", "method", "prefix-based scanning with transformation",
 		"accountPrefix", string(rawdb.TrieNodeAccountPrefix), "storagePrefix", string(rawdb.TrieNodeStoragePrefix))
 
+	// Flag to stop processing when 600GB limit is reached
+	limitReached := false
+
 	// Scan each prefix separately
 	for _, nodeType := range trieNodeTypes {
+		if limitReached {
+			log.Info("⚠️ Skipping remaining prefixes due to 600GB write limit", "skippedPrefix", nodeType.name)
+			break
+		}
 		log.Info("🔍 Scanning trie node prefix", "prefix", string(nodeType.prefix), "name", nodeType.name)
 
 		it := sourceDB.NewIterator(nodeType.prefix, nil)
@@ -2181,11 +2192,33 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 					newValue := shuffleValue(value, suffix)
 					newKVSize := len(newKey) + len(newValue)
 
+					// Check if adding this KV pair would exceed 600GB limit
+					if totalWrittenBytes+uint64(newKVSize) > maxWriteBytes {
+						log.Warn("⚠️ Reached 600GB write limit, stopping new key-value pair generation",
+							"totalWrittenBytes", totalWrittenBytes,
+							"totalWrittenGB", totalWrittenBytes/(1024*1024*1024),
+							"maxLimitGB", maxWriteBytes/(1024*1024*1024),
+							"redundantKVCount", redundantKVCount,
+							"currentKVSize", newKVSize)
+						limitReached = true
+						break // Break out of the inner loop for current prefix
+					}
+
 					stateBatch.Put(newKey, newValue)
 					stateStat.Add(newKVSize)
 					batchSize += newKVSize
+					totalWrittenBytes += uint64(newKVSize)
 					stats.Add("state", len(newKey), len(newValue))
 					redundantKVCount++
+
+					// Log progress every 10GB
+					if redundantKVCount%1000000 == 0 || totalWrittenBytes%(10*1024*1024*1024) < uint64(newKVSize) {
+						log.Info("📊 Write progress update",
+							"totalWrittenBytes", totalWrittenBytes,
+							"totalWrittenGB", totalWrittenBytes/(1024*1024*1024),
+							"redundantKVCount", redundantKVCount,
+							"progress%", float64(totalWrittenBytes)*100/float64(maxWriteBytes))
+					}
 				}
 
 				prefixExtracted++
@@ -2267,11 +2300,28 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 	log.Info("✅ Trie node data extraction with transformation completed",
 		"accountTrieNodes", accountTrieCount, "storageTrieNodes", storageTrieCount, "redundantKVPairs", redundantKVCount,
 		"totalTrieNodes", accountTrieCount+storageTrieCount, "totalKVPairs", stateStat.count, "totalSize", stateStat.size,
+		"totalWrittenBytes", totalWrittenBytes, "totalWrittenGB", totalWrittenBytes/(1024*1024*1024),
+		"limitReached", limitReached, "maxLimitGB", maxWriteBytes/(1024*1024*1024),
 		"operation", "IsAccountTrieNode + IsStorageTrieNode filtering with redundant KV generation",
 		"transformation", "A->X, O->Y prefix replacement with value shuffling",
 		"originalDataIntact", "true (no deletions performed)",
 		"phases", "1 (trie node extraction with transformation)",
 		"threadsUsed", fmt.Sprintf("%d (1 reader + %d trie node writers)", threadPoolSize+1, threadPoolSize))
+
+	if limitReached {
+		log.Warn("🛑 Extraction stopped due to 600GB write limit",
+			"finalWrittenGB", totalWrittenBytes/(1024*1024*1024),
+			"finalWrittenBytes", totalWrittenBytes,
+			"limitGB", maxWriteBytes/(1024*1024*1024),
+			"redundantKVPairs", redundantKVCount)
+	} else {
+		log.Info("✅ Extraction completed within 600GB limit",
+			"finalWrittenGB", totalWrittenBytes/(1024*1024*1024),
+			"finalWrittenBytes", totalWrittenBytes,
+			"limitGB", maxWriteBytes/(1024*1024*1024),
+			"redundantKVPairs", redundantKVCount)
+	}
+
 	return nil
 }
 
