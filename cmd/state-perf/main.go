@@ -424,8 +424,8 @@ func loadDataSet(testCaseDir string) (*DataSet, error) {
 	log.Info("New pebble db finish")
 	dataSet := &DataSet{}
 
-	// Limit to 500 million keys
-	const maxKeys = 500_000_000
+	// Limit to 150 million keys
+	const maxKeys = 150_000_000
 	totalScanned := 0
 
 	// Load account trie nodes using prefix scan
