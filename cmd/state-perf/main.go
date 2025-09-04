@@ -107,8 +107,11 @@ type PerfRunner struct {
 	totalBatchCount int64 // Total number of batches processed
 
 	// Read statistics for trie types
-	totalTrieReadOps  int64
-	totalTrieReadTime time.Duration
+	totalTrieReadOps     int64
+	totalTrieReadTime    time.Duration
+	totalSuccessfulReads int64 // Count of successful reads (returned data)
+	totalFailedReads     int64 // Count of failed reads (errors)
+	totalEmptyReads      int64 // Count of reads that returned empty values
 	// Histograms for percentiles (linear microsecond buckets up to threshold)
 	trieLatencyHist [latencyHistUSMax + 2]int64 // 0..max, overflow at last index
 	minTrieReadTime int64                       // stored as nanoseconds for atomic operations
@@ -405,6 +408,65 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 		}
 	}
 	defer benchDB.Close()
+
+	// Verify that test data keys can be read from benchmark database
+	log.Info("Verifying test data accessibility in benchmark database...")
+	verificationCount := 0
+	successCount := 0
+	sampleSize := min(100, min(len(dataSet.AccountTries), len(dataSet.StorageTries)))
+
+	// Test some account trie keys
+	for i := 0; i < min(sampleSize/2, len(dataSet.AccountTries)); i++ {
+		kv := dataSet.AccountTries[i]
+		value, err := benchDB.Get(kv.Key)
+		verificationCount++
+		if err == nil && len(value) > 0 {
+			successCount++
+			if successCount == 1 {
+				log.Info("Sample verification successful",
+					"type", "account",
+					"key", fmt.Sprintf("%x", kv.Key[:min(8, len(kv.Key))]),
+					"valueSize", len(value))
+			}
+		} else {
+			if verificationCount <= 5 { // Log first few failures
+				log.Warn("Sample verification failed",
+					"type", "account",
+					"key", fmt.Sprintf("%x", kv.Key[:min(8, len(kv.Key))]),
+					"error", err,
+					"valueSize", len(value))
+			}
+		}
+	}
+
+	// Test some storage trie keys
+	for i := 0; i < min(sampleSize/2, len(dataSet.StorageTries)); i++ {
+		kv := dataSet.StorageTries[i]
+		value, err := benchDB.Get(kv.Key)
+		verificationCount++
+		if err == nil && len(value) > 0 {
+			successCount++
+		} else {
+			if verificationCount-successCount <= 5 { // Log first few failures
+				log.Warn("Sample verification failed",
+					"type", "storage",
+					"key", fmt.Sprintf("%x", kv.Key[:min(8, len(kv.Key))]),
+					"error", err,
+					"valueSize", len(value))
+			}
+		}
+	}
+
+	verificationRate := float64(successCount) * 100 / float64(verificationCount)
+	log.Info("Test data verification completed",
+		"verified", verificationCount,
+		"successful", successCount,
+		"successRate", fmt.Sprintf("%.1f%%", verificationRate))
+
+	if verificationRate < 10.0 {
+		log.Error("WARNING: Very low verification success rate - test data may not be properly accessible in benchmark database",
+			"rate", fmt.Sprintf("%.1f%%", verificationRate))
+	}
 
 	// Create and start performance runner
 	runner := NewPerfRunner(dataSet, benchDB, *config, c, stack)
@@ -844,10 +906,13 @@ func (r *PerfRunner) processTrieReadsParallel(readKVs []KeyValue, wg *sync.WaitG
 			defer wg.Done()
 			localReadOps := int64(0)
 			localOpTime := int64(0)
+			localSuccessfulReads := int64(0)
+			localFailedReads := int64(0)
+			localEmptyReads := int64(0)
 
 			for _, kv := range kvs {
 				start := time.Now()
-				_, err := r.db.Get(kv.Key)
+				value, err := r.db.Get(kv.Key)
 				duration := time.Since(start)
 
 				// Update min/max read times
@@ -863,16 +928,55 @@ func (r *PerfRunner) processTrieReadsParallel(readKVs []KeyValue, wg *sync.WaitG
 				}
 				atomic.AddInt64(&r.trieLatencyHist[b], 1)
 
-				if err != nil {
-					// Key might not exist, continue
-				}
 				localReadOps++
 				localOpTime += int64(duration)
+
+				if err != nil {
+					localFailedReads++
+					// Log first few failures for debugging
+					if localFailedReads <= 3 {
+						log.Debug("Failed to read key from database",
+							"key", fmt.Sprintf("%x", kv.Key[:min(8, len(kv.Key))]),
+							"error", err,
+							"keySize", len(kv.Key))
+					}
+				} else if len(value) == 0 {
+					localEmptyReads++
+					// Log first few empty reads for debugging
+					if localEmptyReads <= 3 {
+						log.Debug("Read returned empty value",
+							"key", fmt.Sprintf("%x", kv.Key[:min(8, len(kv.Key))]),
+							"keySize", len(kv.Key))
+					}
+				} else {
+					localSuccessfulReads++
+					// Log first successful read for verification
+					if localSuccessfulReads == 1 {
+						log.Debug("Successful trie read",
+							"key", fmt.Sprintf("%x", kv.Key[:min(8, len(kv.Key))]),
+							"valueSize", len(value),
+							"keySize", len(kv.Key),
+							"duration", duration)
+					}
+				}
 			}
 
 			atomic.AddInt64(&r.totalTrieReadOps, localReadOps)
 			atomic.AddInt64(&r.totalReadOps, localReadOps) // Keep total counter for compatibility
 			atomic.AddInt64((*int64)(&r.totalTrieReadTime), localOpTime)
+			atomic.AddInt64(&r.totalSuccessfulReads, localSuccessfulReads)
+			atomic.AddInt64(&r.totalFailedReads, localFailedReads)
+			atomic.AddInt64(&r.totalEmptyReads, localEmptyReads)
+
+			// Log read statistics for this thread
+			if localReadOps > 0 {
+				log.Debug("Thread read statistics",
+					"totalReads", localReadOps,
+					"successfulReads", localSuccessfulReads,
+					"failedReads", localFailedReads,
+					"emptyReads", localEmptyReads,
+					"successRate", fmt.Sprintf("%.1f%%", float64(localSuccessfulReads)*100/float64(localReadOps)))
+			}
 		}(readKVs[start:end])
 	}
 }
@@ -1214,15 +1318,27 @@ func (r *PerfRunner) printStat() {
 	writeMinTime := atomic.LoadInt64(&r.minWriteTime)
 	writeMaxTime := atomic.LoadInt64(&r.maxWriteTime)
 
+	// Calculate read success rate
+	var readSuccessRate float64
+	totalReads := atomic.LoadInt64(&r.totalTrieReadOps)
+	successfulReads := atomic.LoadInt64(&r.totalSuccessfulReads)
+	failedReads := atomic.LoadInt64(&r.totalFailedReads)
+	emptyReads := atomic.LoadInt64(&r.totalEmptyReads)
+
+	if totalReads > 0 {
+		readSuccessRate = float64(successfulReads) * 100 / float64(totalReads)
+	}
+
 	fmt.Printf(
 		"[%s] Perf In Progress - block height=%d\n"+
-			"  Trie Read TPS: %.2f, Latency: %.2f μs (min: %s, max: %s)\n"+
+			"  Trie Read TPS: %.2f, Latency: %.2f μs (min: %s, max: %s) [Success: %.1f%% (%d/%d), Failed: %d, Empty: %d]\n"+
 			"  Update TPS: %.2f, Latency: %.2f μs (min: %s, max: %s)\n"+
 			"  Write Batch: Latency: %s (min: %s, max: %s), Avg KVs: %.0f, Avg Size: %.1f MB, Count: %d\n"+
 			"  Accumulated Updates: %d KVs, %.2f MB (target: 230-256MB)\n",
 		time.Now().Format(time.RFC3339),
 		r.blockHeight,
 		trieReadTPS, trieReadLatency, formatDurationFromNanos(trieMinTime), formatDurationFromNanos(trieMaxTime),
+		readSuccessRate, successfulReads, totalReads, failedReads, emptyReads,
 		updateTPS, updateLatency, formatDurationFromNanos(updateMinTime), formatDurationFromNanos(updateMaxTime),
 		formatLatency(writeLatency), formatDurationFromNanos(writeMinTime), formatDurationFromNanos(writeMaxTime),
 		avgKVsPerBatch, avgBatchSizeMB, r.totalBatchWrites,
