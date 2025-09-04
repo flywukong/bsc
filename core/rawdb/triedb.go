@@ -169,7 +169,7 @@ func ShardIndexInTrieDB(key []byte, shardNum int) int {
 			hash := crc32.ChecksumIEEE(key[1:])
 			return int(hash) % shardNum
 		}
-	
+
 	*/
 	// TrieNodeAccountPrefix + hexPath -> trie node
 	if TrieNodeAccountPrefix[0] == key[0] {

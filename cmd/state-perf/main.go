@@ -339,35 +339,35 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 			ShardNum:       8, // Use 8 shards for testing
 			Shards: []shardingdb.ShardConfig{
 				{
-					DBPath:  config.BenchDBPath + "/shard0000",
+					DBPath:  "", // Let shardingdb use default path construction
 					Indexes: "0",
 				},
 				{
-					DBPath:  config.BenchDBPath + "/shard0001",
+					DBPath:  "", // Let shardingdb use default path construction
 					Indexes: "1",
 				},
 				{
-					DBPath:  config.BenchDBPath + "/shard0002",
+					DBPath:  "", // Let shardingdb use default path construction
 					Indexes: "2",
 				},
 				{
-					DBPath:  config.BenchDBPath + "/shard0003",
+					DBPath:  "", // Let shardingdb use default path construction
 					Indexes: "3",
 				},
 				{
-					DBPath:  config.BenchDBPath + "/shard0004",
+					DBPath:  "", // Let shardingdb use default path construction
 					Indexes: "4",
 				},
 				{
-					DBPath:  config.BenchDBPath + "/shard0005",
+					DBPath:  "", // Let shardingdb use default path construction
 					Indexes: "5",
 				},
 				{
-					DBPath:  config.BenchDBPath + "/shard0006",
+					DBPath:  "", // Let shardingdb use default path construction
 					Indexes: "6",
 				},
 				{
-					DBPath:  config.BenchDBPath + "/shard0007",
+					DBPath:  "", // Let shardingdb use default path construction
 					Indexes: "7",
 				},
 			},
