@@ -322,14 +322,17 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 
 	// Configure sharding database if enabled
 	if config.ShardingDB {
-		log.Info("Creating sharding database for benchmark operations")
+		log.Info("Creating sharding database for benchmark operations",
+			"dbPath", config.BenchDBPath,
+			"shardNum", 8,
+			"dbType", "pebble")
 
 		// Create sharding database configuration
 		shardingConfig := &shardingdb.Config{
 			EnableSharding: true,
 			DBType:         shardingdb.DBTypePebble,
 			DBPath:         config.BenchDBPath,
-			Namespace:      "",
+			Namespace:      "eth/db/chaindata/",
 			ShardNum:       8, // Use 8 shards for testing
 			Shards: []shardingdb.ShardConfig{
 				{
@@ -367,15 +370,33 @@ func runPerfTest(c *cli.Context, config *PerfConfig) error {
 			},
 		}
 
+		log.Info("Sharding database configuration prepared",
+			"enableSharding", shardingConfig.EnableSharding,
+			"dbType", shardingConfig.DBType,
+			"dbPath", shardingConfig.DBPath,
+			"namespace", shardingConfig.Namespace,
+			"shardNum", shardingConfig.ShardNum,
+			"totalShards", len(shardingConfig.Shards))
+
+		// Log each shard configuration
+		for i, shard := range shardingConfig.Shards {
+			log.Debug("Shard configuration", "index", i, "dbPath", shard.DBPath, "indexes", shard.Indexes)
+		}
+
 		// Create sharding database
+		log.Info("Creating sharding database instance...")
 		shardDB, err := shardingdb.New(shardingConfig, config.CacheSize, config.Handles, false, rawdb.ShardIndexInTrieDB)
 		if err != nil {
 			return fmt.Errorf("failed to create sharding database: %v", err)
 		}
 
 		// Use rawdb.NewDatabase to wrap sharding database
+		log.Info("Wrapping sharding database with rawdb.NewDatabase...")
 		benchDB = rawdb.NewDatabase(shardDB)
-		log.Info("Sharding database created successfully", "shards", shardingConfig.ShardNum)
+		log.Info("Sharding database created successfully",
+			"shards", shardingConfig.ShardNum,
+			"cacheSize", config.CacheSize,
+			"handles", config.Handles)
 	} else {
 		// Create benchmark database using OpenDatabaseWithFreezer
 		benchDB, err = stack.OpenDatabaseWithFreezer("chaindata", config.CacheSize, config.Handles, "", "", false, false)
