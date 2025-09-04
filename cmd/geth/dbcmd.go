@@ -2157,7 +2157,7 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 			value := make([]byte, len(it.Value()))
 			copy(key, it.Key())
 			copy(value, it.Value())
-			kvSize := len(key) + len(value)
+			//	kvSize := len(key) + len(value)
 			totalScanned++
 			prefixScanned++
 
