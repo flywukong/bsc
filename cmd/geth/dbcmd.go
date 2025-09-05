@@ -2072,15 +2072,6 @@ func extractAllDataInOnePass(sourceDB, chainDB, stateDB, snapDB, indexDB ethdb.D
 		newKey := make([]byte, len(originalKey))
 		copy(newKey, originalKey)
 
-		// 替换前缀以避免与原有trie节点冲突
-		// TrieNodeAccountPrefix "A" -> "X"
-		// TrieNodeStoragePrefix "O" -> "Y"
-		if bytes.HasPrefix(originalKey, []byte("A")) {
-			newKey[0] = 'X'
-		} else if bytes.HasPrefix(originalKey, []byte("O")) {
-			newKey[0] = 'Y'
-		}
-
 		// 填充中间部分随机数据
 		if len(originalKey) > 2 {
 			randomBytes := make([]byte, len(originalKey)-2)
