@@ -176,9 +176,15 @@ func (l panicLogger) Fatalf(format string, args ...interface{}) {
 	panic(fmt.Errorf("fatal: "+format, args...))
 }
 
+func New(file string, cache int, handles int, namespace string, readonly bool) (*Database, error) {
+	sharedCache := pebble.NewCache(int64(cache * 1024 * 1024))
+	defer sharedCache.Unref()
+	return NewWithCache(file, cache, handles, namespace, readonly, sharedCache, sharedCache, sharedCache)
+}
+
 // New returns a wrapped pebble DB object. The namespace is the prefix that the
 // metrics reporting should use for surfacing internal stats.
-func New(file string, cache int, handles int, namespace string, readonly bool) (*Database, error) {
+func NewWithCache(file string, cache int, handles int, namespace string, readonly bool, blockCache, filterCache, indexCache *pebble.Cache) (*Database, error) {
 	// Ensure we have some minimal caching and file guarantees
 	if cache < minCache {
 		cache = minCache
@@ -238,7 +244,9 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 		// Pebble has a single combined cache area and the write
 		// buffers are taken from this too. Assign all available
 		// memory allowance for cache.
-		Cache:        pebble.NewCache(int64(cache * 1024 * 1024)),
+		Cache:        blockCache,
+		FilterCache:  filterCache,
+		IndexCache:   indexCache,
 		MaxOpenFiles: handles,
 
 		// The size of memory table(as well as the write buffer).
