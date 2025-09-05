@@ -811,32 +811,26 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 
 	generateNewKey := func(originalKey []byte, suffix byte) []byte {
 		if len(originalKey) <= 2 {
-			return originalKey
+			return nil
 		}
 
-		newKey := make([]byte, len(originalKey))
+		// Create new key with length + 1 to append suffix
+		newKey := make([]byte, len(originalKey)+1)
 		copy(newKey, originalKey)
 
-		// 替换前缀以避免与原有trie节点冲突
-		// TrieNodeAccountPrefix "A" -> "X"
-		// TrieNodeStoragePrefix "O" -> "Y"
-		if bytes.HasPrefix(originalKey, []byte("A")) {
-			newKey[0] = 'X'
-		} else if bytes.HasPrefix(originalKey, []byte("O")) {
-			newKey[0] = 'Y'
-		}
-
-		// 填充中间部分随机数据
+		// 填充中间部分随机数据 (excluding first and last byte of original key)
 		if len(originalKey) > 2 {
 			randomBytes := make([]byte, len(originalKey)-2)
 			rand.Read(randomBytes)
-			copy(newKey[1:len(newKey)-1], randomBytes)
+			copy(newKey[1:len(originalKey)-1], randomBytes)
 		}
 
-		// key末尾一位使用version
+		// append suffix到最后一位 (new position)
 		newKey[len(newKey)-1] = suffix
+
 		// 检查生成的key是否与原始key相同，如果相同则跳过
-		if bytes.Equal(newKey, originalKey) {
+		// Note: this check is now less likely since we're appending, not replacing
+		if bytes.Equal(newKey[:len(originalKey)], originalKey) && len(newKey) == len(originalKey) {
 			return nil // 返回nil表示跳过这个key
 		}
 
