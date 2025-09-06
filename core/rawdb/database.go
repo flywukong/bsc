@@ -827,7 +827,7 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 			if keyLen > 8 {
 				keyLen = 8
 			}
-			log.Debug("Skipping account trie node", "key", fmt.Sprintf("%x", originalKey[:keyLen]))
+			log.Info("Skipping account trie node", "key", fmt.Sprintf("%x", originalKey[:keyLen]))
 			return nil
 		}
 		if IsStorageTrieNode(originalKey) {
@@ -836,7 +836,7 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 			if keyLen > 8 {
 				keyLen = 8
 			}
-			log.Debug("Skipping storage trie node", "key", fmt.Sprintf("%x", originalKey[:keyLen]))
+			log.Info("Skipping storage trie node", "key", fmt.Sprintf("%x", originalKey[:keyLen]))
 			return nil
 		}
 
