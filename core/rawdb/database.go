@@ -814,9 +814,30 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 			return nil
 		}
 
+		// 跳过trie节点：只生成非trie数据的冗余版本
+		if IsAccountTrieNode(originalKey) {
+			keyLen := len(originalKey)
+			if keyLen > 8 {
+				keyLen = 8
+			}
+			log.Debug("Skipping account trie node", "key", fmt.Sprintf("%x", originalKey[:keyLen]))
+			return nil
+		}
+		if IsStorageTrieNode(originalKey) {
+			keyLen := len(originalKey)
+			if keyLen > 8 {
+				keyLen = 8
+			}
+			log.Debug("Skipping storage trie node", "key", fmt.Sprintf("%x", originalKey[:keyLen]))
+			return nil
+		}
+
 		// Create new key with length + 1 to append suffix
 		newKey := make([]byte, len(originalKey)+1)
 		copy(newKey, originalKey)
+
+		// 保持第一个字节不变（前缀一致）
+		// newKey[0] 已经通过 copy(newKey, originalKey) 设置为 originalKey[0]
 
 		// 填充中间部分随机数据 (excluding first and last byte of original key)
 		if len(originalKey) > 2 {
@@ -829,7 +850,6 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 		newKey[len(newKey)-1] = suffix
 
 		// 检查生成的key是否与原始key相同，如果相同则跳过
-		// Note: this check is now less likely since we're appending, not replacing
 		if bytes.Equal(newKey[:len(originalKey)], originalKey) && len(newKey) == len(originalKey) {
 			return nil // 返回nil表示跳过这个key
 		}
