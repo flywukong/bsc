@@ -696,6 +696,12 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 		channelBufferSize = 10000             // Channel buffer size
 	)
 
+	// Trie node skipping counters
+	var (
+		skippedAccountTries int64 // 跳过的account trie节点计数
+		skippedStorageTries int64 // 跳过的storage trie节点计数
+	)
+
 	log.Info("run with new version")
 	// Define focused prefixes to scan concurrently - only the data types we want
 	prefixes := []struct {
@@ -816,6 +822,7 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 
 		// 跳过trie节点：只生成非trie数据的冗余版本
 		if IsAccountTrieNode(originalKey) {
+			atomic.AddInt64(&skippedAccountTries, 1)
 			keyLen := len(originalKey)
 			if keyLen > 8 {
 				keyLen = 8
@@ -824,6 +831,7 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 			return nil
 		}
 		if IsStorageTrieNode(originalKey) {
+			atomic.AddInt64(&skippedStorageTries, 1)
 			keyLen := len(originalKey)
 			if keyLen > 8 {
 				keyLen = 8
@@ -952,11 +960,16 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 						if progress >= lastProgress+10 && progress != lastProgress {
 							lastProgress = progress
 							totalBytes := atomic.LoadInt64(&totalBytesWritten)
+							currentSkippedAccountTries := atomic.LoadInt64(&skippedAccountTries)
+							currentSkippedStorageTries := atomic.LoadInt64(&skippedStorageTries)
 							log.Info("Data expansion progress",
 								"progress", fmt.Sprintf("%d%%", progress),
 								"processedKeys", processed,
 								"totalBytesWritten", common.StorageSize(totalBytes).String(),
 								"newKeysCreated", atomic.LoadInt64(&newKeysCreated),
+								"skippedTrieNodes", fmt.Sprintf("账户:%d, 存储:%d, 总计:%d",
+									currentSkippedAccountTries, currentSkippedStorageTries,
+									currentSkippedAccountTries+currentSkippedStorageTries),
 								"duplicateKeys", atomic.LoadInt64(&duplicateKeys))
 						}
 					}
@@ -1039,6 +1052,9 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 	finalDuplicates := atomic.LoadInt64(&duplicateKeys)
 	finalDuplicateValues := atomic.LoadInt64(&duplicateValues)
 	finalSkipped := atomic.LoadInt64(&skippedKeys)
+	finalSkippedAccountTries := atomic.LoadInt64(&skippedAccountTries)
+	finalSkippedStorageTries := atomic.LoadInt64(&skippedStorageTries)
+	totalSkippedTries := finalSkippedAccountTries + finalSkippedStorageTries
 
 	log.Info("🎉 Focused concurrent database expansion completed!",
 		"newKeysCreated", finalKeysCreated,
@@ -1048,6 +1064,12 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 		"duplicateValues", finalDuplicateValues,
 		"skippedKeys", finalSkipped,
 		"focusedDataTypes", "accountTrie,storageTrie,code,txLookup,accountSnapshot,storageSnapshot")
+
+	log.Info("📊 Trie Node Skipping Statistics",
+		"skippedAccountTrieNodes", finalSkippedAccountTries,
+		"skippedStorageTrieNodes", finalSkippedStorageTries,
+		"totalSkippedTrieNodes", totalSkippedTries,
+		"reason", "避免trie节点冲突，只生成非trie数据的冗余版本")
 
 	if finalDuplicates > 0 {
 		log.Warn("Duplicate key generation detected", "duplicateCount", finalDuplicates)
