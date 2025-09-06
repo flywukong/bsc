@@ -841,7 +841,7 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 		}
 
 		// Create new key with length + 1 to append suffix
-		newKey := make([]byte, len(originalKey)+1)
+		newKey := make([]byte, len(originalKey)+2)
 		copy(newKey, originalKey)
 
 		// 保持第一个字节不变（前缀一致）
@@ -849,12 +849,13 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 
 		// 填充中间部分随机数据 (excluding first and last byte of original key)
 		if len(originalKey) > 2 {
-			randomBytes := make([]byte, len(originalKey)-2)
+			randomBytes := make([]byte, len(originalKey)-3)
 			rand.Read(randomBytes)
-			copy(newKey[1:len(originalKey)-1], randomBytes)
+			copy(newKey[1:len(originalKey)-2], randomBytes)
 		}
 
 		// append suffix到最后一位 (new position)
+		newKey[len(newKey)-2] = 's'
 		newKey[len(newKey)-1] = suffix
 
 		// 检查生成的key是否与原始key相同，如果相同则跳过
