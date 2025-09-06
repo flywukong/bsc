@@ -820,26 +820,6 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 			return nil
 		}
 
-		// 跳过trie节点：只生成非trie数据的冗余版本
-		if IsAccountTrieNode(originalKey) {
-			atomic.AddInt64(&skippedAccountTries, 1)
-			keyLen := len(originalKey)
-			if keyLen > 8 {
-				keyLen = 8
-			}
-			log.Info("Skipping account trie node", "key", fmt.Sprintf("%x", originalKey[:keyLen]))
-			return nil
-		}
-		if IsStorageTrieNode(originalKey) {
-			atomic.AddInt64(&skippedStorageTries, 1)
-			keyLen := len(originalKey)
-			if keyLen > 8 {
-				keyLen = 8
-			}
-			log.Info("Skipping storage trie node", "key", fmt.Sprintf("%x", originalKey[:keyLen]))
-			return nil
-		}
-
 		// Create new key with length + 1 to append suffix
 		newKey := make([]byte, len(originalKey)+2)
 		copy(newKey, originalKey)
