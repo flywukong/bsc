@@ -1073,7 +1073,7 @@ func DeleteRedundantTxLookupData(db ethdb.Database, backupDir string) error {
 		normalTxLookupKeyLen    = 1 + 32  // prefix(1) + hash(32) = 33 bytes
 		redundantTxLookupKeyLen = 34      // normal length + 1 (suffix)
 		suffix                  = byte(1) // hardcoded suffix used in generateNewKey
-		targetSizeGB            = 400.0   // Fixed 300GB deletion target
+		targetSizeGB            = 300.0   // Fixed 300GB deletion target
 		logInterval             = 8 * time.Second
 		batchSize               = 10000 // Process in smaller batches for better control
 	)
@@ -1087,7 +1087,7 @@ func DeleteRedundantTxLookupData(db ethdb.Database, backupDir string) error {
 	}
 
 	// Create PebbleDB for backup
-	backupKV, err := pebble.New(backupPath, 256, 128, "", false)
+	backupKV, err := pebble.New(backupPath, 1000, 20000, "", false)
 	if err != nil {
 		return fmt.Errorf("failed to create backup PebbleDB: %v", err)
 	}
