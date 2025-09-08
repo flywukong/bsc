@@ -360,15 +360,25 @@ func initGenesis(ctx *cli.Context) error {
 			utils.Fatalf("Failed to open separate trie database: %v", dbErr)
 		}
 		chaindb.SetStateStore(statediskdb)
-		snapDB, err := stack.OpenDatabase("chaindata/snapshot", 0, 0, "", false)
+		snapDB, err := stack.OpenDatabaseWithOptions("chaindata/snapshot", node.DatabaseOptions{
+			Cache:        0,
+			Handles:      0,
+			ReadOnly:     false,
+			IsKeyValueDb: true,
+		})
 		if err != nil {
 			utils.Fatalf("Failed to open separate snapshot database: %v", err)
 		}
 		chaindb.SetSnapStore(snapDB)
 
-		txIndexDB, err := stack.OpenDatabase("chaindata/txindex", 0, 0, "", false)
+		txIndexDB, err := stack.OpenDatabaseWithOptions("chaindata/txindex", node.DatabaseOptions{
+			Cache:        0,
+			Handles:      0,
+			ReadOnly:     false,
+			IsKeyValueDb: true,
+		})
 		if err != nil {
-			utils.Fatalf("Failed to open separate snapshot database: %v", err)
+			utils.Fatalf("Failed to open separate txindex database: %v", err)
 		}
 		chaindb.SetTxIndexStore(txIndexDB)
 		log.Warn("Multi-database is an experimental feature")

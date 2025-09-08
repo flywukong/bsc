@@ -762,7 +762,7 @@ func (n *Node) OpenDatabaseWithOptions(name string, opt DatabaseOptions) (ethdb.
 			ReadOnly:         opt.ReadOnly,
 		})
 	} else {
-		if !opt.isKeyValueDataBase {
+		if !opt.IsKeyValueDb {
 			opt.AncientsDirectory = n.ResolveAncient(name, opt.AncientsDirectory)
 		}
 		db, err = openDatabase(internalOpenOptions{
@@ -835,7 +835,13 @@ func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool
 
 		chainDB.SetStateStore(stateDiskDb)
 		// Open the snapshot database as a pure key-value store
-		snapshotDb, err := n.OpenDatabase(name+"/snapshot", snapDbCache, snapDbHandles, "eth/db/snapdata/", readonly)
+		snapshotDb, err := n.OpenDatabaseWithOptions(name+"/snapshot", DatabaseOptions{
+			Cache:            snapDbCache,
+			Handles:          snapDbHandles,
+			MetricsNamespace: "eth/db/snapdata/",
+			ReadOnly:         readonly,
+			IsKeyValueDb:     true,
+		})
 		if err != nil {
 			log.Error("Failed to open separate snapshot database", "err", err)
 			return nil, err
@@ -844,7 +850,13 @@ func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool
 		chainDB.SetSnapStore(snapshotDb)
 
 		// Open the tx index database as a pure key-value store
-		indexDb, err := n.OpenDatabase(name+"/txindex", indexDbCache, indexDbHandles, "eth/db/txindex/", readonly)
+		indexDb, err := n.OpenDatabaseWithOptions(name+"/txindex", DatabaseOptions{
+			Cache:            indexDbCache,
+			Handles:          indexDbHandles,
+			MetricsNamespace: "eth/db/txindex/",
+			ReadOnly:         readonly,
+			IsKeyValueDb:     true,
+		})
 		if err != nil {
 			log.Error("Failed to open separate tx index database", "err", err)
 			return nil, err

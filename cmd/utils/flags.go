@@ -2618,7 +2618,13 @@ func MakeStateDataBase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.
 func MakeSnapDataBase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.KeyValueStore {
 	cache := ctx.Int(CacheFlag.Name) * ctx.Int(CacheDatabaseFlag.Name) * node.SnapDbResourcePercentage / 100
 	handles := MakeDatabaseHandles(ctx.Int(FDLimitFlag.Name)) * node.SnapDbResourcePercentage / 100
-	snapdb, err := stack.OpenDatabase("chaindata/snapshot", cache, handles, "eth/db/snapdata/", readonly)
+	snapdb, err := stack.OpenDatabaseWithOptions("chaindata/snapshot", node.DatabaseOptions{
+		Cache:            cache,
+		Handles:          handles,
+		MetricsNamespace: "eth/db/snapdata/",
+		ReadOnly:         readonly,
+		IsKeyValueDb:     true,
+	})
 	if err != nil {
 		Fatalf("Failed to open separate snapshot database: %v", err)
 	}
@@ -2630,7 +2636,13 @@ func MakeSnapDataBase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.K
 func MakeTxIndexDatabase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.KeyValueStore {
 	cache := ctx.Int(CacheFlag.Name) * ctx.Int(CacheDatabaseFlag.Name) * node.IndexDbResourcePercentage / 100
 	handles := MakeDatabaseHandles(ctx.Int(FDLimitFlag.Name)) * node.IndexDbResourcePercentage / 100
-	indexdb, err := stack.OpenDatabase("chaindata/txindex", cache, handles, "eth/db/txindex/", readonly)
+	indexdb, err := stack.OpenDatabaseWithOptions("chaindata/txindex", node.DatabaseOptions{
+		Cache:            cache,
+		Handles:          handles,
+		MetricsNamespace: "eth/db/txindex/",
+		ReadOnly:         readonly,
+		IsKeyValueDb:     true,
+	})
 	if err != nil {
 		Fatalf("Failed to open separate tx index database: %v", err)
 	}
