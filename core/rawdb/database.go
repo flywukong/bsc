@@ -1109,8 +1109,11 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 	doneChan := make(chan struct{})
 	var wg sync.WaitGroup
 
+	targetMB := float64(targetBytes) / (1024 * 1024)
 	log.Info("开始11线程超高性能异步删除冗余txlookup数据",
-		"targetDeleteSize", common.StorageSize(targetBytes),
+		"targetDeleteMB", fmt.Sprintf("%.0f MB", targetMB),
+		"targetDeleteGB", fmt.Sprintf("%.1f GB", targetMB/1024),
+		"batchSizeMB", "256 MB",
 		"redundantKeyLength", redundantTxLookupKeyLen,
 		"normalKeyLength", normalTxLookupKeyLen,
 		"suffix", suffix,
@@ -1134,8 +1137,8 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 					deleteBatch.Delete(key)
 					deleteCount++
 
-					// Write delete batch when it gets large enough
-					if deleteBatch.ValueSize() > ethdb.IdealBatchSize {
+					// Write delete batch when it reaches 256MB for optimal performance
+					if deleteBatch.ValueSize() > 256*1024*1024 {
 						if err := deleteBatch.Write(); err != nil {
 							log.Error("删除批次写入失败", "worker", workerID, "err", err)
 							return
@@ -1156,11 +1159,13 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 
 					// Log delete progress every 30 seconds (less frequent for 10 workers)
 					if time.Since(deleteLogged) > 30*time.Second {
+						totalMB := float64(atomic.LoadInt64(&deletedBytes)) / (1024 * 1024)
+						batchMB := float64(deleteBatch.ValueSize()) / (1024 * 1024)
 						log.Info("🗑️  删除工作线程进度",
 							"workerID", workerID,
 							"deleteCount", deleteCount,
-							"totalDeletedSize", common.StorageSize(atomic.LoadInt64(&deletedBytes)),
-							"batchSize", common.StorageSize(deleteBatch.ValueSize()),
+							"totalDeletedMB", fmt.Sprintf("%.1f MB", totalMB),
+							"batchMB", fmt.Sprintf("%.1f MB", batchMB),
 							"channelBuffer", fmt.Sprintf("%d/%d", len(deleteChannel), cap(deleteChannel)),
 							"elapsed", common.PrettyDuration(time.Since(start)))
 						deleteLogged = time.Now()
@@ -1258,11 +1263,13 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 				currentDeletedBytes := atomic.LoadInt64(&deletedBytes)
 				remainingBytes := targetBytes - currentDeletedBytes
 				progress := float64(currentDeletedBytes) / float64(targetBytes) * 100
+				deletedMB := float64(currentDeletedBytes) / (1024 * 1024)
+				remainingMB := float64(remainingBytes) / (1024 * 1024)
 				log.Info("📡 主扫描线程总体进度",
 					"scannedCount", deletedCount,
-					"deletedSize", common.StorageSize(currentDeletedBytes),
+					"deletedMB", fmt.Sprintf("%.1f MB", deletedMB),
 					"matchedCount", matchedCount,
-					"remainingSize", common.StorageSize(remainingBytes),
+					"remainingMB", fmt.Sprintf("%.1f MB", remainingMB),
 					"progress", fmt.Sprintf("%.1f%%", progress),
 					"deleteBuffer", fmt.Sprintf("%d/%d", len(deleteChannel), cap(deleteChannel)),
 					"totalChecked", totalCheckedKeys,
@@ -1292,9 +1299,11 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 
 	if matchedCount > 0 {
 		finalDeletedBytes := atomic.LoadInt64(&deletedBytes)
+		finalDeletedMB := float64(finalDeletedBytes) / (1024 * 1024)
 		log.Info("✅ 11线程极速异步冗余txlookup数据删除完成",
 			"deletedCount", deletedCount,
-			"deletedSize", common.StorageSize(finalDeletedBytes),
+			"deletedMB", fmt.Sprintf("%.1f MB", finalDeletedMB),
+			"deletedGB", fmt.Sprintf("%.2f GB", finalDeletedMB/1024),
 			"matchedCount", matchedCount,
 			"totalTxLookupKeys", totalTxLookupKeys,
 			"matchRate", fmt.Sprintf("%.2f%%", float64(matchedCount)/float64(totalTxLookupKeys)*100),

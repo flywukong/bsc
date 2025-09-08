@@ -250,7 +250,8 @@ The redundant data is identified by:
 
 Performance Architecture: 1 main scan thread + 10 delete worker threads
 Channel Buffer: 20,000 entries for optimal throughput
-Expected Performance: ~2-3x faster than backup mode
+Batch Size: 256MB per delete worker for maximum I/O efficiency  
+Expected Performance: ~3-5x faster than backup mode
 
 Example: geth db delete-redundant-txlookup  # Delete 300GB at maximum speed`,
 	}
