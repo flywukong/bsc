@@ -19,7 +19,6 @@ package pathdb
 import (
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/VictoriaMetrics/fastcache"
@@ -183,78 +182,84 @@ func (b *buffer) flush(root common.Hash, db ethdb.Database, freezer ethdb.Ancien
 			}
 		}
 
+		// Execute flush operations based on database configuration
 		if snapBatch == nil {
+			// Single database mode: sequential write
 			nodes = b.nodes.write(trieBatch, nodesCache)
 			accounts, slots = b.states.write(trieBatch, progress, statesCache)
 			rawdb.WritePersistentStateID(trieBatch, id)
 			rawdb.WriteSnapshotRoot(trieBatch, root)
 
-			// Flush all mutations in a single batch
 			size = trieBatch.ValueSize()
 			if err := trieBatch.Write(); err != nil {
 				b.flushErr = err
 				return
 			}
-
-			commitBytesMeter.Mark(int64(size))
-			commitNodesMeter.Mark(int64(nodes))
-			commitAccountsMeter.Mark(int64(accounts))
-			commitStoragesMeter.Mark(int64(slots))
-			commitTimeTimer.UpdateSince(start)
 		} else {
+			// Multi database mode: parallel processing for better performance
 			log.Info("multidb flush - parallel processing")
 
-			// Parallel processing of trie and snapshot writes
-			var (
-				wg               sync.WaitGroup
-				trieErr, snapErr error
-			)
+			type flushResult struct {
+				nodes    int
+				accounts int
+				slots    int
+				size     int
+				err      error
+			}
 
-			// Trie batch processing in goroutine
-			wg.Add(1)
+			trieChan := make(chan flushResult, 1)
+			snapChan := make(chan flushResult, 1)
+
+			// Trie batch processing
 			go func() {
-				defer wg.Done()
-				nodes = b.nodes.write(trieBatch, nodesCache)
+				defer close(trieChan)
+				result := flushResult{}
+				result.nodes = b.nodes.write(trieBatch, nodesCache)
 				rawdb.WritePersistentStateID(trieBatch, id)
-
-				size = trieBatch.ValueSize()
-				if err := trieBatch.Write(); err != nil {
-					trieErr = err
-				}
+				result.size = trieBatch.ValueSize()
+				result.err = trieBatch.Write()
+				trieChan <- result
 			}()
 
-			// Snapshot batch processing in goroutine
-			wg.Add(1)
+			// Snapshot batch processing
 			go func() {
-				defer wg.Done()
-				accounts, slots = b.states.write(snapBatch, progress, statesCache)
+				defer close(snapChan)
+				result := flushResult{}
+				result.accounts, result.slots = b.states.write(snapBatch, progress, statesCache)
 				rawdb.WriteSnapshotRoot(snapBatch, root)
-
-				snapSize = snapBatch.ValueSize()
-				if err := snapBatch.Write(); err != nil {
-					snapErr = err
-				}
+				result.size = snapBatch.ValueSize()
+				result.err = snapBatch.Write()
+				snapChan <- result
 			}()
 
-			// Wait for both operations to complete
-			wg.Wait()
+			// Collect results from both operations
+			trieResult := <-trieChan
+			snapResult := <-snapChan
 
-			// Check for errors from either operation
-			if trieErr != nil {
-				b.flushErr = trieErr
+			// Check for any errors
+			if trieResult.err != nil {
+				b.flushErr = trieResult.err
 				return
 			}
-			if snapErr != nil {
-				b.flushErr = snapErr
+			if snapResult.err != nil {
+				b.flushErr = snapResult.err
 				return
 			}
 
-			commitBytesMeter.Mark(int64(size + snapSize))
-			commitNodesMeter.Mark(int64(nodes))
-			commitAccountsMeter.Mark(int64(accounts))
-			commitStoragesMeter.Mark(int64(slots))
-			commitTimeTimer.UpdateSince(start)
+			// Aggregate results
+			nodes = trieResult.nodes
+			accounts = snapResult.accounts
+			slots = snapResult.slots
+			size = trieResult.size
+			snapSize = snapResult.size
 		}
+
+		// Record performance metrics (unified for both paths)
+		commitBytesMeter.Mark(int64(size + snapSize))
+		commitNodesMeter.Mark(int64(nodes))
+		commitAccountsMeter.Mark(int64(accounts))
+		commitStoragesMeter.Mark(int64(slots))
+		commitTimeTimer.UpdateSince(start)
 
 		// The content in the frozen buffer is kept for consequent state access,
 		// TODO (rjl493456442) measure the gc overhead for holding this struct.
