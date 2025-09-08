@@ -835,7 +835,7 @@ func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool
 
 		chainDB.SetStateStore(stateDiskDb)
 		// Open the snapshot database as a pure key-value store
-		snapshotDb, err := n.OpenDatabase(name+"/snapshot", snapDbCache, snapDbHandles, "eth/db/snapdata/", readonly, true)
+		snapshotDb, err := n.OpenDatabase(name+"/snapshot", snapDbCache, snapDbHandles, "eth/db/snapdata/", readonly)
 		if err != nil {
 			log.Error("Failed to open separate snapshot database", "err", err)
 			return nil, err
@@ -844,7 +844,7 @@ func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool
 		chainDB.SetSnapStore(snapshotDb)
 
 		// Open the tx index database as a pure key-value store
-		indexDb, err := n.OpenDatabase(name+"/txindex", indexDbCache, indexDbHandles, "eth/db/txindex/", readonly, true)
+		indexDb, err := n.OpenDatabase(name+"/txindex", indexDbCache, indexDbHandles, "eth/db/txindex/", readonly)
 		if err != nil {
 			log.Error("Failed to open separate tx index database", "err", err)
 			return nil, err
