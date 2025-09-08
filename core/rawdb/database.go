@@ -32,7 +32,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/memorydb"
-	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/olekukonko/tablewriter"
 )
@@ -1068,13 +1067,14 @@ type KeyValuePair struct {
 }
 
 // DeleteRedundantTxLookupData deletes redundant txlookup data that was generated during database expansion
-// 删除数据库扩展过程中生成的冗余txlookup数据，并备份到tx-back目录（异步处理）
+// 使用11线程极速异步删除冗余txlookup数据（无备份，最大化性能）
+// Architecture: 1 scan thread + 10 delete worker threads
 // Redundant keys are identified by:
 // 1. Having txlookup prefix ("l")
 // 2. Length of 35 bytes (normal is 33 bytes)
 // 3. Second-to-last byte is 's'
 // 4. Last byte is suffix (1)
-func DeleteRedundantTxLookupData(db ethdb.Database, backupDir string) error {
+func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 	const (
 		normalTxLookupKeyLen    = 1 + 32  // prefix(1) + hash(32) = 33 bytes
 		redundantTxLookupKeyLen = 35      // actual length based on logs: 35 bytes
@@ -1086,26 +1086,12 @@ func DeleteRedundantTxLookupData(db ethdb.Database, backupDir string) error {
 
 	targetBytes := int64(targetSizeGB * 1024 * 1024 * 1024)
 
-	// Create backup database - directly write to disk
-	backupPath := filepath.Join(backupDir, "tx-back")
-	if err := os.MkdirAll(backupPath, 0755); err != nil {
-		return fmt.Errorf("failed to create backup directory: %v", err)
-	}
+	// High-performance delete-only mode (no backup needed for maximum speed)
 
-	// Create PebbleDB for backup
-	backupKV, err := pebble.New(backupPath, 1000, 20000, "", false)
-	if err != nil {
-		return fmt.Errorf("failed to create backup PebbleDB: %v", err)
-	}
-	defer backupKV.Close()
-
-	backupDB := NewDatabase(backupKV)
-
-	// Async processing variables
+	// High-performance delete processing variables
 	var (
 		deletedCount      int64
 		deletedBytes      int64
-		backupBytes       int64
 		matchedCount      int64 // 匹配到的冗余key计数
 		totalCheckedKeys  int64
 		totalTxLookupKeys int64                 // 总的txlookup key数量
@@ -1114,130 +1100,85 @@ func DeleteRedundantTxLookupData(db ethdb.Database, backupDir string) error {
 		logged            = time.Now()
 	)
 
-	// Channels for async communication between scan, delete, and backup threads
-	const channelBufferSize = 500
-	backupChannel := make(chan KeyValuePair, channelBufferSize) // For backup thread
-	deleteChannel := make(chan []byte, channelBufferSize)       // For delete thread (only keys needed)
+	// Channels for high-performance delete processing
+	const (
+		channelBufferSize = 10000 // Increased buffer for 10 delete workers
+		numDeleteWorkers  = 10    // 10 delete worker threads for maximum speed
+	)
+	deleteChannel := make(chan []byte, channelBufferSize) // For delete threads (only keys needed)
 	doneChan := make(chan struct{})
 	var wg sync.WaitGroup
 
-	log.Info("开始三线程异步删除冗余txlookup数据并备份",
+	log.Info("开始11线程超高性能异步删除冗余txlookup数据",
 		"targetDeleteSize", common.StorageSize(targetBytes),
-		"backupPath", backupPath,
 		"redundantKeyLength", redundantTxLookupKeyLen,
 		"normalKeyLength", normalTxLookupKeyLen,
 		"suffix", suffix,
-		"mode", "三线程并行")
+		"mode", "11线程极速删除",
+		"architecture", "1扫描+10删除",
+		"channelBuffer", channelBufferSize)
 
-	// Start async backup thread
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		backupBatch := backupDB.NewBatch()
-		backupCount := int64(0)
-		backupLogged := time.Now()
+	// Start 10 high-performance delete worker threads for maximum speed
+	for i := 0; i < numDeleteWorkers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			deleteBatch := db.NewBatch()
+			deleteCount := int64(0)
+			deleteLogged := time.Now()
 
-		for {
-			select {
-			case kv := <-backupChannel:
-				// Backup the key-value pair
-				backupBatch.Put(kv.Key, kv.Value)
-				atomic.AddInt64(&backupBytes, int64(len(kv.Key)+len(kv.Value)))
-				backupCount++
+			for {
+				select {
+				case key := <-deleteChannel:
+					// Delete the key
+					deleteBatch.Delete(key)
+					deleteCount++
 
-				// Write backup batch when it reaches 256MB
-				if backupBatch.ValueSize() > 256*1024*1024 {
-					if err := backupBatch.Write(); err != nil {
-						log.Error("备份批次写入失败", "err", err)
-						return
+					// Write delete batch when it gets large enough
+					if deleteBatch.ValueSize() > ethdb.IdealBatchSize {
+						if err := deleteBatch.Write(); err != nil {
+							log.Error("删除批次写入失败", "worker", workerID, "err", err)
+							return
+						}
+						deleteBatch.Reset()
 					}
-					backupBatch.Reset()
-					runtime.GC() // Force GC after large backup write
-				}
 
-				// Log backup progress every 10 seconds
-				if time.Since(backupLogged) > 10*time.Second {
-					log.Info("💾 备份线程进度",
-						"backupCount", backupCount,
-						"backupSize", common.StorageSize(atomic.LoadInt64(&backupBytes)),
-						"batchSize", common.StorageSize(backupBatch.ValueSize()),
-						"channelBuffer", fmt.Sprintf("%d/%d", len(backupChannel), cap(backupChannel)),
-						"elapsed", common.PrettyDuration(time.Since(start)))
-					backupLogged = time.Now()
-				}
-
-			case <-doneChan:
-				// Write final backup batch
-				if backupBatch.ValueSize() > 0 {
-					if err := backupBatch.Write(); err != nil {
-						log.Error("最终备份批次写入失败", "err", err)
+					// Process in controlled batches to avoid memory issues
+					if deleteCount%batchSize == 0 {
+						// Write delete batch
+						if err := deleteBatch.Write(); err != nil {
+							log.Error("删除批次写入失败", "worker", workerID, "err", err)
+							return
+						}
+						deleteBatch.Reset()
+						runtime.GC() // Force garbage collection periodically
 					}
+
+					// Log delete progress every 30 seconds (less frequent for 10 workers)
+					if time.Since(deleteLogged) > 30*time.Second {
+						log.Info("🗑️  删除工作线程进度",
+							"workerID", workerID,
+							"deleteCount", deleteCount,
+							"totalDeletedSize", common.StorageSize(atomic.LoadInt64(&deletedBytes)),
+							"batchSize", common.StorageSize(deleteBatch.ValueSize()),
+							"channelBuffer", fmt.Sprintf("%d/%d", len(deleteChannel), cap(deleteChannel)),
+							"elapsed", common.PrettyDuration(time.Since(start)))
+						deleteLogged = time.Now()
+					}
+
+				case <-doneChan:
+					// Write final delete batch
+					if deleteBatch.ValueSize() > 0 {
+						if err := deleteBatch.Write(); err != nil {
+							log.Error("最终删除批次写入失败", "worker", workerID, "err", err)
+						}
+					}
+					log.Info("✅ 删除工作线程完成", "workerID", workerID, "processedCount", deleteCount)
+					return
 				}
-				log.Info("✅ 备份线程完成", "totalBackupCount", backupCount,
-					"totalBackupSize", common.StorageSize(atomic.LoadInt64(&backupBytes)))
-				return
 			}
-		}
-	}()
-
-	// Start async delete thread
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		deleteBatch := db.NewBatch()
-		deleteCount := int64(0)
-		deleteLogged := time.Now()
-
-		for {
-			select {
-			case key := <-deleteChannel:
-				// Delete the key
-				deleteBatch.Delete(key)
-				deleteCount++
-
-				// Write delete batch when it gets large enough
-				if deleteBatch.ValueSize() > ethdb.IdealBatchSize {
-					if err := deleteBatch.Write(); err != nil {
-						log.Error("删除批次写入失败", "err", err)
-						return
-					}
-					deleteBatch.Reset()
-				}
-
-				// Process in controlled batches to avoid memory issues
-				if deleteCount%batchSize == 0 {
-					// Write delete batch
-					if err := deleteBatch.Write(); err != nil {
-						log.Error("删除批次写入失败", "err", err)
-						return
-					}
-					deleteBatch.Reset()
-					runtime.GC() // Force garbage collection periodically
-				}
-
-				// Log delete progress every 10 seconds
-				if time.Since(deleteLogged) > 10*time.Second {
-					log.Info("🗑️  删除线程进度",
-						"deleteCount", deleteCount,
-						"deletedSize", common.StorageSize(atomic.LoadInt64(&deletedBytes)),
-						"batchSize", common.StorageSize(deleteBatch.ValueSize()),
-						"channelBuffer", fmt.Sprintf("%d/%d", len(deleteChannel), cap(deleteChannel)),
-						"elapsed", common.PrettyDuration(time.Since(start)))
-					deleteLogged = time.Now()
-				}
-
-			case <-doneChan:
-				// Write final delete batch
-				if deleteBatch.ValueSize() > 0 {
-					if err := deleteBatch.Write(); err != nil {
-						log.Error("最终删除批次写入失败", "err", err)
-					}
-				}
-				log.Info("✅ 删除线程完成", "totalDeleteCount", deleteCount)
-				return
-			}
-		}
-	}()
+		}(i)
+	}
 
 	// Create iterator for txlookup prefix
 	it := db.NewIterator(txLookupPrefix, nil)
@@ -1281,7 +1222,7 @@ func DeleteRedundantTxLookupData(db ethdb.Database, backupDir string) error {
 		if len(key) == redundantTxLookupKeyLen &&
 			key[len(key)-1] == suffix &&
 			key[len(key)-2] == 's' {
-			// This appears to be a redundant key - backup before deleting
+			// This appears to be a redundant key - send to delete workers
 			matchedCount++
 			value := it.Value()
 			valueSize := len(value)
@@ -1289,32 +1230,21 @@ func DeleteRedundantTxLookupData(db ethdb.Database, backupDir string) error {
 			// 每匹配1000个key打印一次进度
 			if matchedCount%1000 == 0 {
 				keyPrefix := fmt.Sprintf("%x", key[:8])
-				log.Info("🔍 扫描线程进度",
+				log.Info("🔍 主扫描线程进度",
 					"matchedCount", matchedCount,
 					"currentKey", keyPrefix,
 					"keyLength", len(key),
 					"totalChecked", totalCheckedKeys,
-					"backupBuffer", fmt.Sprintf("%d/%d", len(backupChannel), cap(backupChannel)),
 					"deleteBuffer", fmt.Sprintf("%d/%d", len(deleteChannel), cap(deleteChannel)),
 					"elapsed", common.PrettyDuration(time.Since(start)))
 			}
 
-			// Send to backup thread asynchronously
-			select {
-			case backupChannel <- KeyValuePair{Key: key, Value: value}:
-				// Successfully sent to backup thread
-			default:
-				// Channel is full, wait a bit
-				time.Sleep(1 * time.Millisecond)
-				backupChannel <- KeyValuePair{Key: key, Value: value}
-			}
-
-			// Send to delete thread asynchronously
+			// Send to delete workers asynchronously
 			select {
 			case deleteChannel <- key:
 				// Successfully sent to delete thread
 			default:
-				// Channel is full, wait a bit
+				// Channel is full, wait a bit and retry
 				time.Sleep(1 * time.Millisecond)
 				deleteChannel <- key
 			}
@@ -1328,17 +1258,15 @@ func DeleteRedundantTxLookupData(db ethdb.Database, backupDir string) error {
 				currentDeletedBytes := atomic.LoadInt64(&deletedBytes)
 				remainingBytes := targetBytes - currentDeletedBytes
 				progress := float64(currentDeletedBytes) / float64(targetBytes) * 100
-				currentBackupBytes := atomic.LoadInt64(&backupBytes)
-				log.Info("📡 主扫描线程进度",
+				log.Info("📡 主扫描线程总体进度",
 					"scannedCount", deletedCount,
 					"deletedSize", common.StorageSize(currentDeletedBytes),
-					"backupSize", common.StorageSize(currentBackupBytes),
 					"matchedCount", matchedCount,
 					"remainingSize", common.StorageSize(remainingBytes),
 					"progress", fmt.Sprintf("%.1f%%", progress),
-					"backupBuffer", fmt.Sprintf("%d/%d", len(backupChannel), cap(backupChannel)),
 					"deleteBuffer", fmt.Sprintf("%d/%d", len(deleteChannel), cap(deleteChannel)),
 					"totalChecked", totalCheckedKeys,
+					"workers", numDeleteWorkers,
 					"elapsed", common.PrettyDuration(time.Since(start)))
 				logged = time.Now()
 			}
@@ -1350,13 +1278,12 @@ func DeleteRedundantTxLookupData(db ethdb.Database, backupDir string) error {
 		}
 	}
 
-	// Signal both worker threads to finish and wait
-	close(backupChannel) // Close backup channel
+	// Signal all delete worker threads to finish and wait
 	close(deleteChannel) // Close delete channel
 	close(doneChan)      // Signal threads to finish
-	log.Info("等待备份和删除线程完成...")
+	log.Info("等待10个删除工作线程完成...")
 	wg.Wait()
-	log.Info("📡 主扫描线程完成")
+	log.Info("📡 主扫描线程完成，10个删除工作线程已同步完成")
 
 	// 显示最终统计信息
 	log.Info("📊 最终txlookup数据统计",
@@ -1364,22 +1291,20 @@ func DeleteRedundantTxLookupData(db ethdb.Database, backupDir string) error {
 		"keyLengthDistribution", keyLengthStats)
 
 	if matchedCount > 0 {
-		finalBackupBytes := atomic.LoadInt64(&backupBytes)
 		finalDeletedBytes := atomic.LoadInt64(&deletedBytes)
-		log.Info("✅ 三线程异步冗余txlookup数据删除和备份完成",
+		log.Info("✅ 11线程极速异步冗余txlookup数据删除完成",
 			"deletedCount", deletedCount,
 			"deletedSize", common.StorageSize(finalDeletedBytes),
-			"backupSize", common.StorageSize(finalBackupBytes),
 			"matchedCount", matchedCount,
-			"backupPath", backupPath,
 			"totalTxLookupKeys", totalTxLookupKeys,
 			"matchRate", fmt.Sprintf("%.2f%%", float64(matchedCount)/float64(totalTxLookupKeys)*100),
-			"mode", "三线程并行",
+			"mode", "11线程极速删除",
+			"architecture", "1扫描+10删除",
+			"workers", numDeleteWorkers,
 			"elapsed", common.PrettyDuration(time.Since(start)),
 			"avgKeySize", fmt.Sprintf("%.1f bytes", float64(finalDeletedBytes)/float64(deletedCount)))
 	} else {
 		// Still need to signal worker threads to finish even if no data found
-		close(backupChannel)
 		close(deleteChannel)
 		close(doneChan)
 		wg.Wait()
@@ -1389,7 +1314,9 @@ func DeleteRedundantTxLookupData(db ethdb.Database, backupDir string) error {
 			"targetLength", redundantTxLookupKeyLen,
 			"targetSuffix", suffix,
 			"targetSecondLastByte", "'s'",
-			"mode", "三线程并行",
+			"mode", "11线程极速删除",
+			"architecture", "1扫描+10删除",
+			"workers", numDeleteWorkers,
 			"elapsed", common.PrettyDuration(time.Since(start)))
 		log.Info("💡 可能的原因：1) 数据库中没有冗余数据 2) 生成的key格式与预期不匹配 3) 识别条件需要调整")
 	}
