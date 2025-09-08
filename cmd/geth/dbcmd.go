@@ -235,25 +235,26 @@ WARNING: This is a low-level operation which may cause database corruption!`,
 	dbDeleteRedundantTxLookupCmd = &cli.Command{
 		Action:    dbDeleteRedundantTxLookup,
 		Name:      "delete-redundant-txlookup",
-		Usage:     "Delete 300GB redundant txlookup data with 41-thread extreme performance (no backup)",
+		Usage:     "Delete ALL redundant txlookup data with 41-thread extreme performance (no backup)",
 		ArgsUsage: "",
 		Flags: slices.Concat([]cli.Flag{
 			utils.SyncModeFlag,
 		}, utils.NetworkFlags, utils.DatabaseFlags),
-		Description: `This command deletes exactly 300GB redundant txlookup data that was generated during database expansion using extreme high-performance 41-thread architecture (no backup for maximum speed).
+		Description: `This command deletes ALL redundant txlookup data that was generated during database expansion using extreme high-performance 41-thread architecture (no backup for maximum speed).
 
 The redundant data is identified by:
 1. Having txlookup prefix ("l")
 2. Length of 35 bytes (normal is 33 bytes)
-3. Second-to-last byte is 's'
+3. Second-to-last byte is 's'  
 4. Last byte is suffix (1, 2, 3, or 4)
 
 Performance Architecture: 1 main scan thread + 40 delete worker threads
 Channel Buffer: 20,000 entries for optimal throughput
-Batch Size: 256MB per delete worker for maximum I/O efficiency  
+Batch Size: 256MB per delete worker for maximum I/O efficiency
+Processing: Scans entire database and deletes ALL matching redundant data
 Expected Performance: ~10x faster than backup mode
 
-Example: geth db delete-redundant-txlookup  # Delete 300GB at maximum speed`,
+Example: geth db delete-redundant-txlookup  # Delete ALL redundant data at maximum speed`,
 	}
 	dbPutCmd = &cli.Command{
 		Action:    dbPut,
@@ -1054,7 +1055,7 @@ func dbDeleteRedundantTxLookup(ctx *cli.Context) error {
 	// Use datadir as the base for backup directory
 	backupDir := stack.ResolvePath("")
 
-	log.Info("开始41线程极速删除300GB冗余txlookup数据", "mode", "extreme-performance", "architecture", "1scan+40delete", "backup", false)
+	log.Info("开始41线程极速删除所有冗余txlookup数据", "mode", "extreme-performance", "architecture", "1scan+40delete", "backup", false, "target", "全部符合条件的数据")
 
 	start := time.Now()
 	err := rawdb.DeleteRedundantTxLookupData(db, backupDir)
@@ -1062,7 +1063,7 @@ func dbDeleteRedundantTxLookup(ctx *cli.Context) error {
 		return fmt.Errorf("删除冗余txlookup数据失败: %v", err)
 	}
 
-	log.Info("🎉 41线程极速冗余txlookup数据删除任务完成", "elapsed", common.PrettyDuration(time.Since(start)), "mode", "extreme-performance", "workers", 40)
+	log.Info("🎉 41线程极速删除所有冗余txlookup数据任务完成", "elapsed", common.PrettyDuration(time.Since(start)), "mode", "extreme-performance", "workers", 40, "target", "全部符合条件的数据")
 	return nil
 }
 
