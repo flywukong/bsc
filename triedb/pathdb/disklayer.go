@@ -26,6 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 )
 
@@ -218,7 +219,8 @@ func (dl *diskLayer) account(hash common.Hash, depth int) ([]byte, error) {
 		cleanStateMissMeter.Mark(1)
 	}
 	// Try to retrieve the account from the disk.
-	blob := rawdb.ReadAccountSnapshot(dl.db.diskdb, hash)
+	blob :=
+		rawdb.ReadAccountSnapshot(dl.db.diskdb.GetSnapStore(), hash)
 
 	// Store the resolved data in the clean cache. The background buffer flusher
 	// may also write to the clean cache concurrently, but two writers cannot
@@ -296,7 +298,7 @@ func (dl *diskLayer) storage(accountHash, storageHash common.Hash, depth int) ([
 		cleanStateMissMeter.Mark(1)
 	}
 	// Try to retrieve the account from the disk
-	blob := rawdb.ReadStorageSnapshot(dl.db.diskdb, accountHash, storageHash)
+	blob := rawdb.ReadStorageSnapshot(dl.db.diskdb.GetSnapStore(), accountHash, storageHash)
 
 	// Store the resolved data in the clean cache. The background buffer flusher
 	// may also write to the clean cache concurrently, but two writers cannot
@@ -529,12 +531,23 @@ func (dl *diskLayer) revert(h *history) (*diskLayer, error) {
 	batch := dl.db.diskdb.NewBatch()
 	writeNodes(batch, nodes, dl.nodes)
 
-	// Provide the original values of modified accounts and storages for revert
-	writeStates(batch, progress, accounts, storages, dl.states)
-	rawdb.WritePersistentStateID(batch, dl.id-1)
-	rawdb.WriteSnapshotRoot(batch, h.meta.parent)
-	if err := batch.Write(); err != nil {
-		log.Crit("Failed to write states", "err", err)
+	var snapBatch ethdb.Batch
+	// The separate snapshot db need to be flush with independent batch
+	if dl.db.diskdb.HasSeparateSnapStore() {
+		snapBatch = dl.db.diskdb.GetSnapStore().NewBatch()
+		writeStates(snapBatch, progress, accounts, storages, dl.states)
+		rawdb.WriteSnapshotRoot(snapBatch, h.meta.parent)
+		if err := snapBatch.Write(); err != nil {
+			log.Crit("Failed to write states", "err", err)
+		}
+	} else {
+		// Provide the original values of modified accounts and storages for revert
+		writeStates(batch, progress, accounts, storages, dl.states)
+		rawdb.WritePersistentStateID(batch, dl.id-1)
+		rawdb.WriteSnapshotRoot(batch, h.meta.parent)
+		if err := batch.Write(); err != nil {
+			log.Crit("Failed to write states", "err", err)
+		}
 	}
 	// Link the generator and resume generation if the snapshot is not yet
 	// fully completed.

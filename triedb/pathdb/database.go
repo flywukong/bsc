@@ -232,8 +232,9 @@ type Database struct {
 	isVerkle bool       // Flag if database is used for verkle tree
 	hasher   nodeHasher // Trie node hasher
 
-	config  *Config                      // Configuration for database
-	diskdb  ethdb.Database               // Persistent storage for matured trie nodes
+	config *Config        // Configuration for database
+	diskdb ethdb.Database // Persistent storage for matured trie nodes
+	//snapdb  ethdb.KeyValueStore          // Persistent storage for snapshot flat data
 	tree    *layerTree                   // The group for all known layers
 	freezer ethdb.ResettableAncientStore // Freezer for storing trie histories, nil possible in tests
 	lock    sync.RWMutex                 // Lock to prevent mutations from happening at the same time
@@ -254,7 +255,8 @@ func New(diskdb ethdb.Database, config *Config, isVerkle bool) *Database {
 		isVerkle: isVerkle,
 		config:   config,
 		diskdb:   diskdb,
-		hasher:   merkleNodeHasher,
+		//snapdb:   diskdb.GetSnapStore(),
+		hasher: merkleNodeHasher,
 	}
 	// Establish a dedicated database namespace tailored for verkle-specific
 	// data, ensuring the isolation of both verkle and merkle tree data. It's
@@ -275,7 +277,7 @@ func New(diskdb ethdb.Database, config *Config, isVerkle bool) *Database {
 		log.Crit("Failed to repair state history", "err", err)
 	}
 	// Disable database in case node is still in the initial state sync stage.
-	if rawdb.ReadSnapSyncStatusFlag(diskdb) == rawdb.StateSyncRunning && !db.readOnly {
+	if rawdb.ReadSnapSyncStatusFlag(db.diskdb.GetSnapStore()) == rawdb.StateSyncRunning && !db.readOnly {
 		if err := db.Disable(); err != nil {
 			log.Crit("Failed to disable database", "err", err) // impossible to happen
 		}

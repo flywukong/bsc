@@ -19,6 +19,7 @@ package pathdb
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/VictoriaMetrics/fastcache"
@@ -132,7 +133,7 @@ func (b *buffer) size() uint64 {
 
 // flush persists the in-memory dirty trie node into the disk if the configured
 // memory threshold is reached. Note, all data must be written atomically.
-func (b *buffer) flush(root common.Hash, db ethdb.KeyValueStore, freezer ethdb.AncientWriter, progress []byte, nodesCache, statesCache *fastcache.Cache, id uint64, postFlush func()) {
+func (b *buffer) flush(root common.Hash, db ethdb.Database, freezer ethdb.AncientWriter, progress []byte, nodesCache, statesCache *fastcache.Cache, id uint64, postFlush func()) {
 	if b.done != nil {
 		panic("duplicated flush operation")
 	}
@@ -157,9 +158,19 @@ func (b *buffer) flush(root common.Hash, db ethdb.KeyValueStore, freezer ethdb.A
 
 		// Terminate the state snapshot generation if it's active
 		var (
-			start = time.Now()
-			batch = db.NewBatchWithSize((b.nodes.dbsize() + b.states.dbsize()) * 11 / 10) // extra 10% for potential pebble internal stuff
+			start           = time.Now()
+			trieBatch       ethdb.Batch // extra 10% for potential pebble internal stuff
+			snapBatch       ethdb.Batch
+			nodes           int
+			accounts, slots int
+			size, snapSize  int
 		)
+		if db.HasSeparateSnapStore() {
+			snapBatch = db.GetSnapStore().NewBatchWithSize(b.states.dbsize() * 11 / 10)
+			trieBatch = db.GetStateStore().NewBatchWithSize(b.nodes.dbsize() * 11 / 10)
+		} else {
+			trieBatch = db.NewBatchWithSize((b.nodes.dbsize() + b.states.dbsize()) * 11 / 10)
+		}
 		// Explicitly sync the state freezer to ensure all written data is persisted to disk
 		// before updating the key-value store.
 		//
@@ -171,22 +182,79 @@ func (b *buffer) flush(root common.Hash, db ethdb.KeyValueStore, freezer ethdb.A
 				return
 			}
 		}
-		nodes := b.nodes.write(batch, nodesCache)
-		accounts, slots := b.states.write(batch, progress, statesCache)
-		rawdb.WritePersistentStateID(batch, id)
-		rawdb.WriteSnapshotRoot(batch, root)
 
-		// Flush all mutations in a single batch
-		size := batch.ValueSize()
-		if err := batch.Write(); err != nil {
-			b.flushErr = err
-			return
+		if snapBatch == nil {
+			nodes = b.nodes.write(trieBatch, nodesCache)
+			accounts, slots = b.states.write(trieBatch, progress, statesCache)
+			rawdb.WritePersistentStateID(trieBatch, id)
+			rawdb.WriteSnapshotRoot(trieBatch, root)
+
+			// Flush all mutations in a single batch
+			size = trieBatch.ValueSize()
+			if err := trieBatch.Write(); err != nil {
+				b.flushErr = err
+				return
+			}
+
+			commitBytesMeter.Mark(int64(size))
+			commitNodesMeter.Mark(int64(nodes))
+			commitAccountsMeter.Mark(int64(accounts))
+			commitStoragesMeter.Mark(int64(slots))
+			commitTimeTimer.UpdateSince(start)
+		} else {
+			log.Info("multidb flush - parallel processing")
+
+			// Parallel processing of trie and snapshot writes
+			var (
+				wg               sync.WaitGroup
+				trieErr, snapErr error
+			)
+
+			// Trie batch processing in goroutine
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				nodes = b.nodes.write(trieBatch, nodesCache)
+				rawdb.WritePersistentStateID(trieBatch, id)
+
+				size = trieBatch.ValueSize()
+				if err := trieBatch.Write(); err != nil {
+					trieErr = err
+				}
+			}()
+
+			// Snapshot batch processing in goroutine
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				accounts, slots = b.states.write(snapBatch, progress, statesCache)
+				rawdb.WriteSnapshotRoot(snapBatch, root)
+
+				snapSize = snapBatch.ValueSize()
+				if err := snapBatch.Write(); err != nil {
+					snapErr = err
+				}
+			}()
+
+			// Wait for both operations to complete
+			wg.Wait()
+
+			// Check for errors from either operation
+			if trieErr != nil {
+				b.flushErr = trieErr
+				return
+			}
+			if snapErr != nil {
+				b.flushErr = snapErr
+				return
+			}
+
+			commitBytesMeter.Mark(int64(size + snapSize))
+			commitNodesMeter.Mark(int64(nodes))
+			commitAccountsMeter.Mark(int64(accounts))
+			commitStoragesMeter.Mark(int64(slots))
+			commitTimeTimer.UpdateSince(start)
 		}
-		commitBytesMeter.Mark(int64(size))
-		commitNodesMeter.Mark(int64(nodes))
-		commitAccountsMeter.Mark(int64(accounts))
-		commitStoragesMeter.Mark(int64(slots))
-		commitTimeTimer.UpdateSince(start)
 
 		// The content in the frozen buffer is kept for consequent state access,
 		// TODO (rjl493456442) measure the gc overhead for holding this struct.
