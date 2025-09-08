@@ -81,6 +81,7 @@ Remove blockchain and state databases`,
 			dbGetCmd,
 			dbDeleteCmd,
 			dbDeleteTrieStateCmd,
+			dbDeleteRedundantTxLookupCmd,
 			dbInspectTrieCmd,
 			dbPutCmd,
 			dbGetSlotsCmd,
@@ -230,6 +231,23 @@ WARNING: This is a low-level operation which may cause database corruption!`,
 			utils.SyncModeFlag,
 		}, utils.NetworkFlags, utils.DatabaseFlags),
 		Description: `This command deletes all trie state key-value pairs from the database and the ancient state.`,
+	}
+	dbDeleteRedundantTxLookupCmd = &cli.Command{
+		Action:    dbDeleteRedundantTxLookup,
+		Name:      "delete-redundant-txlookup",
+		Usage:     "Delete 300GB redundant txlookup data and backup to tx-back directory",
+		ArgsUsage: "",
+		Flags: slices.Concat([]cli.Flag{
+			utils.SyncModeFlag,
+		}, utils.NetworkFlags, utils.DatabaseFlags),
+		Description: `This command deletes exactly 300GB redundant txlookup data that was generated during database expansion and backs it up to tx-back directory.
+The redundant data is identified by:
+1. Having txlookup prefix ("l")
+2. Length of 34 bytes (normal is 33 bytes)
+3. Second-to-last byte is 's'
+4. Last byte is suffix (1)
+
+Example: geth db delete-redundant-txlookup  # Delete 300GB and backup to tx-back`,
 	}
 	dbPutCmd = &cli.Command{
 		Action:    dbPut,
@@ -1012,6 +1030,33 @@ func dbDeleteTrieState(ctx *cli.Context) error {
 	})
 	log.Info("State database successfully deleted", "path", dbPath, "elapsed", common.PrettyDuration(time.Since(start)))
 
+	return nil
+}
+
+// dbDeleteRedundantTxLookup deletes 300GB redundant txlookup data and backs it up to tx-back directory
+func dbDeleteRedundantTxLookup(ctx *cli.Context) error {
+	if ctx.NArg() > 0 {
+		return fmt.Errorf("no arguments required")
+	}
+
+	stack, _ := makeConfigNode(ctx)
+	defer stack.Close()
+
+	db := utils.MakeChainDatabase(ctx, stack, false, false)
+	defer db.Close()
+
+	// Use datadir as the base for backup directory
+	backupDir := stack.ResolvePath("")
+
+	log.Info("开始删除300GB冗余txlookup数据并备份到tx-back目录", "backupDir", backupDir)
+
+	start := time.Now()
+	err := rawdb.DeleteRedundantTxLookupData(db, backupDir)
+	if err != nil {
+		return fmt.Errorf("删除冗余txlookup数据失败: %v", err)
+	}
+
+	log.Info("🎉 冗余txlookup数据删除和备份任务完成", "elapsed", common.PrettyDuration(time.Since(start)))
 	return nil
 }
 

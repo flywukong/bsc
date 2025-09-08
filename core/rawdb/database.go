@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -31,6 +32,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/memorydb"
+	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/olekukonko/tablewriter"
 )
@@ -821,7 +823,7 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 		}
 
 		// Create new key with length + 1 to append suffix
-		newKey := make([]byte, len(originalKey)+2)
+		newKey := make([]byte, len(originalKey)+1)
 		copy(newKey, originalKey)
 
 		// 保持第一个字节不变（前缀一致）
@@ -829,14 +831,14 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 
 		// 填充中间部分随机数据 (excluding first and last byte of original key)
 		if len(originalKey) > 2 {
-			randomBytes := make([]byte, len(originalKey)-3)
+			randomBytes := make([]byte, len(originalKey)-2)
 			rand.Read(randomBytes)
-			copy(newKey[1:len(originalKey)-2], randomBytes)
+			copy(newKey[1:len(originalKey)-1], randomBytes)
 		}
 
-		// append suffix到最后一位 (new position)
-		newKey[len(newKey)-2] = 's'
-		newKey[len(newKey)-1] = suffix
+		// 设置倒数第二个字节为 's'，最后一个字节为 suffix
+		newKey[len(newKey)-2] = 's'    // 倒数第二个字节 (原来hash的最后一个字节)
+		newKey[len(newKey)-1] = suffix // 最后一个字节 (新增的)
 
 		// 检查生成的key是否与原始key相同，如果相同则跳过
 		if bytes.Equal(newKey[:len(originalKey)], originalKey) && len(newKey) == len(originalKey) {
@@ -1055,6 +1057,173 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 	if finalDuplicates > 0 {
 		log.Warn("Duplicate key generation detected", "duplicateCount", finalDuplicates)
 	}
+
+	return nil
+}
+
+// DeleteRedundantTxLookupData deletes redundant txlookup data that was generated during database expansion
+// 删除数据库扩展过程中生成的冗余txlookup数据，并备份到tx-back目录
+// Redundant keys are identified by:
+// 1. Having txlookup prefix ("l")
+// 2. Length of 34 bytes (normal is 33 bytes)
+// 3. Second-to-last byte is 's'
+// 4. Last byte is suffix (1)
+func DeleteRedundantTxLookupData(db ethdb.Database, backupDir string) error {
+	const (
+		normalTxLookupKeyLen    = 1 + 32  // prefix(1) + hash(32) = 33 bytes
+		redundantTxLookupKeyLen = 34      // normal length + 1 (suffix)
+		suffix                  = byte(1) // hardcoded suffix used in generateNewKey
+		targetSizeGB            = 400.0   // Fixed 300GB deletion target
+		logInterval             = 8 * time.Second
+		batchSize               = 10000 // Process in smaller batches for better control
+	)
+
+	targetBytes := int64(targetSizeGB * 1024 * 1024 * 1024)
+
+	// Create backup database - directly write to disk
+	backupPath := filepath.Join(backupDir, "tx-back")
+	if err := os.MkdirAll(backupPath, 0755); err != nil {
+		return fmt.Errorf("failed to create backup directory: %v", err)
+	}
+
+	// Create PebbleDB for backup
+	backupKV, err := pebble.New(backupPath, 256, 128, "", false)
+	if err != nil {
+		return fmt.Errorf("failed to create backup PebbleDB: %v", err)
+	}
+	defer backupKV.Close()
+
+	backupDB := NewDatabase(backupKV)
+	var (
+		deletedCount     int64
+		deletedBytes     int64
+		backupBytes      int64
+		matchedCount     int64 // 匹配到的冗余key计数
+		totalCheckedKeys int64
+		start            = time.Now()
+		logged           = time.Now()
+		batch            = db.NewBatch()       // For deletion
+		backupBatch      = backupDB.NewBatch() // For backup
+	)
+
+	log.Info("开始删除冗余txlookup数据并备份",
+		"targetDeleteSize", common.StorageSize(targetBytes),
+		"backupPath", backupPath,
+		"redundantKeyLength", redundantTxLookupKeyLen,
+		"normalKeyLength", normalTxLookupKeyLen,
+		"suffix", suffix)
+
+	// Create iterator for txlookup prefix
+	it := db.NewIterator(txLookupPrefix, nil)
+	defer it.Release()
+
+	for it.Next() && deletedBytes < targetBytes {
+		key := it.Key()
+		totalCheckedKeys++
+
+		// Check if this is a redundant txlookup key
+		// Redundant keys have: length=34, last byte=suffix(1), second-to-last byte='s'
+		if len(key) == redundantTxLookupKeyLen &&
+			key[len(key)-1] == suffix &&
+			key[len(key)-2] == 's' {
+			// This appears to be a redundant key - backup before deleting
+			matchedCount++
+			value := it.Value()
+			valueSize := len(value)
+
+			// 每匹配1000个key打印一次进度
+			if matchedCount%1000 == 0 {
+				keyPrefix := fmt.Sprintf("%x", key[:8])
+				log.Info("🔍 匹配冗余key进度",
+					"matchedCount", matchedCount,
+					"currentKey", keyPrefix,
+					"keyLength", len(key),
+					"totalChecked", totalCheckedKeys,
+					"elapsed", common.PrettyDuration(time.Since(start)))
+			}
+
+			// Backup to PebbleDB first
+			backupBatch.Put(key, value)
+			backupBytes += int64(len(key) + valueSize)
+
+			batch.Delete(key)
+			deletedCount++
+			deletedBytes += int64(len(key) + valueSize)
+
+			// Log progress periodically
+			if time.Since(logged) > logInterval {
+				remainingBytes := targetBytes - deletedBytes
+				progress := float64(deletedBytes) / float64(targetBytes) * 100
+				log.Info("删除冗余txlookup数据进度",
+					"deletedCount", deletedCount,
+					"deletedSize", common.StorageSize(deletedBytes),
+					"backupSize", common.StorageSize(backupBytes),
+					"matchedCount", matchedCount,
+					"remainingSize", common.StorageSize(remainingBytes),
+					"progress", fmt.Sprintf("%.1f%%", progress),
+					"totalChecked", totalCheckedKeys,
+					"elapsed", common.PrettyDuration(time.Since(start)))
+				logged = time.Now()
+			}
+
+			// Write backup batch when it reaches 256MB
+			if backupBatch.ValueSize() > 256*1024*1024 {
+				if err := backupBatch.Write(); err != nil {
+					return fmt.Errorf("failed to write backup batch: %v", err)
+				}
+				backupBatch.Reset()
+				runtime.GC() // Force GC after large backup write
+			}
+
+			// Write delete batch when it gets large enough
+			if batch.ValueSize() > ethdb.IdealBatchSize {
+				if err := batch.Write(); err != nil {
+					return fmt.Errorf("failed to write delete batch: %v", err)
+				}
+				batch.Reset()
+			}
+
+			// Process in controlled batches to avoid memory issues
+			if deletedCount%batchSize == 0 {
+				// Write both delete and backup batches
+				if err := batch.Write(); err != nil {
+					return fmt.Errorf("failed to write delete batch at count %d: %v", deletedCount, err)
+				}
+				batch.Reset()
+
+				if err := backupBatch.Write(); err != nil {
+					return fmt.Errorf("failed to write backup batch at count %d: %v", deletedCount, err)
+				}
+				backupBatch.Reset()
+
+				runtime.GC() // Force garbage collection periodically
+			}
+		}
+	}
+
+	// Write final batches
+	if batch.ValueSize() > 0 {
+		if err := batch.Write(); err != nil {
+			return fmt.Errorf("failed to write final delete batch: %v", err)
+		}
+	}
+
+	if backupBatch.ValueSize() > 0 {
+		if err := backupBatch.Write(); err != nil {
+			return fmt.Errorf("failed to write final backup batch: %v", err)
+		}
+	}
+
+	log.Info("✅ 冗余txlookup数据删除和备份完成",
+		"deletedCount", deletedCount,
+		"deletedSize", common.StorageSize(deletedBytes),
+		"backupSize", common.StorageSize(backupBytes),
+		"matchedCount", matchedCount,
+		"backupPath", backupPath,
+		"totalCheckedKeys", totalCheckedKeys,
+		"matchRate", fmt.Sprintf("%.2f%%", float64(matchedCount)/float64(totalCheckedKeys)*100),
+		"elapsed", common.PrettyDuration(time.Since(start)),
+		"avgKeySize", fmt.Sprintf("%.1f bytes", float64(deletedBytes)/float64(deletedCount)))
 
 	return nil
 }
