@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1100,8 +1099,8 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 
 	// Channels for high-performance delete processing
 	const (
-		channelBufferSize = 20000 // Increased buffer for 10 delete workers
-		numDeleteWorkers  = 40    // 10 delete worker threads for maximum speed
+		channelBufferSize = 10000 // Increased buffer for 10 delete workers
+		numDeleteWorkers  = 50    // 10 delete worker threads for maximum speed
 	)
 	deleteChannel := make(chan []byte, channelBufferSize) // For delete threads (only keys needed)
 	doneChan := make(chan struct{})
@@ -1136,13 +1135,13 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 					deleteCount++
 
 					// Write delete batch when it reaches 256MB for optimal performance
-					if deleteBatch.ValueSize() > 256*1024*1024 {
+					if deleteBatch.ValueSize() > 512*1024*1024 {
 						if err := deleteBatch.Write(); err != nil {
 							log.Error("删除批次写入失败", "worker", workerID, "err", err)
 							return
 						}
 						deleteBatch.Reset()
-						runtime.GC() // Force garbage collection after 256MB batch
+						//	runtime.GC() // Force garbage collection after 256MB batch
 					}
 
 					// Log delete progress every 30 seconds (less frequent for 40 workers)
@@ -1186,14 +1185,6 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 		keyLen := len(key)
 		keyLengthStats[keyLen]++
 
-		// 每1万个key打印一次长度统计
-		if totalTxLookupKeys%10000 == 0 {
-			log.Info("📊 txlookup数据扫描统计",
-				"totalTxLookupKeys", totalTxLookupKeys,
-				"lengthDistribution", keyLengthStats,
-				"elapsed", common.PrettyDuration(time.Since(start)))
-		}
-
 		// 显示前几个key的详细信息用于调试
 		if totalTxLookupKeys <= 5 {
 			keyHex := fmt.Sprintf("%x", key)
@@ -1215,7 +1206,7 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 
 		// Check if this is a redundant txlookup key
 		// Redundant keys have: length=35, last byte=suffix(1,2,3,4), second-to-last byte='s'
-		if len(key) == redundantTxLookupKeyLen &&
+		if len(key) == 35 &&
 			(key[len(key)-1] == byte(1) || key[len(key)-1] == byte(2) || key[len(key)-1] == byte(3) || key[len(key)-1] == byte(4) || key[len(key)-1] == byte(5)) &&
 			key[len(key)-2] == 's' {
 			// This appears to be a redundant key - send to delete workers
@@ -1241,6 +1232,7 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 				// Successfully sent to delete thread
 			default:
 				// Channel is full, wait a bit and retry
+				log.Info("Channel is full")
 				time.Sleep(1 * time.Millisecond)
 				deleteChannel <- key
 			}
