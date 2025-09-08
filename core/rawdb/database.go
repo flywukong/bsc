@@ -1067,20 +1067,19 @@ type KeyValuePair struct {
 }
 
 // DeleteRedundantTxLookupData deletes redundant txlookup data that was generated during database expansion
-// 使用11线程极速异步删除冗余txlookup数据（无备份，最大化性能）
-// Architecture: 1 scan thread + 10 delete worker threads
+// 使用41线程极速异步删除冗余txlookup数据（无备份，最大化性能）
+// Architecture: 1 scan thread + 40 delete worker threads
 // Redundant keys are identified by:
 // 1. Having txlookup prefix ("l")
 // 2. Length of 35 bytes (normal is 33 bytes)
 // 3. Second-to-last byte is 's'
-// 4. Last byte is suffix (1)
+// 4. Last byte is suffix (1, 2, 3, or 4)
 func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 	const (
-		normalTxLookupKeyLen    = 1 + 32  // prefix(1) + hash(32) = 33 bytes
-		redundantTxLookupKeyLen = 35      // actual length based on logs: 35 bytes
-		suffix                  = byte(1) // hardcoded suffix used in generateNewKey
-		targetSizeGB            = 300.0   // Fixed 300GB deletion target
-		logInterval             = 8 * time.Second
+		normalTxLookupKeyLen    = 1 + 32 // prefix(1) + hash(32) = 33 bytes
+		redundantTxLookupKeyLen = 35     // actual length based on logs: 35 bytes
+		targetSizeGB            = 300.0  // Fixed 300GB deletion target
+		logInterval             = 5 * time.Second
 	)
 
 	targetBytes := int64(targetSizeGB * 1024 * 1024 * 1024)
@@ -1101,26 +1100,26 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 
 	// Channels for high-performance delete processing
 	const (
-		channelBufferSize = 10000 // Increased buffer for 10 delete workers
-		numDeleteWorkers  = 10    // 10 delete worker threads for maximum speed
+		channelBufferSize = 20000 // Increased buffer for 10 delete workers
+		numDeleteWorkers  = 40    // 10 delete worker threads for maximum speed
 	)
 	deleteChannel := make(chan []byte, channelBufferSize) // For delete threads (only keys needed)
 	doneChan := make(chan struct{})
 	var wg sync.WaitGroup
 
 	targetMB := float64(targetBytes) / (1024 * 1024)
-	log.Info("开始11线程超高性能异步删除冗余txlookup数据",
+	log.Info("开始41线程超高性能异步删除冗余txlookup数据",
 		"targetDeleteMB", fmt.Sprintf("%.0f MB", targetMB),
 		"targetDeleteGB", fmt.Sprintf("%.1f GB", targetMB/1024),
 		"batchSizeMB", "256 MB",
 		"redundantKeyLength", redundantTxLookupKeyLen,
 		"normalKeyLength", normalTxLookupKeyLen,
-		"suffix", suffix,
-		"mode", "11线程极速删除",
-		"architecture", "1扫描+10删除",
+		"allowedSuffixes", "1,2,3,4",
+		"mode", "41线程极速删除",
+		"architecture", "1扫描+40删除",
 		"channelBuffer", channelBufferSize)
 
-	// Start 10 high-performance delete worker threads for maximum speed
+	// Start 40 high-performance delete worker threads for maximum speed
 	for i := 0; i < numDeleteWorkers; i++ {
 		wg.Add(1)
 		go func(workerID int) {
@@ -1146,7 +1145,7 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 						runtime.GC() // Force garbage collection after 256MB batch
 					}
 
-					// Log delete progress every 30 seconds (less frequent for 10 workers)
+					// Log delete progress every 30 seconds (less frequent for 40 workers)
 					if time.Since(deleteLogged) > 30*time.Second {
 						totalMB := float64(atomic.LoadInt64(&deletedBytes)) / (1024 * 1024)
 						batchMB := float64(deleteBatch.ValueSize()) / (1024 * 1024)
@@ -1178,7 +1177,7 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 	it := db.NewIterator(txLookupPrefix, nil)
 	defer it.Release()
 
-	for it.Next() && deletedBytes < targetBytes {
+	for it.Next() && atomic.LoadInt64(&deletedBytes) < targetBytes {
 		key := it.Key()
 		totalCheckedKeys++
 
@@ -1198,11 +1197,14 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 		// 显示前几个key的详细信息用于调试
 		if totalTxLookupKeys <= 5 {
 			keyHex := fmt.Sprintf("%x", key)
+			lastByte := key[keyLen-1]
+			isValidSuffix := lastByte == byte(1) || lastByte == byte(2) || lastByte == byte(3) || lastByte == byte(4)
 			log.Info("🔍 txlookup样本key详情",
 				"index", totalTxLookupKeys,
 				"keyHex", keyHex,
 				"keyLength", keyLen,
-				"lastByte", key[keyLen-1],
+				"lastByte", lastByte,
+				"isValidSuffix", isValidSuffix,
 				"secondLastByte", func() string {
 					if keyLen >= 2 {
 						return fmt.Sprintf("'%c'(%d)", key[keyLen-2], key[keyLen-2])
@@ -1212,9 +1214,9 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 		}
 
 		// Check if this is a redundant txlookup key
-		// Redundant keys have: length=34, last byte=suffix(1), second-to-last byte='s'
+		// Redundant keys have: length=35, last byte=suffix(1,2,3,4), second-to-last byte='s'
 		if len(key) == redundantTxLookupKeyLen &&
-			key[len(key)-1] == suffix &&
+			(key[len(key)-1] == byte(1) || key[len(key)-1] == byte(2) || key[len(key)-1] == byte(3) || key[len(key)-1] == byte(4) || key[len(key)-1] == byte(5)) &&
 			key[len(key)-2] == 's' {
 			// This appears to be a redundant key - send to delete workers
 			matchedCount++
@@ -1267,19 +1269,15 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 				logged = time.Now()
 			}
 
-			// Stop when we reach target size
-			if atomic.LoadInt64(&deletedBytes) >= targetBytes {
-				break
-			}
 		}
 	}
 
 	// Signal all delete worker threads to finish and wait
 	close(deleteChannel) // Close delete channel
 	close(doneChan)      // Signal threads to finish
-	log.Info("等待10个删除工作线程完成...")
+	log.Info("等待40个删除工作线程完成...")
 	wg.Wait()
-	log.Info("📡 主扫描线程完成，10个删除工作线程已同步完成")
+	log.Info("📡 主扫描线程完成，40个删除工作线程已同步完成")
 
 	// 显示最终统计信息
 	log.Info("📊 最终txlookup数据统计",
@@ -1289,15 +1287,15 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 	if matchedCount > 0 {
 		finalDeletedBytes := atomic.LoadInt64(&deletedBytes)
 		finalDeletedMB := float64(finalDeletedBytes) / (1024 * 1024)
-		log.Info("✅ 11线程极速异步冗余txlookup数据删除完成",
+		log.Info("✅ 41线程极速异步冗余txlookup数据删除完成",
 			"deletedCount", deletedCount,
 			"deletedMB", fmt.Sprintf("%.1f MB", finalDeletedMB),
 			"deletedGB", fmt.Sprintf("%.2f GB", finalDeletedMB/1024),
 			"matchedCount", matchedCount,
 			"totalTxLookupKeys", totalTxLookupKeys,
 			"matchRate", fmt.Sprintf("%.2f%%", float64(matchedCount)/float64(totalTxLookupKeys)*100),
-			"mode", "11线程极速删除",
-			"architecture", "1扫描+10删除",
+			"mode", "41线程极速删除",
+			"architecture", "1扫描+40删除",
 			"workers", numDeleteWorkers,
 			"elapsed", common.PrettyDuration(time.Since(start)),
 			"avgKeySize", fmt.Sprintf("%.1f bytes", float64(finalDeletedBytes)/float64(deletedCount)))
@@ -1310,10 +1308,10 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 		log.Info("ℹ️  未找到符合条件的冗余txlookup数据",
 			"totalTxLookupKeys", totalTxLookupKeys,
 			"targetLength", redundantTxLookupKeyLen,
-			"targetSuffix", suffix,
+			"targetSuffixes", "1,2,3,4",
 			"targetSecondLastByte", "'s'",
-			"mode", "11线程极速删除",
-			"architecture", "1扫描+10删除",
+			"mode", "41线程极速删除",
+			"architecture", "1扫描+40删除",
 			"workers", numDeleteWorkers,
 			"elapsed", common.PrettyDuration(time.Since(start)))
 		log.Info("💡 可能的原因：1) 数据库中没有冗余数据 2) 生成的key格式与预期不匹配 3) 识别条件需要调整")
