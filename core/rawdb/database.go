@@ -1081,7 +1081,6 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 		suffix                  = byte(1) // hardcoded suffix used in generateNewKey
 		targetSizeGB            = 300.0   // Fixed 300GB deletion target
 		logInterval             = 8 * time.Second
-		batchSize               = 10000 // Process in smaller batches for better control
 	)
 
 	targetBytes := int64(targetSizeGB * 1024 * 1024 * 1024)
@@ -1144,17 +1143,7 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 							return
 						}
 						deleteBatch.Reset()
-					}
-
-					// Process in controlled batches to avoid memory issues
-					if deleteCount%batchSize == 0 {
-						// Write delete batch
-						if err := deleteBatch.Write(); err != nil {
-							log.Error("删除批次写入失败", "worker", workerID, "err", err)
-							return
-						}
-						deleteBatch.Reset()
-						runtime.GC() // Force garbage collection periodically
+						runtime.GC() // Force garbage collection after 256MB batch
 					}
 
 					// Log delete progress every 30 seconds (less frequent for 10 workers)
