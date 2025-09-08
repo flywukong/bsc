@@ -235,17 +235,20 @@ WARNING: This is a low-level operation which may cause database corruption!`,
 	dbDeleteRedundantTxLookupCmd = &cli.Command{
 		Action:    dbDeleteRedundantTxLookup,
 		Name:      "delete-redundant-txlookup",
-		Usage:     "Delete 300GB redundant txlookup data and backup to tx-back directory",
+		Usage:     "Delete 300GB redundant txlookup data and backup to tx-back directory (3-thread parallel)",
 		ArgsUsage: "",
 		Flags: slices.Concat([]cli.Flag{
 			utils.SyncModeFlag,
 		}, utils.NetworkFlags, utils.DatabaseFlags),
-		Description: `This command deletes exactly 300GB redundant txlookup data that was generated during database expansion and backs it up to tx-back directory.
+		Description: `This command deletes exactly 300GB redundant txlookup data that was generated during database expansion and backs it up to tx-back directory using 3-thread parallel processing.
+
 The redundant data is identified by:
 1. Having txlookup prefix ("l")
-2. Length of 34 bytes (normal is 33 bytes)
+2. Length of 35 bytes (normal is 33 bytes)
 3. Second-to-last byte is 's'
 4. Last byte is suffix (1)
+
+Architecture: Main scan thread + Delete worker thread + Backup worker thread
 
 Example: geth db delete-redundant-txlookup  # Delete 300GB and backup to tx-back`,
 	}
@@ -1048,7 +1051,7 @@ func dbDeleteRedundantTxLookup(ctx *cli.Context) error {
 	// Use datadir as the base for backup directory
 	backupDir := stack.ResolvePath("")
 
-	log.Info("开始删除300GB冗余txlookup数据并备份到tx-back目录", "backupDir", backupDir)
+	log.Info("开始三线程删除300GB冗余txlookup数据并备份到tx-back目录", "backupDir", backupDir, "architecture", "scan+delete+backup")
 
 	start := time.Now()
 	err := rawdb.DeleteRedundantTxLookupData(db, backupDir)
@@ -1056,7 +1059,7 @@ func dbDeleteRedundantTxLookup(ctx *cli.Context) error {
 		return fmt.Errorf("删除冗余txlookup数据失败: %v", err)
 	}
 
-	log.Info("🎉 冗余txlookup数据删除和备份任务完成", "elapsed", common.PrettyDuration(time.Since(start)))
+	log.Info("🎉 三线程冗余txlookup数据删除和备份任务完成", "elapsed", common.PrettyDuration(time.Since(start)), "mode", "parallel")
 	return nil
 }
 
