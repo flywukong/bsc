@@ -990,7 +990,7 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 			defer it.Release()
 
 			var prefixScanned int64
-			for it.Next() {
+	for it.Next() {
 				key := it.Key()
 				value := it.Value()
 
@@ -1100,6 +1100,8 @@ func DeleteRedundantTxLookupData(db ethdb.Database, backupDir string) error {
 		backupBytes      int64
 		matchedCount     int64 // 匹配到的冗余key计数
 		totalCheckedKeys int64
+		totalTxLookupKeys int64  // 总的txlookup key数量
+		keyLengthStats   = make(map[int]int64)  // 长度统计
 		start            = time.Now()
 		logged           = time.Now()
 		batch            = db.NewBatch()       // For deletion
@@ -1120,12 +1122,41 @@ func DeleteRedundantTxLookupData(db ethdb.Database, backupDir string) error {
 	for it.Next() && deletedBytes < targetBytes {
 		key := it.Key()
 		totalCheckedKeys++
+		
+		// 统计所有txlookup key
+		totalTxLookupKeys++
+		keyLen := len(key)
+		keyLengthStats[keyLen]++
+		
+		// 每1万个key打印一次长度统计
+		if totalTxLookupKeys%10000 == 0 {
+			log.Info("📊 txlookup数据扫描统计", 
+				"totalTxLookupKeys", totalTxLookupKeys,
+				"lengthDistribution", keyLengthStats,
+				"elapsed", common.PrettyDuration(time.Since(start)))
+		}
+		
+		// 显示前几个key的详细信息用于调试
+		if totalTxLookupKeys <= 5 {
+			keyHex := fmt.Sprintf("%x", key)
+			log.Info("🔍 txlookup样本key详情",
+				"index", totalTxLookupKeys,
+				"keyHex", keyHex,
+				"keyLength", keyLen,
+				"lastByte", key[keyLen-1],
+				"secondLastByte", func() string {
+					if keyLen >= 2 {
+						return fmt.Sprintf("'%c'(%d)", key[keyLen-2], key[keyLen-2])
+					}
+					return "N/A"
+				}())
+		}
 
 		// Check if this is a redundant txlookup key
 		// Redundant keys have: length=34, last byte=suffix(1), second-to-last byte='s'
-		if len(key) == redundantTxLookupKeyLen &&
-			key[len(key)-1] == suffix &&
-			key[len(key)-2] == 's' {
+		if len(key) == redundantTxLookupKeyLen && 
+		   key[len(key)-1] == suffix && 
+		   key[len(key)-2] == 's' {
 			// This appears to be a redundant key - backup before deleting
 			matchedCount++
 			value := it.Value()
@@ -1163,8 +1194,8 @@ func DeleteRedundantTxLookupData(db ethdb.Database, backupDir string) error {
 					"progress", fmt.Sprintf("%.1f%%", progress),
 					"totalChecked", totalCheckedKeys,
 					"elapsed", common.PrettyDuration(time.Since(start)))
-				logged = time.Now()
-			}
+			logged = time.Now()
+		}
 
 			// Write backup batch when it reaches 256MB
 			if backupBatch.ValueSize() > 256*1024*1024 {
@@ -1214,16 +1245,31 @@ func DeleteRedundantTxLookupData(db ethdb.Database, backupDir string) error {
 		}
 	}
 
-	log.Info("✅ 冗余txlookup数据删除和备份完成",
-		"deletedCount", deletedCount,
-		"deletedSize", common.StorageSize(deletedBytes),
-		"backupSize", common.StorageSize(backupBytes),
-		"matchedCount", matchedCount,
-		"backupPath", backupPath,
-		"totalCheckedKeys", totalCheckedKeys,
-		"matchRate", fmt.Sprintf("%.2f%%", float64(matchedCount)/float64(totalCheckedKeys)*100),
-		"elapsed", common.PrettyDuration(time.Since(start)),
-		"avgKeySize", fmt.Sprintf("%.1f bytes", float64(deletedBytes)/float64(deletedCount)))
+	// 显示最终统计信息
+	log.Info("📊 最终txlookup数据统计",
+		"totalTxLookupKeys", totalTxLookupKeys,
+		"keyLengthDistribution", keyLengthStats)
+	
+	if matchedCount > 0 {
+		log.Info("✅ 冗余txlookup数据删除和备份完成",
+			"deletedCount", deletedCount,
+			"deletedSize", common.StorageSize(deletedBytes),
+			"backupSize", common.StorageSize(backupBytes),
+			"matchedCount", matchedCount,
+			"backupPath", backupPath,
+			"totalTxLookupKeys", totalTxLookupKeys,
+			"matchRate", fmt.Sprintf("%.2f%%", float64(matchedCount)/float64(totalTxLookupKeys)*100),
+			"elapsed", common.PrettyDuration(time.Since(start)),
+			"avgKeySize", fmt.Sprintf("%.1f bytes", float64(deletedBytes)/float64(deletedCount)))
+	} else {
+		log.Info("ℹ️  未找到符合条件的冗余txlookup数据",
+			"totalTxLookupKeys", totalTxLookupKeys,
+			"targetLength", redundantTxLookupKeyLen,
+			"targetSuffix", suffix,
+			"targetSecondLastByte", "'s'",
+			"elapsed", common.PrettyDuration(time.Since(start)))
+		log.Info("💡 可能的原因：1) 数据库中没有冗余数据 2) 生成的key格式与预期不匹配 3) 识别条件需要调整")
+	}
 
 	return nil
 }
