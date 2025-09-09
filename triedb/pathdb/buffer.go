@@ -133,7 +133,7 @@ func (b *buffer) size() uint64 {
 
 // flush persists the in-memory dirty trie node into the disk if the configured
 // memory threshold is reached. Note, all data must be written atomically.
-func (b *buffer) flush(root common.Hash, db ethdb.Database, separateSnapDB ethdb.KeyValueStore, freezer ethdb.AncientWriter, progress []byte, nodesCache, statesCache *fastcache.Cache, id uint64, postFlush func()) {
+func (b *buffer) flush(root common.Hash, db ethdb.Database, separateSnapDB ethdb.KeyValueStore, freezer ethdb.AncientWriter, progress []byte, nodesCache, statesCache *fastcache.Cache, id uint64, isMultiDb bool, postFlush func()) {
 	if b.done != nil {
 		panic("duplicated flush operation")
 	}
@@ -166,7 +166,7 @@ func (b *buffer) flush(root common.Hash, db ethdb.Database, separateSnapDB ethdb
 			size, snapSize  int
 		)
 
-		if separateSnapDB != nil {
+		if isMultiDb {
 			snapBatch = separateSnapDB.NewBatchWithSize(b.states.dbsize() * 11 / 10)
 			trieBatch = db.NewBatchWithSize(b.nodes.dbsize() * 11 / 10)
 		} else {

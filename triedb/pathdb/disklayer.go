@@ -420,7 +420,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 
 		// Freeze the live buffer and schedule background flushing
 		dl.frozen = combined
-		dl.frozen.flush(bottom.root, dl.db.diskdb, dl.db.snapdb, dl.db.freezer, progress, dl.nodes, dl.states, bottom.stateID(), func() {
+		dl.frozen.flush(bottom.root, dl.db.diskdb, dl.db.snapdb, dl.db.freezer, progress, dl.nodes, dl.states, bottom.stateID(), dl.db.isMultiDB, func() {
 			// Resume the background generation if it's not completed yet.
 			// The generator is assumed to be available if the progress is
 			// not nil.
@@ -532,34 +532,41 @@ func (dl *diskLayer) revert(h *history) (*diskLayer, error) {
 
 	var snapBatch ethdb.Batch
 	// The separate snapshot db need to be flush with independent batch
-	if dl.db.snapdb != nil {
+	if dl.db.isMultiDB {
 		// Parallel write operations for better performance
-		nodesChan := make(chan error, 1)
-		snapChan := make(chan error, 1)
+		var (
+			wg                sync.WaitGroup
+			nodesErr, snapErr error
+		)
 
 		// Trie nodes batch processing
+		wg.Add(1)
 		go func() {
-			defer close(nodesChan)
+			defer wg.Done()
 			writeNodes(batch, nodes, dl.nodes)
 			rawdb.WritePersistentStateID(batch, dl.id-1)
-			nodesChan <- batch.Write()
+			nodesErr = batch.Write()
 		}()
 
 		// Snapshot states batch processing
+		wg.Add(1)
 		go func() {
-			defer close(snapChan)
+			defer wg.Done()
 			snapBatch = dl.db.snapdb.NewBatch()
 			writeStates(snapBatch, progress, accounts, storages, dl.states)
 			rawdb.WriteSnapshotRoot(snapBatch, h.meta.parent)
-			snapChan <- snapBatch.Write()
+			snapErr = snapBatch.Write()
 		}()
 
-		// Wait for both operations to complete and check for errors
-		if err := <-nodesChan; err != nil {
-			log.Crit("Failed to write states", "err", err)
+		// Wait for both operations to complete
+		wg.Wait()
+
+		// Check for any errors
+		if nodesErr != nil {
+			log.Crit("Failed to write states", "err", nodesErr)
 		}
-		if err := <-snapChan; err != nil {
-			log.Crit("Failed to write states to snapshot db", "err", err)
+		if snapErr != nil {
+			log.Crit("Failed to write states to snapshot db", "err", snapErr)
 		}
 	} else {
 		writeNodes(batch, nodes, dl.nodes)
