@@ -258,6 +258,9 @@ func New(diskdb ethdb.Database, config *Config, isVerkle bool) *Database {
 		snapdb:   diskdb.GetSnapStore(),
 		hasher:   merkleNodeHasher,
 	}
+	if db.snapdb != nil {
+		log.Info("init path db with separate snapshot ")
+	}
 	// Establish a dedicated database namespace tailored for verkle-specific
 	// data, ensuring the isolation of both verkle and merkle tree data. It's
 	// important to note that the introduction of a prefix won't lead to

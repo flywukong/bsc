@@ -19,6 +19,7 @@ package pathdb
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/VictoriaMetrics/fastcache"
@@ -199,53 +200,46 @@ func (b *buffer) flush(root common.Hash, db ethdb.Database, separateSnapDB ethdb
 		} else {
 			// Multi database mode: parallel processing for better performance
 			log.Info("multidb flush - parallel processing")
-			type flushResult struct {
-				size int
-				err  error
-			}
 
-			trieChan := make(chan flushResult, 1)
-			snapChan := make(chan flushResult, 1)
+			var (
+				wg               sync.WaitGroup
+				trieErr, snapErr error
+			)
 
 			// Trie batch processing
+			wg.Add(1)
 			go func() {
-				defer close(trieChan)
-				result := flushResult{}
+				defer wg.Done()
 				nodes = b.nodes.write(trieBatch, nodesCache)
 				rawdb.WritePersistentStateID(trieBatch, id)
-				result.size = trieBatch.ValueSize()
-				result.err = trieBatch.Write()
-				trieChan <- result
+				size = trieBatch.ValueSize()
+				trieErr = trieBatch.Write()
+				log.Info("multidb trie flush finish")
 			}()
 
 			// Snapshot batch processing
+			wg.Add(1)
 			go func() {
-				defer close(snapChan)
-				result := flushResult{}
+				defer wg.Done()
 				accounts, slots = b.states.write(snapBatch, progress, statesCache)
 				rawdb.WriteSnapshotRoot(snapBatch, root)
-				result.size = snapBatch.ValueSize()
-				result.err = snapBatch.Write()
-				snapChan <- result
+				snapSize = snapBatch.ValueSize()
+				snapErr = snapBatch.Write()
+				log.Info("multidb snap flush finish")
 			}()
 
-			// Collect results from both operations
-			trieResult := <-trieChan
-			snapResult := <-snapChan
+			// Wait for both operations to complete
+			wg.Wait()
 
 			// Check for any errors
-			if trieResult.err != nil {
-				b.flushErr = trieResult.err
+			if trieErr != nil {
+				b.flushErr = trieErr
 				return
 			}
-			if snapResult.err != nil {
-				b.flushErr = snapResult.err
+			if snapErr != nil {
+				b.flushErr = snapErr
 				return
 			}
-
-			// Aggregate results
-			size = trieResult.size
-			snapSize = snapResult.size
 		}
 
 		// Record performance metrics (unified for both paths)
