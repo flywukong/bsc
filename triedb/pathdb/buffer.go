@@ -132,7 +132,7 @@ func (b *buffer) size() uint64 {
 
 // flush persists the in-memory dirty trie node into the disk if the configured
 // memory threshold is reached. Note, all data must be written atomically.
-func (b *buffer) flush(root common.Hash, db ethdb.Database, freezer ethdb.AncientWriter, progress []byte, nodesCache, statesCache *fastcache.Cache, id uint64, postFlush func()) {
+func (b *buffer) flush(root common.Hash, db ethdb.Database, separateSnapDB ethdb.KeyValueStore, freezer ethdb.AncientWriter, progress []byte, nodesCache, statesCache *fastcache.Cache, id uint64, postFlush func()) {
 	if b.done != nil {
 		panic("duplicated flush operation")
 	}
@@ -164,9 +164,10 @@ func (b *buffer) flush(root common.Hash, db ethdb.Database, freezer ethdb.Ancien
 			accounts, slots int
 			size, snapSize  int
 		)
-		if db.HasSeparateSnapStore() {
-			snapBatch = db.GetSnapStore().NewBatchWithSize(b.states.dbsize() * 11 / 10)
-			trieBatch = db.GetStateStore().NewBatchWithSize(b.nodes.dbsize() * 11 / 10)
+
+		if separateSnapDB != nil {
+			snapBatch = separateSnapDB.NewBatchWithSize(b.states.dbsize() * 11 / 10)
+			trieBatch = db.NewBatchWithSize(b.nodes.dbsize() * 11 / 10)
 		} else {
 			trieBatch = db.NewBatchWithSize((b.nodes.dbsize() + b.states.dbsize()) * 11 / 10)
 		}
@@ -198,13 +199,9 @@ func (b *buffer) flush(root common.Hash, db ethdb.Database, freezer ethdb.Ancien
 		} else {
 			// Multi database mode: parallel processing for better performance
 			log.Info("multidb flush - parallel processing")
-
 			type flushResult struct {
-				nodes    int
-				accounts int
-				slots    int
-				size     int
-				err      error
+				size int
+				err  error
 			}
 
 			trieChan := make(chan flushResult, 1)
@@ -214,7 +211,7 @@ func (b *buffer) flush(root common.Hash, db ethdb.Database, freezer ethdb.Ancien
 			go func() {
 				defer close(trieChan)
 				result := flushResult{}
-				result.nodes = b.nodes.write(trieBatch, nodesCache)
+				nodes = b.nodes.write(trieBatch, nodesCache)
 				rawdb.WritePersistentStateID(trieBatch, id)
 				result.size = trieBatch.ValueSize()
 				result.err = trieBatch.Write()
@@ -225,7 +222,7 @@ func (b *buffer) flush(root common.Hash, db ethdb.Database, freezer ethdb.Ancien
 			go func() {
 				defer close(snapChan)
 				result := flushResult{}
-				result.accounts, result.slots = b.states.write(snapBatch, progress, statesCache)
+				accounts, slots = b.states.write(snapBatch, progress, statesCache)
 				rawdb.WriteSnapshotRoot(snapBatch, root)
 				result.size = snapBatch.ValueSize()
 				result.err = snapBatch.Write()
@@ -247,9 +244,6 @@ func (b *buffer) flush(root common.Hash, db ethdb.Database, freezer ethdb.Ancien
 			}
 
 			// Aggregate results
-			nodes = trieResult.nodes
-			accounts = snapResult.accounts
-			slots = snapResult.slots
 			size = trieResult.size
 			snapSize = snapResult.size
 		}

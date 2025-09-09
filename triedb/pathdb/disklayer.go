@@ -220,7 +220,7 @@ func (dl *diskLayer) account(hash common.Hash, depth int) ([]byte, error) {
 	}
 	// Try to retrieve the account from the disk.
 	blob :=
-		rawdb.ReadAccountSnapshot(dl.db.diskdb.GetSnapStore(), hash)
+		rawdb.ReadAccountSnapshot(dl.db.snapdb, hash)
 
 	// Store the resolved data in the clean cache. The background buffer flusher
 	// may also write to the clean cache concurrently, but two writers cannot
@@ -298,7 +298,7 @@ func (dl *diskLayer) storage(accountHash, storageHash common.Hash, depth int) ([
 		cleanStateMissMeter.Mark(1)
 	}
 	// Try to retrieve the account from the disk
-	blob := rawdb.ReadStorageSnapshot(dl.db.diskdb.GetSnapStore(), accountHash, storageHash)
+	blob := rawdb.ReadStorageSnapshot(dl.db.snapdb, accountHash, storageHash)
 
 	// Store the resolved data in the clean cache. The background buffer flusher
 	// may also write to the clean cache concurrently, but two writers cannot
@@ -420,7 +420,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 
 		// Freeze the live buffer and schedule background flushing
 		dl.frozen = combined
-		dl.frozen.flush(bottom.root, dl.db.diskdb, dl.db.freezer, progress, dl.nodes, dl.states, bottom.stateID(), func() {
+		dl.frozen.flush(bottom.root, dl.db.diskdb, dl.db.snapdb, dl.db.freezer, progress, dl.nodes, dl.states, bottom.stateID(), func() {
 			// Resume the background generation if it's not completed yet.
 			// The generator is assumed to be available if the progress is
 			// not nil.
@@ -529,18 +529,40 @@ func (dl *diskLayer) revert(h *history) (*diskLayer, error) {
 		progress = dl.generator.progressMarker()
 	}
 	batch := dl.db.diskdb.NewBatch()
-	writeNodes(batch, nodes, dl.nodes)
 
 	var snapBatch ethdb.Batch
 	// The separate snapshot db need to be flush with independent batch
-	if dl.db.diskdb.HasSeparateSnapStore() {
-		snapBatch = dl.db.diskdb.GetSnapStore().NewBatch()
-		writeStates(snapBatch, progress, accounts, storages, dl.states)
-		rawdb.WriteSnapshotRoot(snapBatch, h.meta.parent)
-		if err := snapBatch.Write(); err != nil {
+	if dl.db.snapdb != nil {
+		// Parallel write operations for better performance
+		nodesChan := make(chan error, 1)
+		snapChan := make(chan error, 1)
+
+		// Trie nodes batch processing
+		go func() {
+			defer close(nodesChan)
+			writeNodes(batch, nodes, dl.nodes)
+			rawdb.WritePersistentStateID(batch, dl.id-1)
+			nodesChan <- batch.Write()
+		}()
+
+		// Snapshot states batch processing
+		go func() {
+			defer close(snapChan)
+			snapBatch = dl.db.snapdb.NewBatch()
+			writeStates(snapBatch, progress, accounts, storages, dl.states)
+			rawdb.WriteSnapshotRoot(snapBatch, h.meta.parent)
+			snapChan <- snapBatch.Write()
+		}()
+
+		// Wait for both operations to complete and check for errors
+		if err := <-nodesChan; err != nil {
 			log.Crit("Failed to write states", "err", err)
 		}
+		if err := <-snapChan; err != nil {
+			log.Crit("Failed to write states to snapshot db", "err", err)
+		}
 	} else {
+		writeNodes(batch, nodes, dl.nodes)
 		// Provide the original values of modified accounts and storages for revert
 		writeStates(batch, progress, accounts, storages, dl.states)
 		rawdb.WritePersistentStateID(batch, dl.id-1)

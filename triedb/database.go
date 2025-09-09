@@ -144,6 +144,7 @@ func NewDatabase(diskdb ethdb.Database, config *Config) *Database {
 		if rawdb.ReadStateScheme(triediskdb) == rawdb.HashScheme {
 			log.Warn("Incompatible state scheme", "old", rawdb.HashScheme, "new", rawdb.PathScheme)
 		}
+		// The new pathdb implementation needs to support both trie and snap storage
 		db.backend = pathdb.New(diskdb, config.PathDB, config.IsVerkle)
 	} else if strings.Compare(dbScheme, rawdb.PathScheme) == 0 {
 		if config.PathDB == nil {
