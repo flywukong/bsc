@@ -538,9 +538,8 @@ func (dl *diskLayer) revert(h *history) (*diskLayer, error) {
 			wg                sync.WaitGroup
 			nodesErr, snapErr error
 		)
-
 		// Trie nodes batch processing
-		wg.Add(1)
+		wg.Add(2)
 		go func() {
 			defer wg.Done()
 			writeNodes(batch, nodes, dl.nodes)
@@ -549,7 +548,6 @@ func (dl *diskLayer) revert(h *history) (*diskLayer, error) {
 		}()
 
 		// Snapshot states batch processing
-		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			snapBatch = dl.db.snapdb.NewBatch()
@@ -557,11 +555,8 @@ func (dl *diskLayer) revert(h *history) (*diskLayer, error) {
 			rawdb.WriteSnapshotRoot(snapBatch, h.meta.parent)
 			snapErr = snapBatch.Write()
 		}()
-
-		// Wait for both operations to complete
 		wg.Wait()
-
-		// Check for any errors
+		
 		if nodesErr != nil {
 			log.Crit("Failed to write states", "err", nodesErr)
 		}

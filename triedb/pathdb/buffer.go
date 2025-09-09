@@ -200,7 +200,6 @@ func (b *buffer) flush(root common.Hash, db ethdb.Database, separateSnapDB ethdb
 		} else {
 			// Multi database mode: parallel processing for better performance
 			log.Info("multidb flush - parallel processing")
-
 			var (
 				wg               sync.WaitGroup
 				trieErr, snapErr error
@@ -214,7 +213,6 @@ func (b *buffer) flush(root common.Hash, db ethdb.Database, separateSnapDB ethdb
 				rawdb.WritePersistentStateID(trieBatch, id)
 				size = trieBatch.ValueSize()
 				trieErr = trieBatch.Write()
-				log.Info("multidb trie flush finish")
 			}()
 
 			// Snapshot batch processing
@@ -225,7 +223,6 @@ func (b *buffer) flush(root common.Hash, db ethdb.Database, separateSnapDB ethdb
 				rawdb.WriteSnapshotRoot(snapBatch, root)
 				snapSize = snapBatch.ValueSize()
 				snapErr = snapBatch.Write()
-				log.Info("multidb snap flush finish")
 			}()
 
 			// Wait for both operations to complete
