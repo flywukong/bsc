@@ -1394,30 +1394,35 @@ func CopyTxLookupToIndex(source ethdb.Database, dest ethdb.Database) error {
 			batchStart := time.Now()
 
 			flush := func() {
-				if currentBatchSize == 0 {
+				batchSize := batch.ValueSize()
+				if batchSize == 0 {
 					return
 				}
 				if err := batch.Write(); err != nil {
-					log.Error("Index batch write failed", "err", err, "worker", workerID, "size", currentBatchSize)
+					log.Error("Index batch write failed", "err", err, "worker", workerID, "size", batchSize)
 				} else {
-					atomic.AddInt64(&writtenBytes, int64(currentBatchSize))
+					atomic.AddInt64(&writtenBytes, int64(batchSize))
 					dur := time.Since(batchStart)
-					thr := float64(currentBatchSize) / dur.Seconds() / (1024 * 1024)
-					log.Debug("Index batch written", "worker", workerID, "size", common.StorageSize(currentBatchSize).String(), "duration", dur, "throughput", fmt.Sprintf("%.2f MB/s", thr))
+					thr := float64(batchSize) / dur.Seconds() / (1024 * 1024)
+					log.Info("Index batch written", "worker", workerID, "size", common.StorageSize(batchSize).String(), "duration", dur, "throughput", fmt.Sprintf("%.2f MB/s", thr))
 				}
 				batch = dest.NewBatch()
 				currentBatchSize = 0
 				batchStart = time.Now()
 			}
 
+			lastFlush := time.Now()
 			for kv := range kvChan {
 				if err := batch.Put(kv.key, kv.value); err != nil {
 					log.Error("Failed to add kv to batch", "err", err, "worker", workerID)
 					continue
 				}
 				currentBatchSize += kv.size
-				if currentBatchSize >= maxBatchSize {
+
+				// Flush on size or time trigger
+				if batch.ValueSize() >= maxBatchSize || time.Since(lastFlush) > 10*time.Second {
 					flush()
+					lastFlush = time.Now()
 				}
 			}
 			flush()
