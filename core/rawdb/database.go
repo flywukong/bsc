@@ -1372,9 +1372,7 @@ func CopyTxLookupToIndex(source ethdb.Database, dest ethdb.Database) error {
 		logInterval       = 5 * time.Second
 		targetGB          = 900 // stop after ~700GB committed
 	)
-
-	targetBytes := int64(targetGB) * 1024 * 1024 * 1024
-
+	
 	start := time.Now()
 	lastLog := time.Now()
 
@@ -1434,18 +1432,6 @@ func CopyTxLookupToIndex(source ethdb.Database, dest ethdb.Database) error {
 	defer it.Release()
 	for it.Next() {
 		key := it.Key()
-		if len(key) != 35 {
-			atomic.AddInt64(&skipped, 1)
-			continue
-		}
-		if key[len(key)-2] != 's' {
-			atomic.AddInt64(&skipped, 1)
-			continue
-		}
-
-		if atomic.LoadInt64(&writtenBytes) >= targetBytes {
-			break
-		}
 
 		val := it.Value()
 		kv := kvPair{key: common.CopyBytes(key), value: common.CopyBytes(val), size: len(key) + len(val)}
