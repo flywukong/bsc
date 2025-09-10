@@ -1360,6 +1360,119 @@ func DeleteTrieState(db ethdb.Database) error {
 	return nil
 }
 
+// CopyTxLookupToIndex scans the source database for txlookup entries and writes
+// them into the destination database. Only keys with the txlookup prefix are
+// copied. The destination database is expected to be a fresh key-value store
+// (e.g. created under an 'index' directory).
+func CopyTxLookupToIndex(source ethdb.Database, dest ethdb.Database) error {
+	const (
+		numWriters        = 50                // concurrent writers (aligned with focused expansion)
+		maxBatchSize      = 512 * 1024 * 1024 // 512MB per batch
+		channelBufferSize = 20000             // channel buffer size
+		logInterval       = 5 * time.Second
+		targetGB          = 900 // stop after ~700GB committed
+	)
+
+	targetBytes := int64(targetGB) * 1024 * 1024 * 1024
+
+	start := time.Now()
+	lastLog := time.Now()
+
+	var (
+		writtenBytes int64
+		matched      int64
+		skipped      int64
+		wg           sync.WaitGroup
+	)
+
+	kvChan := make(chan kvPair, channelBufferSize)
+
+	// Writers
+	for i := 0; i < numWriters; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			batch := dest.NewBatch()
+			currentBatchSize := 0
+			batchStart := time.Now()
+
+			flush := func() {
+				if currentBatchSize == 0 {
+					return
+				}
+				if err := batch.Write(); err != nil {
+					log.Error("Index batch write failed", "err", err, "worker", workerID, "size", currentBatchSize)
+				} else {
+					atomic.AddInt64(&writtenBytes, int64(currentBatchSize))
+					dur := time.Since(batchStart)
+					thr := float64(currentBatchSize) / dur.Seconds() / (1024 * 1024)
+					log.Debug("Index batch written", "worker", workerID, "size", common.StorageSize(currentBatchSize).String(), "duration", dur, "throughput", fmt.Sprintf("%.2f MB/s", thr))
+				}
+				batch = dest.NewBatch()
+				currentBatchSize = 0
+				batchStart = time.Now()
+			}
+
+			for kv := range kvChan {
+				if err := batch.Put(kv.key, kv.value); err != nil {
+					log.Error("Failed to add kv to batch", "err", err, "worker", workerID)
+					continue
+				}
+				currentBatchSize += kv.size
+				if currentBatchSize >= maxBatchSize {
+					flush()
+				}
+			}
+			flush()
+		}(i)
+	}
+
+	log.Info("Starting concurrent txlookup extraction to index DB", "writers", numWriters, "batch", "512MB", "target", fmt.Sprintf("%d GB", targetGB))
+
+	// Scanner
+	it := source.NewIterator(txLookupPrefix, nil)
+	defer it.Release()
+	for it.Next() {
+		key := it.Key()
+		if len(key) != 35 {
+			atomic.AddInt64(&skipped, 1)
+			continue
+		}
+		if key[len(key)-2] != 's' {
+			atomic.AddInt64(&skipped, 1)
+			continue
+		}
+
+		if atomic.LoadInt64(&writtenBytes) >= targetBytes {
+			break
+		}
+
+		val := it.Value()
+		kv := kvPair{key: common.CopyBytes(key), value: common.CopyBytes(val), size: len(key) + len(val)}
+		kvChan <- kv
+		atomic.AddInt64(&matched, 1)
+
+		if time.Since(lastLog) > logInterval {
+			wb := atomic.LoadInt64(&writtenBytes)
+			mb := float64(wb) / (1024 * 1024)
+			gb := mb / 1024
+			log.Info("Txlookup extraction progress", "matched", atomic.LoadInt64(&matched), "writtenMB", fmt.Sprintf("%.1f MB", mb), "writtenGB", fmt.Sprintf("%.2f GB", gb), "elapsed", common.PrettyDuration(time.Since(start)))
+			lastLog = time.Now()
+		}
+	}
+	close(kvChan)
+	wg.Wait()
+	if err := it.Error(); err != nil {
+		return err
+	}
+
+	wb := atomic.LoadInt64(&writtenBytes)
+	mb := float64(wb) / (1024 * 1024)
+	gb := mb / 1024
+	log.Info("Txlookup extraction finished", "matched", atomic.LoadInt64(&matched), "writtenMB", fmt.Sprintf("%.1f MB", mb), "writtenGB", fmt.Sprintf("%.2f GB", gb), "skipped", atomic.LoadInt64(&skipped), "targetGB", targetGB, "elapsed", common.PrettyDuration(time.Since(start)))
+	return nil
+}
+
 // printChainMetadata prints out chain metadata to stderr.
 func printChainMetadata(db ethdb.Reader) {
 	fmt.Fprintf(os.Stderr, "Chain metadata\n")

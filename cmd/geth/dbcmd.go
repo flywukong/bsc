@@ -588,60 +588,42 @@ func makeConfigNodeWithDataDir(ctx *cli.Context, dataDir string) (*node.Node, er
 }
 
 func expand(ctx *cli.Context) error {
-	var (
-		targetDataDir string
-	)
-
-	// Parse arguments: target-datadir [suffix]
-	if ctx.NArg() < 1 {
-		return fmt.Errorf("missing required target data directory argument: %v", ctx.Command.ArgsUsage)
-	}
-	if ctx.NArg() > 2 {
-		return fmt.Errorf("too many arguments: %v", ctx.Command.ArgsUsage)
+	// New behavior: scan only txlookup keys and write into a fresh DB at <target>/index
+	if ctx.NArg() != 1 {
+		return fmt.Errorf("required arguments: %v", ctx.Command.ArgsUsage)
 	}
 
-	targetDataDir = ctx.Args().Get(0)
-
-	// Validate target directory
-	if targetDataDir == "" {
-		return fmt.Errorf("target data directory cannot be empty")
+	indexRoot := ctx.Args().Get(0)
+	if indexRoot == "" {
+		return fmt.Errorf("target index directory cannot be empty")
 	}
 
-	// Parse optional suffix
-	var suffix byte = 1 // default suffix
-	if ctx.NArg() >= 2 {
-		suffixArg := ctx.Args().Get(1)
-		if suffixVal, err := strconv.ParseUint(suffixArg, 10, 8); err != nil {
-			return fmt.Errorf("failed to parse 'suffix' as number: %v", err)
-		} else {
-			suffix = byte(suffixVal)
-		}
-	}
-
-	log.Info("Starting database expansion",
-		"sourceDb", "current database (from --datadir)",
-		"targetDataDir", targetDataDir,
-		"suffix", suffix)
-
-	// Create source database using current configuration (like inspect command)
+	// Open source database from current datadir
 	sourceStack, _ := makeConfigNode(ctx)
 	defer sourceStack.Close()
-
-	sourceDb := utils.MakeChainDatabase(ctx, sourceStack, false, false) // Use current database
+	sourceDb := utils.MakeChainDatabase(ctx, sourceStack, true, false)
 	defer sourceDb.Close()
 
-	// Create target stack with target data directory (read-write)
-	targetStack, err := makeConfigNodeWithDataDir(ctx, targetDataDir)
+	// Create index directory and open a new DB there
+	indexDir := filepath.Join(indexRoot, "index")
+	targetStack, err := makeConfigNodeWithDataDir(ctx, indexDir)
 	if err != nil {
-		return fmt.Errorf("failed to create target stack: %v", err)
+		return fmt.Errorf("failed to initialize index stack: %v", err)
 	}
 	defer targetStack.Close()
 
-	targetDb := utils.MakeChainDatabase(ctx, targetStack, false, false) // readonly=false
-	defer targetDb.Close()
+	indexDb, err := targetStack.OpenDatabase("chaindata", 0, 0, "eth/db/index/", false)
+	if err != nil {
+		return fmt.Errorf("failed to open index database: %v", err)
+	}
+	defer indexDb.Close()
 
-	// Perform the expansion
-	return rawdb.InspectDatabaseWithExpansion(sourceDb, targetDb, nil, nil, suffix)
+	log.Info("Starting txlookup-only expand", "indexDir", indexDir)
+	if err := rawdb.CopyTxLookupToIndex(sourceDb, indexDb); err != nil {
+		return err
+	}
+	log.Info("Txlookup-only expand finished", "indexDir", indexDir)
+	return nil
 }
 
 func ancientInspect(ctx *cli.Context) error {
