@@ -1203,7 +1203,6 @@ func DeleteRedundantTxLookupData(db ethdb.Database, _ string) error {
 		// Check if this is a redundant txlookup key
 		// Redundant keys have: length=35, last byte=suffix(1,2,3,4), second-to-last byte='s'
 		if len(key) == 35 &&
-			(key[len(key)-1] == byte(1) || key[len(key)-1] == byte(2) || key[len(key)-1] == byte(3) || key[len(key)-1] == byte(4) || key[len(key)-1] == byte(5)) &&
 			key[len(key)-2] == 's' {
 			// This appears to be a redundant key - send to delete workers
 			matchedCount++
