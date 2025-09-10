@@ -1411,7 +1411,6 @@ func CopyTxLookupToIndex(source ethdb.Database, dest ethdb.Database) error {
 				batchStart = time.Now()
 			}
 
-			lastFlush := time.Now()
 			for kv := range kvChan {
 				if err := batch.Put(kv.key, kv.value); err != nil {
 					log.Error("Failed to add kv to batch", "err", err, "worker", workerID)
@@ -1419,10 +1418,9 @@ func CopyTxLookupToIndex(source ethdb.Database, dest ethdb.Database) error {
 				}
 				currentBatchSize += kv.size
 
-				// Flush on size or time trigger
-				if batch.ValueSize() >= maxBatchSize || time.Since(lastFlush) > 10*time.Second {
+				// Flush only on size trigger
+				if batch.ValueSize() >= maxBatchSize {
 					flush()
-					lastFlush = time.Now()
 				}
 			}
 			flush()
