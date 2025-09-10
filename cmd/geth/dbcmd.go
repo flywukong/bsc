@@ -612,7 +612,7 @@ func expand(ctx *cli.Context) error {
 	}
 	defer targetStack.Close()
 
-	indexDb, err := targetStack.OpenDatabase("chaindata", 0, 0, "eth/db/index/", false)
+	indexDb, err := targetStack.OpenDatabase("chaindata", 4000, 200000, "eth/db/index/", false)
 	if err != nil {
 		return fmt.Errorf("failed to open index database: %v", err)
 	}

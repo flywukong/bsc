@@ -1366,13 +1366,12 @@ func DeleteTrieState(db ethdb.Database) error {
 // (e.g. created under an 'index' directory).
 func CopyTxLookupToIndex(source ethdb.Database, dest ethdb.Database) error {
 	const (
-		numWriters        = 50                // concurrent writers (aligned with focused expansion)
+		numWriters        = 70                // concurrent writers (aligned with focused expansion)
 		maxBatchSize      = 512 * 1024 * 1024 // 512MB per batch
-		channelBufferSize = 20000             // channel buffer size
+		channelBufferSize = 30000             // channel buffer size
 		logInterval       = 5 * time.Second
-		targetGB          = 900 // stop after ~700GB committed
 	)
-	
+
 	start := time.Now()
 	lastLog := time.Now()
 
@@ -1455,7 +1454,7 @@ func CopyTxLookupToIndex(source ethdb.Database, dest ethdb.Database) error {
 	wb := atomic.LoadInt64(&writtenBytes)
 	mb := float64(wb) / (1024 * 1024)
 	gb := mb / 1024
-	log.Info("Txlookup extraction finished", "matched", atomic.LoadInt64(&matched), "writtenMB", fmt.Sprintf("%.1f MB", mb), "writtenGB", fmt.Sprintf("%.2f GB", gb), "skipped", atomic.LoadInt64(&skipped), "targetGB", targetGB, "elapsed", common.PrettyDuration(time.Since(start)))
+	log.Info("Txlookup extraction finished", "matched", atomic.LoadInt64(&matched), "writtenMB", fmt.Sprintf("%.1f MB", mb), "writtenGB", fmt.Sprintf("%.2f GB", gb), "skipped", atomic.LoadInt64(&skipped), "elapsed", common.PrettyDuration(time.Since(start)))
 	return nil
 }
 
