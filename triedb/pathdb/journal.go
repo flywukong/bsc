@@ -240,7 +240,7 @@ func loadGenerator(db ethdb.KeyValueReader, snapdb ethdb.KeyValueReader, hash no
 		return nil, common.Hash{}, err
 	}
 	// State generation progress marker is lost, rebuild it
-	blob := rawdb.ReadSnapshotGenerator(db)
+	blob := rawdb.ReadSnapshotGenerator(snapdb)
 	if len(blob) == 0 {
 		log.Info("State snapshot generator is not found")
 		return nil, trieRoot, nil
