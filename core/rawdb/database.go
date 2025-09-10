@@ -1424,7 +1424,7 @@ func CopyTxLookupToIndex(source ethdb.Database, dest ethdb.Database) error {
 		}(i)
 	}
 
-	log.Info("Starting concurrent txlookup extraction to index DB", "writers", numWriters, "batch", "512MB", "target", fmt.Sprintf("%d GB", targetGB))
+	log.Info("Starting concurrent txlookup extraction to index DB", "writers", numWriters, "batch", "512MB")
 
 	// Scanner
 	it := source.NewIterator(txLookupPrefix, nil)
