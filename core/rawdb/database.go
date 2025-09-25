@@ -691,9 +691,9 @@ type kvPair struct {
 func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suffix byte) error {
 	const (
 		totalExpectedKeys = 18800000000       // 18.8 billion keys
-		numWriters        = 45                // Number of writer goroutines
+		numWriters        = 10                // Number of writer goroutines
 		maxBatchSize      = 512 * 1024 * 1024 // 512MB batch size
-		channelBufferSize = 10000             // Channel buffer size
+		channelBufferSize = 2000              // Channel buffer size
 	)
 
 	// Trie node skipping counters
