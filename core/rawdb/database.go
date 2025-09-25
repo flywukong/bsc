@@ -714,42 +714,6 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 		{CodePrefix, "code", func(key []byte) bool {
 			return bytes.HasPrefix(key, CodePrefix) && len(key) == len(CodePrefix)+common.HashLength
 		}},
-		{txLookupPrefix, "txLookup", func(key []byte) bool {
-			return bytes.HasPrefix(key, txLookupPrefix) && len(key) == (len(txLookupPrefix)+common.HashLength)
-		}},
-		{SnapshotAccountPrefix, "accountSnapshot", func(key []byte) bool {
-			return bytes.HasPrefix(key, SnapshotAccountPrefix) && len(key) == (len(SnapshotAccountPrefix)+common.HashLength)
-		}},
-		{SnapshotStoragePrefix, "storageSnapshot", func(key []byte) bool {
-			return bytes.HasPrefix(key, SnapshotStoragePrefix) && len(key) == (len(SnapshotStoragePrefix)+2*common.HashLength)
-		}},
-		{headerPrefix, "headers", func(key []byte) bool {
-			return bytes.HasPrefix(key, headerPrefix) && len(key) == (len(headerPrefix)+8+common.HashLength)
-		}},
-		{blockBodyPrefix, "blockBodies", func(key []byte) bool {
-			return bytes.HasPrefix(key, blockBodyPrefix) && len(key) == (len(blockBodyPrefix)+8+common.HashLength)
-		}},
-		{blockReceiptsPrefix, "blockReceipts", func(key []byte) bool {
-			return bytes.HasPrefix(key, blockReceiptsPrefix) && len(key) == (len(blockReceiptsPrefix)+8+common.HashLength)
-		}},
-		{headerPrefix, "headerTDs", func(key []byte) bool {
-			return bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerTDSuffix)
-		}},
-		{BlockBlobSidecarsPrefix, "blobSidecars", func(key []byte) bool {
-			return bytes.HasPrefix(key, BlockBlobSidecarsPrefix)
-		}},
-		{headerPrefix, "headerHashes", func(key []byte) bool {
-			return bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerHashSuffix)
-		}},
-		{headerNumberPrefix, "headerNumbers", func(key []byte) bool {
-			return bytes.HasPrefix(key, headerNumberPrefix) && len(key) == (len(headerNumberPrefix)+common.HashLength)
-		}},
-		{stateIDPrefix, "stateIDs", func(key []byte) bool {
-			return bytes.HasPrefix(key, stateIDPrefix) && len(key) == len(stateIDPrefix)+common.HashLength
-		}},
-		{bloomBitsPrefix, "bloomBits", func(key []byte) bool {
-			return bytes.HasPrefix(key, bloomBitsPrefix) && len(key) == (len(bloomBitsPrefix)+10+common.HashLength)
-		}},
 	}
 
 	// Shared statistics
@@ -817,26 +781,6 @@ func expandDatabaseFocused(sourceDb ethdb.Database, targetDb ethdb.Database, suf
 
 	generateNewKey := func(originalKey []byte, suffix byte) []byte {
 		if len(originalKey) <= 2 {
-			return nil
-		}
-
-		// 跳过trie节点：只生成非trie数据的冗余版本
-		if IsAccountTrieNode(originalKey) {
-			atomic.AddInt64(&skippedAccountTries, 1)
-			keyLen := len(originalKey)
-			if keyLen > 8 {
-				keyLen = 8
-			}
-			log.Info("Skipping account trie node", "key", fmt.Sprintf("%x", originalKey[:keyLen]))
-			return nil
-		}
-		if IsStorageTrieNode(originalKey) {
-			atomic.AddInt64(&skippedStorageTries, 1)
-			keyLen := len(originalKey)
-			if keyLen > 8 {
-				keyLen = 8
-			}
-			log.Info("Skipping storage trie node", "key", fmt.Sprintf("%x", originalKey[:keyLen]))
 			return nil
 		}
 
