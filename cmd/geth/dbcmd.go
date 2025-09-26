@@ -3250,7 +3250,7 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 
 // migrateDBWithShardingExpandMode migrates database with sharding in expand mode
 func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, version byte) error {
-	log.Info("Starting shard database migration with intelligent sharding", "target", targetDataDir, "shards", 8, "suffix", version)
+	log.Info("Starting async shard database migration with intelligent sharding", "target", targetDataDir, "shards", 8, "workers", 10, "suffix", version)
 
 	// Open source database (single, not multidb)
 	stack, cfg := makeConfigNode(ctx)
@@ -3343,62 +3343,111 @@ func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, ver
 
 	// Wrap target shard database to get ethdb.Database interface
 	shardDB := rawdb.NewDatabase(targetDB)
-	batch := shardDB.NewBatch()
 
-	// Process each prefix
+	// Create channels and synchronization for async thread pool
+	const (
+		threadPoolSize    = 10
+		channelBufferSize = 2000
+	)
+
+	type kvPair struct {
+		key   []byte
+		value []byte
+	}
+
+	kvChan := make(chan kvPair, channelBufferSize)
+	var wg sync.WaitGroup
+
+	// Start 10 async writer goroutines
+	log.Info("🚀 Starting async writer thread pool", "threadCount", threadPoolSize)
+	for i := 0; i < threadPoolSize; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			batch := shardDB.NewBatch()
+			var processed int64
+
+			for kv := range kvChan {
+				// Write original key-value pair to shard database
+				if err := batch.Put(kv.key, kv.value); err != nil {
+					log.Error("Failed to add to batch", "err", err, "worker", workerID)
+					continue
+				}
+
+				atomic.AddInt64(&totalKeys, 1)
+				atomic.AddInt64(&totalBytes, int64(len(kv.key)+len(kv.value)))
+				processed++
+
+				// Batch write when reaching size limit
+				if batch.ValueSize() >= batchSize {
+					if err := batch.Write(); err != nil {
+						log.Error("Batch write failed", "err", err, "worker", workerID)
+					} else {
+						log.Debug("Batch written", "worker", workerID,
+							"size", common.StorageSize(batch.ValueSize()).String(),
+							"processed", processed)
+					}
+					batch.Reset()
+				}
+			}
+
+			// Write remaining batch
+			if batch.ValueSize() > 0 {
+				if err := batch.Write(); err != nil {
+					log.Error("Final batch write failed", "err", err, "worker", workerID)
+				} else {
+					log.Info("Final batch written", "worker", workerID,
+						"size", common.StorageSize(batch.ValueSize()).String(),
+						"totalProcessed", processed)
+				}
+			}
+		}(i)
+	}
+
+	// Process each prefix and send to workers
 	for _, prefixInfo := range prefixes {
 		log.Info("Processing prefix", "name", prefixInfo.name, "prefix", fmt.Sprintf("%x", prefixInfo.prefix))
 
 		it := srcDB.NewIterator(prefixInfo.prefix, nil)
-		var processed int64
+		var scanned int64
 
 		for it.Next() {
-			key := it.Key()
-			value := it.Value()
+			key := make([]byte, len(it.Key()))
+			value := make([]byte, len(it.Value()))
+			copy(key, it.Key())
+			copy(value, it.Value())
 
-			// Write original key-value pair to shard database
-			if err := batch.Put(key, value); err != nil {
-				log.Error("Failed to add to batch", "err", err, "prefix", prefixInfo.name)
-				continue
-			}
-
-			totalKeys++
-			totalBytes += int64(len(key) + len(value))
-			processed++
-
-			// Batch write when reaching size limit
-			if batch.ValueSize() >= batchSize {
-				if err := batch.Write(); err != nil {
-					log.Error("Batch write failed", "err", err, "prefix", prefixInfo.name)
-				}
-				batch.Reset()
-			}
+			// Send to worker channel
+			kvChan <- kvPair{key: key, value: value}
+			scanned++
 
 			// Progress report every 1M keys
-			if processed%1000000 == 0 {
-				log.Info("Prefix progress", "name", prefixInfo.name,
-					"processed", processed,
+			if scanned%1000000 == 0 {
+				currentTotal := atomic.LoadInt64(&totalKeys)
+				log.Info("Prefix scanning progress", "name", prefixInfo.name,
+					"scanned", scanned, "totalProcessed", currentTotal,
 					"elapsed", common.PrettyDuration(time.Since(start)))
 			}
 		}
 		it.Release()
 
-		log.Info("Prefix completed", "name", prefixInfo.name,
-			"totalProcessed", processed,
+		log.Info("Prefix scanning completed", "name", prefixInfo.name,
+			"totalScanned", scanned,
 			"elapsed", common.PrettyDuration(time.Since(start)))
 	}
 
-	// Write remaining batch
-	if batch.ValueSize() > 0 {
-		if err := batch.Write(); err != nil {
-			log.Error("Final batch write failed", "err", err)
-		}
-	}
+	// Close channel to signal workers to finish
+	close(kvChan)
 
-	log.Info("Shard database migration completed",
-		"totalKeys", totalKeys,
-		"totalBytes", common.StorageSize(totalBytes).String(),
+	// Wait for all workers to complete
+	log.Info("Waiting for all workers to complete...")
+	wg.Wait()
+
+	log.Info("🎉 Async shard database migration completed",
+		"totalKeys", atomic.LoadInt64(&totalKeys),
+		"totalBytes", common.StorageSize(atomic.LoadInt64(&totalBytes)).String(),
 		"shards", 8,
+		"workers", threadPoolSize,
 		"elapsed", common.PrettyDuration(time.Since(start)))
 
 	return nil
