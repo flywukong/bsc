@@ -49,6 +49,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
 	"github.com/ethereum/go-ethereum/ethdb/pebble"
+	"github.com/ethereum/go-ethereum/ethdb/shardingdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -1691,12 +1692,12 @@ func migrateDatabase(ctx *cli.Context) error {
 	defer snapDB.Close()
 
 	/*
-		// TxIndex database
-		indexDB, err := openTargetDatabase(targetTxIndexPath, cacheSize*cacheDB*15/100, 32)
+			// TxIndex database
+			indexDB, err := openTargetDatabase(targetTxIndexPath, cacheSize*cacheDB*15/100, 32)
 		if err != nil {
-			return fmt.Errorf("failed to create target txindex database: %v", err)
-		}
-		defer indexDB.Close()
+				return fmt.Errorf("failed to create target txindex database: %v", err)
+			}
+			defer indexDB.Close()
 	*/
 	// Start in-place migration
 	return performInPlaceMigration(sourceDB, stateDB, snapDB, nil, sourceChainDataPath, 1)
@@ -3249,139 +3250,156 @@ func traverseAndMigrateWithSharding(chainDB ethdb.Database) error {
 
 // migrateDBWithShardingExpandMode migrates database with sharding in expand mode
 func migrateDBWithShardingExpandMode(ctx *cli.Context, targetDataDir string, version byte) error {
-	// src is a single db, read all the kvs and then write to the target db
+	log.Info("Starting shard database migration with intelligent sharding", "target", targetDataDir, "shards", 8, "suffix", version)
+
+	// Open source database (single, not multidb)
 	stack, cfg := makeConfigNode(ctx)
-	srcChainDB, err := initMultiDBs(stack, cfg, false)
+	srcChainDataPath := stack.ResolvePath("chaindata")
+	srcDB, err := openTargetDatabase(srcChainDataPath, cfg.Eth.DatabaseCache, cfg.Eth.DatabaseHandles)
 	if err != nil {
-		return fmt.Errorf("failed to init source chaindb: %v", err)
+		return fmt.Errorf("failed to open source database: %v", err)
 	}
-	defer srcChainDB.Close()
+	defer srcDB.Close()
 
-	dstChainDB, err := initMultiDBsWithDataDir(stack, cfg, targetDataDir)
+	// Create target shard database
+	targetPath := filepath.Join(targetDataDir, "chaindata")
+	if err := os.MkdirAll(targetPath, 0755); err != nil {
+		return fmt.Errorf("failed to create target directory: %v", err)
+	}
+
+	// Create shard database configuration
+	shardCfg := &shardingdb.Config{
+		DBType:         "pebble",
+		CacheRatio:     100,
+		Namespace:      "trie",
+		EnableSharding: true,
+		DBPath:         targetPath,
+		ShardNum:       8, // Use 8 shards
+		Shards: []shardingdb.ShardConfig{
+			{Indexes: "0-7"},
+		},
+	}
+
+	// ShardIndexInTrieDB returns the shard index of the given key
+	// it accepts account trie key, storage trie key, and state root key
+	shardIndexFunc := func(key []byte, shardNum int) int {
+		if len(key) < 1 {
+			return 0
+		}
+		// TrieNodeAccountPrefix + hexPath -> trie node
+		if rawdb.TrieNodeAccountPrefix[0] == key[0] {
+			if len(key) < 2 {
+				return 0
+			}
+			return int(key[1]) % shardNum
+		}
+		// TrieNodeStoragePrefix + accountHash + hexPath -> trie node
+		if rawdb.TrieNodeStoragePrefix[0] == key[0] {
+			if len(key) < 34 {
+				return 0
+			}
+			return int(key[33]) % shardNum
+		}
+		// CodePrefix + code hash -> account code
+		if rawdb.CodePrefix[0] == key[0] {
+			if len(key) < 2 {
+				return 0
+			}
+			return int(key[1]) % shardNum
+		}
+		// some metadata, journal save in shard0
+		// such as persistentStateIDKey, trieJournalKey, stateIDPrefix, etc.
+		return 0
+	}
+
+	targetDB, err := shardingdb.New(shardCfg, cfg.Eth.DatabaseCache, cfg.Eth.DatabaseHandles, false, shardIndexFunc)
 	if err != nil {
-		return fmt.Errorf("failed to init target chaindb: %v", err)
+		return fmt.Errorf("failed to create target shard database: %v", err)
 	}
-	defer dstChainDB.Close()
+	defer targetDB.Close()
 
-	it := srcChainDB.NewIterator(nil, nil)
-	defer it.Release()
+	log.Info("Initialized shard database with intelligent key distribution",
+		"accountTrie", "uses key[1] for sharding",
+		"storageTrie", "uses key[33] for sharding",
+		"code", "uses key[1] for sharding",
+		"metadata", "stored in shard0")
+
+	// Define 3 prefixes to scan
+	prefixes := []struct {
+		prefix []byte
+		name   string
+	}{
+		{rawdb.TrieNodeAccountPrefix, "accountTrie"},
+		{rawdb.TrieNodeStoragePrefix, "storageTrie"},
+		{rawdb.CodePrefix, "code"},
+	}
 
 	var (
-		chainBatch = dstChainDB.NewBatch()
-		stateBatch = dstChainDB.GetStateStore().NewBatch()
-		snapBatch  = dstChainDB.GetSnapStore().NewBatch()
-		indexBatch = dstChainDB.GetTxIndexStore().NewBatch()
-		batchSize  = 0
-		srcStat    = &stat{}
-		chainStat  = &stat{}
-		stateStat  = &stat{}
-		snapStat   = &stat{}
-		indexStat  = &stat{}
+		totalKeys  int64
+		totalBytes int64
+		start      = time.Now()
+		batchSize  = 64 * 1024 * 1024 // 64MB
 	)
-	for it.Next() {
-		key := make([]byte, len(it.Key()))
-		value := make([]byte, len(it.Value()))
-		copy(key, it.Key())
-		copy(value, it.Value())
 
-		// regenerate the new key and value
-		key = generateNewKey(key, version)
-		value = shuffleValue(value)
-		kvSize := len(key) + len(value)
-		batchSize += kvSize
-		srcStat.Add(kvSize)
+	// Wrap target shard database to get ethdb.Database interface
+	shardDB := rawdb.NewDatabase(targetDB)
+	batch := shardDB.NewBatch()
 
-		// put the key into the state, snap, or index database and delete from chaindb
-		category := categorizeDataByKey(key, value)
-		switch category {
-		case "state":
-			stateBatch.Put(key, value)
-			stateStat.Add(kvSize)
-		case "snapshot":
-			snapBatch.Put(key, value)
-			snapStat.Add(kvSize)
-		case "txindex":
-			indexBatch.Put(key, value)
-			indexStat.Add(kvSize)
-		default:
-			chainBatch.Put(key, value)
-			chainStat.Add(kvSize)
-		}
+	// Process each prefix
+	for _, prefixInfo := range prefixes {
+		log.Info("Processing prefix", "name", prefixInfo.name, "prefix", fmt.Sprintf("%x", prefixInfo.prefix))
 
-		// flush the batch if it's too large
-		if batchSize >= 256*1024*1024 {
-			log.Info("flushing kvs...", "src count", srcStat.count, "src size", srcStat.size,
-				"chain count", chainStat.count, "chain size", chainStat.size,
-				"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
-				"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
-			if err := stateBatch.Write(); err != nil {
-				return fmt.Errorf("failed to write state batch: %v", err)
+		it := srcDB.NewIterator(prefixInfo.prefix, nil)
+		var processed int64
+
+		for it.Next() {
+			key := it.Key()
+			value := it.Value()
+
+			// Write original key-value pair to shard database
+			if err := batch.Put(key, value); err != nil {
+				log.Error("Failed to add to batch", "err", err, "prefix", prefixInfo.name)
+				continue
 			}
-			if err := snapBatch.Write(); err != nil {
-				return fmt.Errorf("failed to write snap batch: %v", err)
+
+			totalKeys++
+			totalBytes += int64(len(key) + len(value))
+			processed++
+
+			// Batch write when reaching size limit
+			if batch.ValueSize() >= batchSize {
+				if err := batch.Write(); err != nil {
+					log.Error("Batch write failed", "err", err, "prefix", prefixInfo.name)
+				}
+				batch.Reset()
 			}
-			if err := indexBatch.Write(); err != nil {
-				return fmt.Errorf("failed to write index batch: %v", err)
+
+			// Progress report every 1M keys
+			if processed%1000000 == 0 {
+				log.Info("Prefix progress", "name", prefixInfo.name,
+					"processed", processed,
+					"elapsed", common.PrettyDuration(time.Since(start)))
 			}
-			// save first, then delete
-			if err := chainBatch.Write(); err != nil {
-				return fmt.Errorf("failed to write chain batch: %v", err)
-			}
-			chainBatch.Reset()
-			stateBatch.Reset()
-			snapBatch.Reset()
-			indexBatch.Reset()
-			batchSize = 0
+		}
+		it.Release()
+
+		log.Info("Prefix completed", "name", prefixInfo.name,
+			"totalProcessed", processed,
+			"elapsed", common.PrettyDuration(time.Since(start)))
+	}
+
+	// Write remaining batch
+	if batch.ValueSize() > 0 {
+		if err := batch.Write(); err != nil {
+			log.Error("Final batch write failed", "err", err)
 		}
 	}
 
-	// flush the remaining kvs
-	if batchSize > 0 {
-		log.Info("flushing leftover kvs...", "src count", srcStat.count, "src size", srcStat.size,
-			"chain count", chainStat.count, "chain size", chainStat.size,
-			"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
-			"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
-		if err := stateBatch.Write(); err != nil {
-			return fmt.Errorf("failed to write state batch: %v", err)
-		}
-		if err := snapBatch.Write(); err != nil {
-			return fmt.Errorf("failed to write snap batch: %v", err)
-		}
-		if err := indexBatch.Write(); err != nil {
-			return fmt.Errorf("failed to write index batch: %v", err)
-		}
-		// save first, then delete
-		if err := chainBatch.Write(); err != nil {
-			return fmt.Errorf("failed to write chain batch: %v", err)
-		}
-		chainBatch.Reset()
-		stateBatch.Reset()
-		snapBatch.Reset()
-		indexBatch.Reset()
-		batchSize = 0
-	}
+	log.Info("Shard database migration completed",
+		"totalKeys", totalKeys,
+		"totalBytes", common.StorageSize(totalBytes).String(),
+		"shards", 8,
+		"elapsed", common.PrettyDuration(time.Since(start)))
 
-	log.Info("migration completed", "src count", srcStat.count, "src size", srcStat.size,
-		"chain count", chainStat.count, "chain size", chainStat.size,
-		"state count", stateStat.count, "state size", stateStat.size, "snap count", snapStat.count,
-		"snap size", snapStat.size, "index count", indexStat.count, "index size", indexStat.size)
-
-	// compact the database
-	log.Info("compacting chaindb...")
-	if err := dstChainDB.Compact(nil, nil); err != nil {
-		return fmt.Errorf("failed to compact chaindb: %v", err)
-	}
-	log.Info("compacting statedb...")
-	if err := dstChainDB.GetStateStore().Compact(nil, nil); err != nil {
-		return fmt.Errorf("failed to compact statedb: %v", err)
-	}
-	log.Info("compacting snapdb...")
-	if err := dstChainDB.GetSnapStore().Compact(nil, nil); err != nil {
-		return fmt.Errorf("failed to compact snapdb: %v", err)
-	}
-	log.Info("compacting indexdb...")
-	if err := dstChainDB.GetTxIndexStore().Compact(nil, nil); err != nil {
-		return fmt.Errorf("failed to compact indexdb: %v", err)
-	}
 	return nil
 }
