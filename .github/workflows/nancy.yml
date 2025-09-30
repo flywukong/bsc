@@ -30,18 +30,13 @@ jobs:
           sudo mv nancy /usr/local/bin/
           file /usr/local/bin/nancy
 
-      - name: Configure OSS Index
-        run: |
-          mkdir -p $HOME/.ossindex
-          echo "OSSINDEX_USERNAME(secret):" "${{ secrets.OSSINDEX_USERNAME }}"
-          echo "OSSINDEX_TOKEN(secret):"    "${{ secrets.OSSINDEX_TOKEN }}"
-          cat > $HOME/.ossindex/config.json <<EOF
-          {
-            "username": "${{ secrets.OSSINDEX_USERNAME }}",
-            "token": "${{ secrets.OSSINDEX_TOKEN }}"
-          }
-          EOF
 
       - name: Nancy Scan
         run: |
+          set -euo pipefail
+          echo "1244"
+          echo "OSSINDEX_USERNAME(secret):" "${{ secrets.OSSINDEX_USERNAME }}"
+          echo "OSSINDEX_TOKEN(secret):"    "${{ secrets.OSSINDEX_TOKEN }}"
+          echo "OSSINDEX_USERNAME length: ${#OSSINDEX_USERNAME}"
+          echo "OSSINDEX_TOKEN length: ${#OSSINDEX_TOKEN}"
           go list -json -deps ./... | nancy sleuth --loud
