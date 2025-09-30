@@ -31,10 +31,13 @@ jobs:
     - name: WriteGoList
       run:  go list -json -deps ./... > go.list
 
+    - name: Export OSS Index env
+      if: ${{ secrets.OSSINDEX_TOKEN != '' }}
+      run: |
+        echo "OSSINDEX_USERNAME=${{ secrets.OSSINDEX_USERNAME }}" >> $GITHUB_ENV
+        echo "OSSINDEX_TOKEN=${{ secrets.OSSINDEX_TOKEN }}" >> $GITHUB_ENV
+
     - name: Nancy
       uses: sonatype-nexus-community/nancy-github-action@main
       with:
         nancyCommand: sleuth --loud
-      env:
-    	OSSINDEX_USERNAME: ${{ secrets.OSSINDEX_USERNAME }}
-    	OSSINDEX_TOKEN: ${{ secrets.OSSINDEX_TOKEN }}
