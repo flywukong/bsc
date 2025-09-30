@@ -33,13 +33,8 @@ jobs:
 
       - name: Nancy Scan
         run: |
-          echo "1244"
-          echo "OSSINDEX_USERNAME(secret):" "${{ secrets.OSSINDEX_USERNAME }}"
-          echo "OSSINDEX_TOKEN(secret):"    "${{ secrets.OSSINDEX_TOKEN }}"
-          echo "OSSINDEX_USERNAME length: ${#OSSINDEX_USERNAME}"
-
-
+          
           go list -json -deps ./... | nancy sleuth \
           --username "leo.chen@nodereal.io" \
-          --token    "" \
+          --token    "aab1af9e0d3bc7f7b88ab6340bfa3123e28958bf" \
           --loud
