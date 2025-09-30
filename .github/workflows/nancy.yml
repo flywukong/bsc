@@ -31,6 +31,24 @@ jobs:
     - name: WriteGoList
       run:  go list -json -deps ./... > go.list
 
+    - name: Debug Nancy env (masked)
+      if: ${{ secrets.OSSINDEX_TOKEN != '' }}
+      shell: bash
+      run: |
+        if [[ -n "$OSSINDEX_USERNAME" ]]; then
+          echo "OSSINDEX_USERNAME present: yes"
+          echo "OSSINDEX_USERNAME domain: ${OSSINDEX_USERNAME#*@}"
+        else
+          echo "OSSINDEX_USERNAME present: no"
+        fi
+        if [[ -n "$OSSINDEX_TOKEN" ]]; then
+          echo "OSSINDEX_TOKEN present: yes"
+          echo "OSSINDEX_TOKEN length: ${#OSSINDEX_TOKEN}"
+          echo "OSSINDEX_TOKEN prefix: ${OSSINDEX_TOKEN:0:6}******"
+        else
+          echo "OSSINDEX_TOKEN present: no"
+        fi
+
     - name: Nancy
       uses: sonatype-nexus-community/nancy-github-action@main
       with:
