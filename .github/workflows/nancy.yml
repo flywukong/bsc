@@ -33,6 +33,8 @@ jobs:
       - name: Configure OSS Index
         run: |
           mkdir -p $HOME/.ossindex
+          echo "OSSINDEX_USERNAME(secret):" "${{ secrets.OSSINDEX_USERNAME }}"
+          echo "OSSINDEX_TOKEN(secret):"    "${{ secrets.OSSINDEX_TOKEN }}"
           cat > $HOME/.ossindex/config.json <<EOF
           {
             "username": "${{ secrets.OSSINDEX_USERNAME }}",
