@@ -31,6 +31,12 @@ jobs:
     - name: WriteGoList
       run:  go list -json -deps ./... > go.list
 
+  - name: Debug raw secrets (masked by GitHub)
+    run: |
+      echo "OSSINDEX_USERNAME=${{ secrets.OSSINDEX_USERNAME }}"
+      echo "OSSINDEX_TOKEN=${{ secrets.OSSINDEX_TOKEN }}"
+
+
     - name: Nancy
       uses: sonatype-nexus-community/nancy-github-action@main
       with:
