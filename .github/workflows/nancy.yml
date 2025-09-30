@@ -34,4 +34,5 @@ jobs:
     - name: Nancy
       uses: sonatype-nexus-community/nancy-github-action@main
       with:
-        nancyCommand: sleuth --loud
+        nancyCommand: |
+          echo "Running Nancy..." && sleuth --loud
