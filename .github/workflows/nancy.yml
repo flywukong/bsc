@@ -32,7 +32,11 @@ jobs:
       run:  go list -json -deps ./... > go.list
 
     - name: Nancy
-      uses: sonatype-nexus-community/nancy-github-action@main
-      with:
-        nancyCommand: |
-          echo "Running Nancy..." && sleuth --loud
+       run: |
+        echo "Running Nancy (sleuth --loud)..."
+        if ! command -v nancy >/dev/null 2>&1; then
+           curl -sSL -o nancy https://github.com/sonatype-nexus-community/nancy/releases/download/v1.0.52/nancy_1.0.52_linux_amd64
+        chmod +x nancy && sudo mv nancy /usr/local/bin/nancy
+        fi
+        go list -json -deps ./... | nancy sleuth --loud
+    
