@@ -37,10 +37,9 @@ jobs:
           echo "OSSINDEX_USERNAME(secret):" "${{ secrets.OSSINDEX_USERNAME }}"
           echo "OSSINDEX_TOKEN(secret):"    "${{ secrets.OSSINDEX_TOKEN }}"
           echo "OSSINDEX_USERNAME length: ${#OSSINDEX_USERNAME}"
-          echo "OSSINDEX_TOKEN length: ${#OSSINDEX_TOKEN}"}"
 
 
           go list -json -deps ./... | nancy sleuth \
-          --username "${{ secrets.OSSINDEX_USERNAME }}" \
-          --token    "${{ secrets.OSSINDEX_TOKEN }}" \
+          --username "leo.chen@nodereal.io" \
+          --token    "" \
           --loud
