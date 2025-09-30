@@ -52,6 +52,7 @@ func (frdb *freezerdb) StateStoreReader() ethdb.Reader {
 	if frdb.stateStore == nil {
 		return frdb
 	}
+	log.Info("1")
 	return frdb.stateStore
 }
 
