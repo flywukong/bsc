@@ -37,15 +37,10 @@ jobs:
           echo "OSSINDEX_USERNAME(secret):" "${{ secrets.OSSINDEX_USERNAME }}"
           echo "OSSINDEX_TOKEN(secret):"    "${{ secrets.OSSINDEX_TOKEN }}"
           echo "OSSINDEX_USERNAME length: ${#OSSINDEX_USERNAME}"
-          echo "OSSINDEX_TOKEN length: ${#OSSINDEX_TOKEN}"
+          echo "OSSINDEX_TOKEN length: ${#OSSINDEX_TOKEN}"}"
 
-          echo "Step started"
-          echo "Secrets masked:"
-          echo "OSSINDEX_USERNAME(secret): ${{ secrets.OSSINDEX_USERNAME }}"
-          echo "OSSINDEX_TOKEN(secret): ${{ secrets.OSSINDEX_TOKEN }}"
 
-          echo "Env lengths (0 表示未注入):"
-           echo "OSSINDEX_USERNAME length: ${#OSSINDEX_USERNAME:-0}"
-          echo "OSSINDEX_TOKEN length: ${#OSSINDEX_TOKEN:-0}"
-
-          go list -json -deps ./... | nancy sleuth --loud
+          go list -json -deps ./... | nancy sleuth \
+          --username "${{ secrets.OSSINDEX_USERNAME }}" \
+          --token    "${{ secrets.OSSINDEX_TOKEN }}" \
+          --loud
