@@ -72,6 +72,11 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		gp          = new(GasPool).AddGas(block.GasLimit())
 	)
 
+	log.Info("[StateProcessor.Process] Starting",
+		"blockNumber", blockNumber.Uint64(),
+		"txCount", len(block.Transactions()),
+		"gasLimit", block.GasLimit())
+
 	// Mutate the block and state according to any hard-fork specs
 	if p.config.DAOForkSupport && p.config.DAOForkBlock != nil && p.config.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(statedb)
@@ -90,6 +95,10 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		txNum   = len(block.Transactions())
 		err     error
 	)
+
+	log.Info("[StateProcessor.Process] Signer created",
+		"blockNumber", blockNumber.Uint64(),
+		"signerType", fmt.Sprintf("%T", signer))
 
 	// Apply pre-execution system calls.
 	var tracingStateDB = vm.StateDB(statedb)
@@ -119,9 +128,20 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	for i, tx := range block.Transactions() {
 		if isPoSA {
 			if isSystemTx, err := posa.IsSystemTransaction(tx, block.Header()); err != nil {
+				log.Error("[StateProcessor.Process] IsSystemTransaction failed",
+					"blockNumber", blockNumber.Uint64(),
+					"txIndex", i,
+					"txHash", tx.Hash().Hex(),
+					"error", err)
 				bloomProcessors.Close()
 				return nil, err
 			} else if isSystemTx {
+				log.Info("[StateProcessor.Process] System tx detected",
+					"blockNumber", blockNumber.Uint64(),
+					"txIndex", i,
+					"txHash", tx.Hash().Hex(),
+					"to", tx.To().Hex(),
+					"gas", tx.Gas())
 				systemTxs = append(systemTxs, tx)
 				continue
 			}
@@ -174,10 +194,24 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	}
 
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+	log.Info("[StateProcessor.Process] Calling Finalize",
+		"blockNumber", blockNumber.Uint64(),
+		"commonTxCount", len(commonTxs),
+		"systemTxCount", len(systemTxs),
+		"usedGas", *usedGas)
+
 	err = p.chain.engine.Finalize(p.chain, header, tracingStateDB, &commonTxs, block.Uncles(), block.Withdrawals(), &receipts, &systemTxs, usedGas, cfg.Tracer)
 	if err != nil {
+		log.Error("[StateProcessor.Process] Finalize failed",
+			"blockNumber", blockNumber.Uint64(),
+			"error", err)
 		return nil, err
 	}
+
+	log.Info("[StateProcessor.Process] Finalize completed",
+		"blockNumber", blockNumber.Uint64(),
+		"finalUsedGas", *usedGas,
+		"receiptCount", len(receipts))
 	for _, receipt := range receipts {
 		allLogs = append(allLogs, receipt.Logs...)
 	}

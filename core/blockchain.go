@@ -2550,23 +2550,46 @@ func (bc *BlockChain) processBlock(parentRoot common.Hash, block *types.Block, s
 	}
 
 	// Process block using the parent state as reference point
+	log.Info("[processBlock] Starting block execution",
+		"blockNumber", block.NumberU64(),
+		"blockHash", block.Hash().Hex(),
+		"parentRoot", parentRoot.Hex(),
+		"expectedRoot", block.Root().Hex(),
+		"txCount", len(block.Transactions()),
+		"verifyMode", bc.db.TrieDB().Scheme())
+
 	pstart := time.Now()
 	statedb.SetExpectedStateRoot(block.Root())
 	statedb.SetNeedBadSharedStorage(needBadSharedStorage)
 	res, err := bc.processor.Process(block, statedb, bc.cfg.VmConfig)
 	if err != nil {
+		log.Error("[processBlock] Block processing failed",
+			"blockNumber", block.NumberU64(),
+			"error", err)
 		bc.reportBlock(block, res, err)
 		return nil, err
 	}
 	ptime := time.Since(pstart)
 
+	log.Info("[processBlock] Block processing completed",
+		"blockNumber", block.NumberU64(),
+		"procTime", ptime,
+		"gasUsed", res.usedGas)
+
 	// Validate the state using the default validator
 	vstart := time.Now()
 	if err := bc.validator.ValidateState(block, statedb, res, false); err != nil {
+		log.Error("[processBlock] State validation failed",
+			"blockNumber", block.NumberU64(),
+			"error", err)
 		bc.reportBlock(block, res, err)
 		return nil, err
 	}
 	vtime := time.Since(vstart)
+
+	log.Info("[processBlock] State validation completed",
+		"blockNumber", block.NumberU64(),
+		"validTime", vtime)
 
 	// If witnesses was generated and stateless self-validation requested, do
 	// that now. Self validation should *never* run in production, it's more of

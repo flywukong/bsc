@@ -2224,13 +2224,15 @@ func (p *Parlia) applyTransaction(
 	nonce := state.GetNonce(msg.From)
 	isFeynman := p.chainConfig.IsFeynman(header.Number, header.Time)
 
-	log.Debug("[applyTransaction] System tx details",
+	log.Info("[applyTransaction] System tx details",
 		"blockNumber", header.Number.Uint64(),
 		"from", msg.From.Hex(),
 		"to", msg.To.Hex(),
 		"nonce", nonce,
 		"value", msg.Value,
 		"gasLimit", msg.GasLimit,
+		"gasPrice", msg.GasPrice,
+		"dataLen", len(msg.Data),
 		"isFeynman", isFeynman,
 		"staticSignerType", fmt.Sprintf("%T", p.signer))
 
@@ -2239,6 +2241,15 @@ func (p *Parlia) applyTransaction(
 	expectedSigHash := p.signer.Hash(expectedTx)
 
 	signerDesc := fmt.Sprintf("%T (EIP-155 with ChainID)", p.signer)
+
+	log.Info("[applyTransaction] Expected tx created",
+		"blockNumber", header.Number.Uint64(),
+		"expectedNonce", expectedTx.Nonce(),
+		"expectedTo", expectedTx.To().Hex(),
+		"expectedValue", expectedTx.Value(),
+		"expectedGas", expectedTx.Gas(),
+		"expectedGasPrice", expectedTx.GasPrice(),
+		"expectedSigHash", expectedSigHash.Hex())
 
 	log.Info("[applyTransaction] Hash calculation",
 		"blockNumber", header.Number.Uint64(),
