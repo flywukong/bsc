@@ -322,7 +322,8 @@ func (p *Parlia) IsSystemTransaction(tx *types.Transaction, header *types.Header
 	if tx.GasPrice().Sign() != 0 {
 		return false, nil
 	}
-	sender, err := types.Sender(p.signer, tx)
+	signer := types.MakeSigner(p.chainConfig, header.Number, header.Time)
+	sender, err := types.Sender(signer, tx)
 	if err != nil {
 		return false, errors.New("UnAuthorized transaction")
 	}
@@ -1349,7 +1350,7 @@ func (p *Parlia) distributeFinalityReward(chain consensus.ChainHeaderReader, sta
 		log.Error("Unable to pack tx for distributeFinalityReward", "error", err)
 		return err
 	}
-	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.ValidatorContract), data, common.Big0)
+	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.ValidatorContract), data, common.Big0, header)
 	return p.applyTransaction(msg, state, header, cx, txs, receipts, systemTxs, usedGas, mining, tracer)
 }
 
@@ -2075,7 +2076,7 @@ func (p *Parlia) slash(spoiledVal common.Address, state vm.StateDB, header *type
 		return err
 	}
 	// get system message
-	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.SlashContract), data, common.Big0)
+	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.SlashContract), data, common.Big0, header)
 	// apply message
 	return p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining, tracer)
 }
@@ -2102,7 +2103,7 @@ func (p *Parlia) initContract(state vm.StateDB, header *types.Header, chain core
 		return err
 	}
 	for _, c := range contracts {
-		msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(c), data, common.Big0)
+		msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(c), data, common.Big0, header)
 		// apply message
 		log.Trace("init contract", "block hash", header.Hash(), "contract", c)
 		err = p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining, tracer)
@@ -2116,7 +2117,7 @@ func (p *Parlia) initContract(state vm.StateDB, header *types.Header, chain core
 func (p *Parlia) distributeToSystem(amount *big.Int, state vm.StateDB, header *types.Header, chain core.ChainContext,
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool, tracer *tracing.Hooks) error {
 	// get system message
-	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.SystemRewardContract), nil, amount)
+	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.SystemRewardContract), nil, amount, header)
 	// apply message
 	return p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining, tracer)
 }
@@ -2137,16 +2138,20 @@ func (p *Parlia) distributeToValidator(amount *big.Int, validator common.Address
 		return err
 	}
 	// get system message
-	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.ValidatorContract), data, amount)
+	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.ValidatorContract), data, amount, header)
 	// apply message
 	return p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining, tracer)
 }
 
 // get system message
-func (p *Parlia) getSystemMessage(from, toAddress common.Address, data []byte, value *big.Int) *core.Message {
+func (p *Parlia) getSystemMessage(from, toAddress common.Address, data []byte, value *big.Int, header *types.Header) *core.Message {
+	gasLimit := uint64(math.MaxUint64 / 2)
+	if !p.chainConfig.IsFeynman(header.Number, header.Time) {
+		gasLimit = 0
+	}
 	return &core.Message{
 		From:     from,
-		GasLimit: math.MaxUint64 / 2,
+		GasLimit: gasLimit,
 		GasPrice: big.NewInt(0),
 		Value:    value,
 		To:       &toAddress,
@@ -2165,7 +2170,8 @@ func (p *Parlia) applyTransaction(
 ) (applyErr error) {
 	nonce := state.GetNonce(msg.From)
 	expectedTx := types.NewTransaction(nonce, *msg.To, msg.Value, msg.GasLimit, msg.GasPrice, msg.Data)
-	expectedHash := p.signer.Hash(expectedTx)
+	signer := types.MakeSigner(p.chainConfig, header.Number, header.Time)
+	expectedHash := signer.Hash(expectedTx)
 
 	if msg.From == p.val && mining {
 		var err error
@@ -2178,7 +2184,7 @@ func (p *Parlia) applyTransaction(
 			return errors.New("supposed to get a actual transaction, but get none")
 		}
 		actualTx := (*receivedTxs)[0]
-		if !bytes.Equal(p.signer.Hash(actualTx).Bytes(), expectedHash.Bytes()) {
+		if !bytes.Equal(signer.Hash(actualTx).Bytes(), expectedHash.Bytes()) {
 			return fmt.Errorf("expected tx hash %v, get %v, nonce %d, to %s, value %s, gas %d, gasPrice %s, data %s", expectedHash.String(), actualTx.Hash().String(),
 				expectedTx.Nonce(),
 				expectedTx.To().String(),
