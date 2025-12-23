@@ -2078,6 +2078,13 @@ func (p *Parlia) distributeIncoming(val common.Address, state vm.StateDB, header
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool, tracer *tracing.Hooks) error {
 	coinbase := header.Coinbase
 
+	systemAddrBalanceStart := state.GetBalance(consensus.SystemAddress)
+	log.Info("[distributeIncoming] Starting distribution",
+		"blockNumber", header.Number.Uint64(),
+		"systemAddressBalance", systemAddrBalanceStart.ToBig(),
+		"val", val.Hex(),
+		"coinbase", coinbase.Hex())
+
 	doDistributeSysReward := !p.chainConfig.IsKepler(header.Number, header.Time) &&
 		state.GetBalance(common.HexToAddress(systemcontracts.SystemRewardContract)).Cmp(maxSystemBalance) < 0
 	if doDistributeSysReward {
@@ -2085,6 +2092,9 @@ func (p *Parlia) distributeIncoming(val common.Address, state vm.StateDB, header
 		rewards := new(uint256.Int)
 		rewards = rewards.Rsh(balance, systemRewardPercent)
 		if rewards.Cmp(common.U2560) > 0 {
+			log.Info("[distributeIncoming] Distributing to system reward",
+				"blockNumber", header.Number.Uint64(),
+				"rewards", rewards.ToBig())
 			state.SetBalance(consensus.SystemAddress, balance.Sub(balance, rewards), tracing.BalanceChangeUnspecified)
 			state.AddBalance(coinbase, rewards, tracing.BalanceChangeUnspecified)
 			err := p.distributeToSystem(rewards.ToBig(), state, header, chain, txs, receipts, receivedTxs, usedGas, mining, tracer)
@@ -2096,7 +2106,14 @@ func (p *Parlia) distributeIncoming(val common.Address, state vm.StateDB, header
 	}
 
 	balance := state.GetBalance(consensus.SystemAddress)
+	log.Info("[distributeIncoming] Final balance for validator distribution",
+		"blockNumber", header.Number.Uint64(),
+		"balance", balance.ToBig(),
+		"validator", val.Hex())
+
 	if balance.Cmp(common.U2560) <= 0 {
+		log.Info("[distributeIncoming] Balance too low, skipping distribution",
+			"blockNumber", header.Number.Uint64())
 		return nil
 	}
 
