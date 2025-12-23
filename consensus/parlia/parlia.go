@@ -322,11 +322,6 @@ func (p *Parlia) IsSystemTransaction(tx *types.Transaction, header *types.Header
 	if tx.GasPrice().Sign() != 0 {
 		return false, nil
 	}
-	// Before Feynman fork, we don't check sender for system transactions
-	// to avoid EIP-155 signature verification failure on historical blocks
-	if !p.chainConfig.IsFeynman(header.Number, header.Time) {
-		return true, nil
-	}
 	sender, err := types.Sender(p.signer, tx)
 	if err != nil {
 		return false, errors.New("UnAuthorized transaction")
@@ -2169,18 +2164,8 @@ func (p *Parlia) applyTransaction(
 	tracer *tracing.Hooks,
 ) (applyErr error) {
 	nonce := state.GetNonce(msg.From)
-	gasLimit := msg.GasLimit
-	if !p.chainConfig.IsFeynman(header.Number, header.Time) {
-		gasLimit = 0
-	}
-	expectedTx := types.NewTransaction(nonce, *msg.To, msg.Value, gasLimit, msg.GasPrice, msg.Data)
-
-	// Use HomesteadSigner for system transactions before Feynman fork to match historical hashes
-	var signer types.Signer = p.signer
-	if !p.chainConfig.IsFeynman(header.Number, header.Time) {
-		signer = types.HomesteadSigner{}
-	}
-	expectedHash := signer.Hash(expectedTx)
+	expectedTx := types.NewTransaction(nonce, *msg.To, msg.Value, msg.GasLimit, msg.GasPrice, msg.Data)
+	expectedHash := p.signer.Hash(expectedTx)
 
 	if msg.From == p.val && mining {
 		var err error
@@ -2193,7 +2178,7 @@ func (p *Parlia) applyTransaction(
 			return errors.New("supposed to get a actual transaction, but get none")
 		}
 		actualTx := (*receivedTxs)[0]
-		if !bytes.Equal(signer.Hash(actualTx).Bytes(), expectedHash.Bytes()) {
+		if !bytes.Equal(p.signer.Hash(actualTx).Bytes(), expectedHash.Bytes()) {
 			return fmt.Errorf("expected tx hash %v, get %v, nonce %d, to %s, value %s, gas %d, gasPrice %s, data %s", expectedHash.String(), actualTx.Hash().String(),
 				expectedTx.Nonce(),
 				expectedTx.To().String(),
