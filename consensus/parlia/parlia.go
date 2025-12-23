@@ -322,16 +322,47 @@ func (p *Parlia) IsSystemTransaction(tx *types.Transaction, header *types.Header
 	if tx.GasPrice().Sign() != 0 {
 		return false, nil
 	}
+
+	// Extract signature values for debugging
+	v, r, s := tx.RawSignatureValues()
+	isFeynman := p.chainConfig.IsFeynman(header.Number, header.Time)
+
+	log.Debug("[IsSystemTransaction] Checking system tx",
+		"blockNumber", header.Number.Uint64(),
+		"txHash", tx.Hash().Hex(),
+		"to", tx.To().Hex(),
+		"gas", tx.Gas(),
+		"gasPrice", tx.GasPrice(),
+		"v", v,
+		"r", r,
+		"s", s,
+		"isFeynman", isFeynman,
+		"staticSignerType", fmt.Sprintf("%T", p.signer))
+
 	// Before Feynman fork, we don't check sender for system transactions
 	// to avoid EIP-155 signature verification failure on historical blocks
-	if !p.chainConfig.IsFeynman(header.Number, header.Time) {
+	if !isFeynman {
+		log.Debug("[IsSystemTransaction] Skip sender verification for pre-Feynman block", "blockNumber", header.Number.Uint64())
 		return true, nil
 	}
+
 	sender, err := types.Sender(p.signer, tx)
 	if err != nil {
+		log.Warn("[IsSystemTransaction] Failed to extract sender",
+			"blockNumber", header.Number.Uint64(),
+			"txHash", tx.Hash().Hex(),
+			"error", err)
 		return false, errors.New("UnAuthorized transaction")
 	}
-	return sender == header.Coinbase, nil
+
+	isValid := sender == header.Coinbase
+	log.Debug("[IsSystemTransaction] Sender verification result",
+		"blockNumber", header.Number.Uint64(),
+		"sender", sender.Hex(),
+		"coinbase", header.Coinbase.Hex(),
+		"isValid", isValid)
+
+	return isValid, nil
 }
 
 func (p *Parlia) IsSystemContract(to *common.Address) bool {
@@ -1354,7 +1385,7 @@ func (p *Parlia) distributeFinalityReward(chain consensus.ChainHeaderReader, sta
 		log.Error("Unable to pack tx for distributeFinalityReward", "error", err)
 		return err
 	}
-	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.ValidatorContract), data, common.Big0)
+	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.ValidatorContract), data, common.Big0, header)
 	return p.applyTransaction(msg, state, header, cx, txs, receipts, systemTxs, usedGas, mining, tracer)
 }
 
@@ -1400,6 +1431,15 @@ func (p *Parlia) EstimateGasReservedForSystemTxs(chain consensus.ChainHeaderRead
 // rewards given.
 func (p *Parlia) Finalize(chain consensus.ChainHeaderReader, header *types.Header, state vm.StateDB, txs *[]*types.Transaction,
 	uncles []*types.Header, _ []*types.Withdrawal, receipts *[]*types.Receipt, systemTxs *[]*types.Transaction, usedGas *uint64, tracer *tracing.Hooks) error {
+
+	log.Info("[Finalize] Starting block finalization",
+		"blockNumber", header.Number.Uint64(),
+		"blockHash", header.Hash().Hex(),
+		"userTxCount", len(*txs),
+		"existingSystemTxCount", len(*systemTxs),
+		"isFeynman", p.chainConfig.IsFeynman(header.Number, header.Time),
+		"staticSignerType", fmt.Sprintf("%T", p.signer))
+
 	// warn if not in majority fork
 	p.detectNewVersionWithFork(chain, header, state)
 
@@ -2080,7 +2120,7 @@ func (p *Parlia) slash(spoiledVal common.Address, state vm.StateDB, header *type
 		return err
 	}
 	// get system message
-	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.SlashContract), data, common.Big0)
+	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.SlashContract), data, common.Big0, header)
 	// apply message
 	return p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining, tracer)
 }
@@ -2107,7 +2147,7 @@ func (p *Parlia) initContract(state vm.StateDB, header *types.Header, chain core
 		return err
 	}
 	for _, c := range contracts {
-		msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(c), data, common.Big0)
+		msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(c), data, common.Big0, header)
 		// apply message
 		log.Trace("init contract", "block hash", header.Hash(), "contract", c)
 		err = p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining, tracer)
@@ -2121,7 +2161,7 @@ func (p *Parlia) initContract(state vm.StateDB, header *types.Header, chain core
 func (p *Parlia) distributeToSystem(amount *big.Int, state vm.StateDB, header *types.Header, chain core.ChainContext,
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool, tracer *tracing.Hooks) error {
 	// get system message
-	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.SystemRewardContract), nil, amount)
+	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.SystemRewardContract), nil, amount, header)
 	// apply message
 	return p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining, tracer)
 }
@@ -2142,16 +2182,28 @@ func (p *Parlia) distributeToValidator(amount *big.Int, validator common.Address
 		return err
 	}
 	// get system message
-	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.ValidatorContract), data, amount)
+	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.ValidatorContract), data, amount, header)
 	// apply message
 	return p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining, tracer)
 }
 
 // get system message
-func (p *Parlia) getSystemMessage(from, toAddress common.Address, data []byte, value *big.Int) *core.Message {
+func (p *Parlia) getSystemMessage(from, toAddress common.Address, data []byte, value *big.Int, header *types.Header) *core.Message {
+	gasLimit := uint64(math.MaxUint64 / 2)
+	isFeynman := p.chainConfig.IsFeynman(header.Number, header.Time)
+
+	log.Debug("[getSystemMessage] Creating system message",
+		"blockNumber", header.Number.Uint64(),
+		"from", from.Hex(),
+		"to", toAddress.Hex(),
+		"value", value,
+		"gasLimit", gasLimit,
+		"isFeynman", isFeynman,
+		"dataLen", len(data))
+
 	return &core.Message{
 		From:     from,
-		GasLimit: math.MaxUint64 / 2,
+		GasLimit: gasLimit,
 		GasPrice: big.NewInt(0),
 		Value:    value,
 		To:       &toAddress,
@@ -2169,18 +2221,46 @@ func (p *Parlia) applyTransaction(
 	tracer *tracing.Hooks,
 ) (applyErr error) {
 	nonce := state.GetNonce(msg.From)
-	gasLimit := msg.GasLimit
-	if !p.chainConfig.IsFeynman(header.Number, header.Time) {
-		gasLimit = 0
+	isFeynman := p.chainConfig.IsFeynman(header.Number, header.Time)
+
+	// For historical blocks (before Feynman), system transactions were stored with 0 gas limit
+	// even though they were executed with "infinite" gas.
+	hashGasLimit := msg.GasLimit
+	execGasLimit := msg.GasLimit
+	if !isFeynman {
+		hashGasLimit = 0
 	}
-	expectedTx := types.NewTransaction(nonce, *msg.To, msg.Value, gasLimit, msg.GasPrice, msg.Data)
+
+	log.Debug("[applyTransaction] System tx details",
+		"blockNumber", header.Number.Uint64(),
+		"from", msg.From.Hex(),
+		"to", msg.To.Hex(),
+		"nonce", nonce,
+		"value", msg.Value,
+		"execGasLimit", execGasLimit,
+		"hashGasLimit", hashGasLimit,
+		"isFeynman", isFeynman,
+		"staticSignerType", fmt.Sprintf("%T", p.signer))
+
+	expectedTx := types.NewTransaction(nonce, *msg.To, msg.Value, hashGasLimit, msg.GasPrice, msg.Data)
 
 	// Use HomesteadSigner for system transactions before Feynman fork to match historical hashes
 	var signer types.Signer = p.signer
-	if !p.chainConfig.IsFeynman(header.Number, header.Time) {
+	var signerDesc string
+	if !isFeynman {
 		signer = types.HomesteadSigner{}
+		signerDesc = "HomesteadSigner (6-field, no ChainID)"
+	} else {
+		signerDesc = fmt.Sprintf("%T (EIP-155 with ChainID)", p.signer)
 	}
-	expectedHash := signer.Hash(expectedTx)
+
+	expectedSigHash := signer.Hash(expectedTx)
+
+	log.Info("[applyTransaction] Hash calculation",
+		"blockNumber", header.Number.Uint64(),
+		"signerUsed", signerDesc,
+		"expectedTxGas", expectedTx.Gas(),
+		"expectedSigHash", expectedSigHash.Hex())
 
 	if msg.From == p.val && mining {
 		var err error
@@ -2188,13 +2268,45 @@ func (p *Parlia) applyTransaction(
 		if err != nil {
 			return err
 		}
+		log.Debug("[applyTransaction] Signed tx for mining", "txHash", expectedTx.Hash().Hex())
 	} else {
 		if receivedTxs == nil || len(*receivedTxs) == 0 || (*receivedTxs)[0] == nil {
 			return errors.New("supposed to get a actual transaction, but get none")
 		}
 		actualTx := (*receivedTxs)[0]
-		if !bytes.Equal(signer.Hash(actualTx).Bytes(), expectedHash.Bytes()) {
-			return fmt.Errorf("expected tx hash %v, get %v, nonce %d, to %s, value %s, gas %d, gasPrice %s, data %s", expectedHash.String(), actualTx.Hash().String(),
+		actualSigHash := signer.Hash(actualTx)
+
+		// Extract actual tx signature for debugging
+		v, r, s := actualTx.RawSignatureValues()
+
+		log.Info("[applyTransaction] Comparing hashes",
+			"blockNumber", header.Number.Uint64(),
+			"actualTxHash", actualTx.Hash().Hex(),
+			"actualTxGas", actualTx.Gas(),
+			"actualSigHash", actualSigHash.Hex(),
+			"expectedSigHash", expectedSigHash.Hex(),
+			"actualV", v,
+			"actualR", r,
+			"actualS", s,
+			"match", bytes.Equal(actualSigHash.Bytes(), expectedSigHash.Bytes()))
+
+		// Compare signature hashes to ensure the content matches, regardless of the signature values.
+		if !bytes.Equal(actualSigHash.Bytes(), expectedSigHash.Bytes()) {
+			log.Error("[applyTransaction] Hash mismatch detected",
+				"blockNumber", header.Number.Uint64(),
+				"signerUsed", signerDesc,
+				"expectedSigHash", expectedSigHash.Hex(),
+				"actualSigHash", actualSigHash.Hex(),
+				"expectedTxGas", expectedTx.Gas(),
+				"actualTxGas", actualTx.Gas(),
+				"nonce", expectedTx.Nonce(),
+				"to", expectedTx.To().Hex(),
+				"value", expectedTx.Value(),
+				"data", hex.EncodeToString(expectedTx.Data()))
+
+			return fmt.Errorf("system tx mismatch: expected sigHash %v, get %v; expected fullHash %v, get %v; nonce %d, to %s, value %s, gas %d, gasPrice %s, data %s",
+				expectedSigHash.String(), actualSigHash.String(),
+				expectedTx.Hash().String(), actualTx.Hash().String(),
 				expectedTx.Nonce(),
 				expectedTx.To().String(),
 				expectedTx.Value().String(),
@@ -2203,6 +2315,8 @@ func (p *Parlia) applyTransaction(
 				hex.EncodeToString(expectedTx.Data()),
 			)
 		}
+
+		log.Info("[applyTransaction] Hash verification passed", "blockNumber", header.Number.Uint64())
 		expectedTx = actualTx
 		// move to next
 		*receivedTxs = (*receivedTxs)[1:]

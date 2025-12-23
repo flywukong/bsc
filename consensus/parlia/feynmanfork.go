@@ -51,7 +51,7 @@ func (p *Parlia) initializeFeynmanContract(state vm.StateDB, header *types.Heade
 		return err
 	}
 	for _, c := range contracts {
-		msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(c), data, common.Big0)
+		msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(c), data, common.Big0, header)
 		// apply message
 		log.Info("initialize feynman contract", "block number", header.Number.Uint64(), "contract", c)
 		err = p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining, tracer)
@@ -122,7 +122,7 @@ func (p *Parlia) updateValidatorSetV2(state vm.StateDB, header *types.Header, ch
 	}
 
 	// get system message
-	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.ValidatorContract), data, common.Big0)
+	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.ValidatorContract), data, common.Big0, header)
 	// apply message
 	return p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining, tracer)
 }
