@@ -2164,8 +2164,35 @@ func (p *Parlia) applyTransaction(
 	tracer *tracing.Hooks,
 ) (applyErr error) {
 	nonce := state.GetNonce(msg.From)
+	log.Info("[applyTransaction] System tx details",
+		"blockNumber", header.Number.Uint64(),
+		"from", msg.From.Hex(),
+		"to", msg.To.Hex(),
+		"nonce", nonce,
+		"value", msg.Value,
+		"gasLimit", msg.GasLimit,
+		"gasPrice", msg.GasPrice,
+		"dataLen", len(msg.Data),
+		"isFeynman", p.chainConfig.IsFeynman(header.Number, header.Time),
+		"staticSignerType", fmt.Sprintf("%T", p.signer))
+
 	expectedTx := types.NewTransaction(nonce, *msg.To, msg.Value, msg.GasLimit, msg.GasPrice, msg.Data)
 	expectedHash := p.signer.Hash(expectedTx)
+
+	log.Info("[applyTransaction] Expected tx created",
+		"blockNumber", header.Number.Uint64(),
+		"expectedNonce", expectedTx.Nonce(),
+		"expectedTo", expectedTx.To().Hex(),
+		"expectedValue", expectedTx.Value(),
+		"expectedGas", expectedTx.Gas(),
+		"expectedGasPrice", expectedTx.GasPrice(),
+		"expectedSigHash", expectedHash.Hex())
+
+	log.Info("[applyTransaction] Hash calculation",
+		"blockNumber", header.Number.Uint64(),
+		"signerUsed", fmt.Sprintf("%T (EIP-155 with ChainID)", p.signer),
+		"expectedTxGas", expectedTx.Gas(),
+		"expectedSigHash", expectedHash.Hex())
 
 	if msg.From == p.val && mining {
 		var err error
@@ -2178,7 +2205,45 @@ func (p *Parlia) applyTransaction(
 			return errors.New("supposed to get a actual transaction, but get none")
 		}
 		actualTx := (*receivedTxs)[0]
-		if !bytes.Equal(p.signer.Hash(actualTx).Bytes(), expectedHash.Bytes()) {
+		actualSigHash := p.signer.Hash(actualTx)
+
+		// Extract actual tx signature for debugging
+		v, r, s := actualTx.RawSignatureValues()
+
+		log.Info("[applyTransaction] Comparing hashes",
+			"blockNumber", header.Number.Uint64(),
+			"actualTxHash", actualTx.Hash().Hex(),
+			"actualNonce", actualTx.Nonce(),
+			"expectedNonce", expectedTx.Nonce(),
+			"actualTo", actualTx.To().Hex(),
+			"expectedTo", expectedTx.To().Hex(),
+			"actualValue", actualTx.Value(),
+			"expectedValue", expectedTx.Value(),
+			"actualGas", actualTx.Gas(),
+			"expectedGas", expectedTx.Gas(),
+			"actualGasPrice", actualTx.GasPrice(),
+			"expectedGasPrice", expectedTx.GasPrice(),
+			"actualDataLen", len(actualTx.Data()),
+			"expectedDataLen", len(expectedTx.Data()),
+			"actualSigHash", actualSigHash.Hex(),
+			"expectedSigHash", expectedHash.Hex(),
+			"actualV", v,
+			"actualR", r,
+			"actualS", s,
+			"match", bytes.Equal(actualSigHash.Bytes(), expectedHash.Bytes()))
+
+		if !bytes.Equal(actualSigHash.Bytes(), expectedHash.Bytes()) {
+			log.Error("[applyTransaction] Hash mismatch detected",
+				"blockNumber", header.Number.Uint64(),
+				"signerUsed", fmt.Sprintf("%T (EIP-155 with ChainID)", p.signer),
+				"expectedSigHash", expectedHash.Hex(),
+				"actualSigHash", actualSigHash.Hex(),
+				"expectedTxGas", expectedTx.Gas(),
+				"actualTxGas", actualTx.Gas(),
+				"nonce", expectedTx.Nonce(),
+				"to", expectedTx.To().Hex(),
+				"value", expectedTx.Value(),
+				"data", hex.EncodeToString(expectedTx.Data()))
 			return fmt.Errorf("expected tx hash %v, get %v, nonce %d, to %s, value %s, gas %d, gasPrice %s, data %s", expectedHash.String(), actualTx.Hash().String(),
 				expectedTx.Nonce(),
 				expectedTx.To().String(),
@@ -2489,6 +2554,13 @@ func applyMessage(
 	chainConfig *params.ChainConfig,
 	chainContext core.ChainContext,
 ) (uint64, error) {
+	log.Info("[applyMessage] Starting system tx execution",
+		"blockNumber", header.Number.Uint64(),
+		"from", msg.From.Hex(),
+		"to", msg.To.Hex(),
+		"gasLimit", msg.GasLimit,
+		"value", msg.Value)
+
 	// Apply the transaction to the current state (included in the env)
 	if chainConfig.IsCancun(header.Number, header.Time) {
 		rules := evm.ChainConfig().Rules(evm.Context.BlockNumber, evm.Context.Random != nil, evm.Context.Time)
@@ -2506,10 +2578,19 @@ func applyMessage(
 		msg.GasLimit,
 		uint256.MustFromBig(msg.Value),
 	)
+	gasUsed := msg.GasLimit - returnGas
+	log.Info("[applyMessage] EVM.Call completed",
+		"blockNumber", header.Number.Uint64(),
+		"gasLimit", msg.GasLimit,
+		"returnGas", returnGas,
+		"gasUsed", gasUsed,
+		"err", err,
+		"retLen", len(ret))
+
 	if err != nil {
 		log.Error("apply message failed", "msg", string(ret), "err", err)
 	}
-	return msg.GasLimit - returnGas, err
+	return gasUsed, err
 }
 
 // proposalKey build a key which is a combination of the block number and the proposer address.

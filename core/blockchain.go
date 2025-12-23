@@ -2459,7 +2459,9 @@ func (bc *BlockChain) processBlock(parentRoot common.Hash, block *types.Block, s
 	defer interrupt.Store(true) // terminate the prefetch at the end
 
 	needBadSharedStorage := bc.chainConfig.NeedBadSharedStorage(block.Number())
-	needPrefetch := needBadSharedStorage || (!bc.cfg.NoPrefetch && len(block.Transactions()) >= prefetchTxNumber) || block.BAL() != nil
+	// Force-disable prefetch (including BAL prefetch) for fastnode troubleshooting.
+	// This avoids running the background prefetcher and avoids using cached readers.
+	needPrefetch := false
 	if !needPrefetch {
 		statedb, err = state.New(parentRoot, bc.statedb)
 		if err != nil {
@@ -2530,8 +2532,11 @@ func (bc *BlockChain) processBlock(parentRoot common.Hash, block *types.Block, s
 				return nil, err
 			}
 		}
-		statedb.StartPrefetcher("chain", witness)
-		defer statedb.StopPrefetcher()
+		// Keep the state prefetcher disabled when needPrefetch is forced off.
+		if needPrefetch {
+			statedb.StartPrefetcher("chain", witness)
+			defer statedb.StopPrefetcher()
+		}
 	}
 
 	if bc.logger != nil && bc.logger.OnBlockStart != nil {
