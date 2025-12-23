@@ -33,6 +33,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/holiman/uint256"
 )
 
 const largeTxGasLimit = 10000000 // 10M Gas, to measure the execution time of large tx
@@ -100,6 +101,13 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		"blockNumber", blockNumber.Uint64(),
 		"signerType", fmt.Sprintf("%T", signer))
 
+	// Log initial system address balance
+	initialSystemBalance := statedb.GetBalance(consensus.SystemAddress)
+	log.Info("[StateProcessor.Process] Initial system address balance",
+		"blockNumber", blockNumber.Uint64(),
+		"systemAddress", consensus.SystemAddress.Hex(),
+		"balance", initialSystemBalance)
+
 	// Apply pre-execution system calls.
 	var tracingStateDB = vm.StateDB(statedb)
 	if hooks := cfg.Tracer; hooks != nil {
@@ -161,11 +169,38 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		}
 		statedb.SetTxContext(tx.Hash(), i)
 
+		// Track system address balance changes for debugging
+		systemAddrBefore := statedb.GetBalance(consensus.SystemAddress)
+
 		receipt, err := ApplyTransactionWithEVM(msg, gp, statedb, blockNumber, blockHash, context.Time, tx, usedGas, evm, bloomProcessors)
 		if err != nil {
 			bloomProcessors.Close()
 			return nil, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
+
+		// Log system address balance change after each transaction
+		systemAddrAfter := statedb.GetBalance(consensus.SystemAddress)
+		systemAddrDiff := new(uint256.Int).Sub(systemAddrAfter, systemAddrBefore)
+
+		if systemAddrDiff.Sign() != 0 {
+			toAddr := "CONTRACT_CREATION"
+			if tx.To() != nil {
+				toAddr = tx.To().Hex()
+			}
+			log.Info("[StateProcessor] System address balance changed",
+				"blockNumber", blockNumber.Uint64(),
+				"txIndex", i,
+				"txHash", tx.Hash().Hex(),
+				"from", msg.From.Hex(),
+				"to", toAddr,
+				"gasUsed", receipt.GasUsed,
+				"gasPrice", tx.GasPrice(),
+				"gasFee", new(uint256.Int).Mul(uint256.NewInt(receipt.GasUsed), uint256.MustFromBig(tx.GasPrice())),
+				"systemAddrBefore", systemAddrBefore,
+				"systemAddrAfter", systemAddrAfter,
+				"systemAddrDiff", systemAddrDiff)
+		}
+
 		commonTxs = append(commonTxs, tx)
 		receipts = append(receipts, receipt)
 	}
@@ -194,11 +229,13 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	}
 
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+	systemBalanceBeforeFinalize := statedb.GetBalance(consensus.SystemAddress)
 	log.Info("[StateProcessor.Process] Calling Finalize",
 		"blockNumber", blockNumber.Uint64(),
 		"commonTxCount", len(commonTxs),
 		"systemTxCount", len(systemTxs),
-		"usedGas", *usedGas)
+		"usedGas", *usedGas,
+		"systemBalanceBeforeFinalize", systemBalanceBeforeFinalize)
 
 	err = p.chain.engine.Finalize(p.chain, header, tracingStateDB, &commonTxs, block.Uncles(), block.Withdrawals(), &receipts, &systemTxs, usedGas, cfg.Tracer)
 	if err != nil {
@@ -208,10 +245,13 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		return nil, err
 	}
 
+	systemBalanceAfterFinalize := statedb.GetBalance(consensus.SystemAddress)
 	log.Info("[StateProcessor.Process] Finalize completed",
 		"blockNumber", blockNumber.Uint64(),
 		"finalUsedGas", *usedGas,
-		"receiptCount", len(receipts))
+		"receiptCount", len(receipts),
+		"systemBalanceAfterFinalize", systemBalanceAfterFinalize,
+		"systemBalanceChange", new(uint256.Int).Sub(systemBalanceAfterFinalize, systemBalanceBeforeFinalize))
 	for _, receipt := range receipts {
 		allLogs = append(allLogs, receipt.Logs...)
 	}
