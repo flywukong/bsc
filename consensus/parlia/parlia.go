@@ -1435,6 +1435,7 @@ func (p *Parlia) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 	log.Info("[Finalize] Starting block finalization",
 		"blockNumber", header.Number.Uint64(),
 		"blockHash", header.Hash().Hex(),
+		"stateRoot", header.Root.Hex(),
 		"userTxCount", len(*txs),
 		"existingSystemTxCount", len(*systemTxs),
 		"isFeynman", p.chainConfig.IsFeynman(header.Number, header.Time),
@@ -2223,38 +2224,21 @@ func (p *Parlia) applyTransaction(
 	nonce := state.GetNonce(msg.From)
 	isFeynman := p.chainConfig.IsFeynman(header.Number, header.Time)
 
-	// For historical blocks (before Feynman), system transactions were stored with 0 gas limit
-	// even though they were executed with "infinite" gas.
-	hashGasLimit := msg.GasLimit
-	execGasLimit := msg.GasLimit
-	if !isFeynman {
-		hashGasLimit = 0
-	}
-
 	log.Debug("[applyTransaction] System tx details",
 		"blockNumber", header.Number.Uint64(),
 		"from", msg.From.Hex(),
 		"to", msg.To.Hex(),
 		"nonce", nonce,
 		"value", msg.Value,
-		"execGasLimit", execGasLimit,
-		"hashGasLimit", hashGasLimit,
+		"gasLimit", msg.GasLimit,
 		"isFeynman", isFeynman,
 		"staticSignerType", fmt.Sprintf("%T", p.signer))
 
-	expectedTx := types.NewTransaction(nonce, *msg.To, msg.Value, hashGasLimit, msg.GasPrice, msg.Data)
+	// BSC system transactions use EIP-155 signer with large gas limit across all blocks
+	expectedTx := types.NewTransaction(nonce, *msg.To, msg.Value, msg.GasLimit, msg.GasPrice, msg.Data)
+	expectedSigHash := p.signer.Hash(expectedTx)
 
-	// Use HomesteadSigner for system transactions before Feynman fork to match historical hashes
-	var signer types.Signer = p.signer
-	var signerDesc string
-	if !isFeynman {
-		signer = types.HomesteadSigner{}
-		signerDesc = "HomesteadSigner (6-field, no ChainID)"
-	} else {
-		signerDesc = fmt.Sprintf("%T (EIP-155 with ChainID)", p.signer)
-	}
-
-	expectedSigHash := signer.Hash(expectedTx)
+	signerDesc := fmt.Sprintf("%T (EIP-155 with ChainID)", p.signer)
 
 	log.Info("[applyTransaction] Hash calculation",
 		"blockNumber", header.Number.Uint64(),
@@ -2274,7 +2258,7 @@ func (p *Parlia) applyTransaction(
 			return errors.New("supposed to get a actual transaction, but get none")
 		}
 		actualTx := (*receivedTxs)[0]
-		actualSigHash := signer.Hash(actualTx)
+		actualSigHash := p.signer.Hash(actualTx)
 
 		// Extract actual tx signature for debugging
 		v, r, s := actualTx.RawSignatureValues()
@@ -2282,7 +2266,18 @@ func (p *Parlia) applyTransaction(
 		log.Info("[applyTransaction] Comparing hashes",
 			"blockNumber", header.Number.Uint64(),
 			"actualTxHash", actualTx.Hash().Hex(),
-			"actualTxGas", actualTx.Gas(),
+			"actualNonce", actualTx.Nonce(),
+			"expectedNonce", expectedTx.Nonce(),
+			"actualTo", actualTx.To().Hex(),
+			"expectedTo", expectedTx.To().Hex(),
+			"actualValue", actualTx.Value(),
+			"expectedValue", expectedTx.Value(),
+			"actualGas", actualTx.Gas(),
+			"expectedGas", expectedTx.Gas(),
+			"actualGasPrice", actualTx.GasPrice(),
+			"expectedGasPrice", expectedTx.GasPrice(),
+			"actualDataLen", len(actualTx.Data()),
+			"expectedDataLen", len(expectedTx.Data()),
 			"actualSigHash", actualSigHash.Hex(),
 			"expectedSigHash", expectedSigHash.Hex(),
 			"actualV", v,
