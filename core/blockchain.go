@@ -2555,8 +2555,7 @@ func (bc *BlockChain) processBlock(parentRoot common.Hash, block *types.Block, s
 		"blockHash", block.Hash().Hex(),
 		"parentRoot", parentRoot.Hex(),
 		"expectedRoot", block.Root().Hex(),
-		"txCount", len(block.Transactions()),
-		"verifyMode", bc.db.TrieDB().Scheme())
+		"txCount", len(block.Transactions()))
 
 	pstart := time.Now()
 	statedb.SetExpectedStateRoot(block.Root())
@@ -2574,7 +2573,7 @@ func (bc *BlockChain) processBlock(parentRoot common.Hash, block *types.Block, s
 	log.Info("[processBlock] Block processing completed",
 		"blockNumber", block.NumberU64(),
 		"procTime", ptime,
-		"gasUsed", res.usedGas)
+		"gasUsed", res.GasUsed)
 
 	// Validate the state using the default validator
 	vstart := time.Now()
