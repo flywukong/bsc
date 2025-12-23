@@ -2172,7 +2172,13 @@ func (p *Parlia) applyTransaction(
 ) (applyErr error) {
 	nonce := state.GetNonce(msg.From)
 	expectedTx := types.NewTransaction(nonce, *msg.To, msg.Value, msg.GasLimit, msg.GasPrice, msg.Data)
-	expectedHash := p.signer.Hash(expectedTx)
+
+	// Use HomesteadSigner for system transactions before Feynman fork to match historical hashes
+	var signer types.Signer = p.signer
+	if !p.chainConfig.IsFeynman(header.Number, header.Time) {
+		signer = types.HomesteadSigner{}
+	}
+	expectedHash := signer.Hash(expectedTx)
 
 	if msg.From == p.val && mining {
 		var err error
@@ -2185,7 +2191,8 @@ func (p *Parlia) applyTransaction(
 			return errors.New("supposed to get a actual transaction, but get none")
 		}
 		actualTx := (*receivedTxs)[0]
-		if !bytes.Equal(p.signer.Hash(actualTx).Bytes(), expectedHash.Bytes()) {
+		// Use the determined signer to calculate the hash of the actual transaction for comparison
+		if !bytes.Equal(signer.Hash(actualTx).Bytes(), expectedHash.Bytes()) {
 			return fmt.Errorf("expected tx hash %v, get %v, nonce %d, to %s, value %s, gas %d, gasPrice %s, data %s", expectedHash.String(), actualTx.Hash().String(),
 				expectedTx.Nonce(),
 				expectedTx.To().String(),
