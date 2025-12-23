@@ -2405,10 +2405,23 @@ func (p *Parlia) applyTransaction(
 		}
 	}
 
+	usedGasBefore := *usedGas
 	gasUsed, err := applyMessage(msg, evm, state, header, p.chainConfig, chainContext)
 	if err != nil {
+		log.Error("[applyTransaction] applyMessage failed",
+			"blockNumber", header.Number.Uint64(),
+			"error", err,
+			"gasUsed", gasUsed)
 		return err
 	}
+
+	log.Info("[applyTransaction] System tx execution completed",
+		"blockNumber", header.Number.Uint64(),
+		"msgGasLimit", msg.GasLimit,
+		"gasUsedByCall", gasUsed,
+		"totalUsedGasBefore", usedGasBefore,
+		"totalUsedGasAfter", usedGasBefore+gasUsed)
+
 	*txs = append(*txs, expectedTx)
 	var root []byte
 	if p.chainConfig.IsByzantium(header.Number) {
@@ -2669,6 +2682,13 @@ func applyMessage(
 	chainConfig *params.ChainConfig,
 	chainContext core.ChainContext,
 ) (uint64, error) {
+	log.Info("[applyMessage] Starting system tx execution",
+		"blockNumber", header.Number.Uint64(),
+		"from", msg.From.Hex(),
+		"to", msg.To.Hex(),
+		"gasLimit", msg.GasLimit,
+		"value", msg.Value)
+
 	// Apply the transaction to the current state (included in the env)
 	if chainConfig.IsCancun(header.Number, header.Time) {
 		rules := evm.ChainConfig().Rules(evm.Context.BlockNumber, evm.Context.Random != nil, evm.Context.Time)
@@ -2686,10 +2706,20 @@ func applyMessage(
 		msg.GasLimit,
 		uint256.MustFromBig(msg.Value),
 	)
+
+	gasUsed := msg.GasLimit - returnGas
+	log.Info("[applyMessage] EVM.Call completed",
+		"blockNumber", header.Number.Uint64(),
+		"gasLimit", msg.GasLimit,
+		"returnGas", returnGas,
+		"gasUsed", gasUsed,
+		"err", err,
+		"retLen", len(ret))
+
 	if err != nil {
 		log.Error("apply message failed", "msg", string(ret), "err", err)
 	}
-	return msg.GasLimit - returnGas, err
+	return gasUsed, err
 }
 
 // proposalKey build a key which is a combination of the block number and the proposer address.
