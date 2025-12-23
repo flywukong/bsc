@@ -322,6 +322,9 @@ func (p *Parlia) IsSystemTransaction(tx *types.Transaction, header *types.Header
 	if tx.GasPrice().Sign() != 0 {
 		return false, nil
 	}
+	if !p.chainConfig.IsFeynman(header.Number, header.Time) {
+		return true, nil
+	}
 	sender, err := types.Sender(p.signer, tx)
 	if err != nil {
 		return false, errors.New("UnAuthorized transaction")
