@@ -602,6 +602,20 @@ func (s *StateDB) SelfDestruct(addr common.Address) uint256.Int {
 	if stateObject == nil {
 		return prevBalance
 	}
+
+	// === DEBUG: 目标合约被 selfdestruct 时打点 ===
+	debugAddr := common.HexToAddress("0x000000aC89e4A66919059f45Bf3e8d1700B42731")
+	if addr == debugAddr {
+		log.Info("DEBUG SelfDestruct target",
+			"addr", addr.Hex(),
+			"originalRoot", s.originalRoot.Hex(),
+			"txHash", s.thash.Hex(),
+			"txIndex", s.txIndex,
+			"selfDestructed", stateObject.selfDestructed,
+			"balance", stateObject.Balance().String(),
+		)
+	}
+	// === DEBUG END ===
 	prevBalance = *(stateObject.Balance())
 	// Regardless of whether it is already destructed or not, we do have to
 	// journal the balance-change, if we set it to zero here.
@@ -1490,6 +1504,42 @@ func (s *StateDB) commitAndFlush(block uint64, deleteEmptyObjects bool, noStorag
 		return nil, err
 	}
 
+	// === DEBUG: 追踪目标合约账号和 storage 变化 ===
+	debugAddr := common.HexToAddress("0x000000aC89e4A66919059f45Bf3e8d1700B42731")
+	debugAddrHash := crypto.Keccak256Hash(debugAddr.Bytes())
+
+	if !ret.empty() {
+		if accountData, ok := ret.accounts[debugAddrHash]; ok {
+			log.Info("DEBUG StateUpdate account",
+				"block", block,
+				"addr", debugAddr.Hex(),
+				"addrHash", debugAddrHash.Hex(),
+				"originRoot", ret.originRoot.Hex(),
+				"newRoot", ret.root.Hex(),
+				"rlpLen", len(accountData),
+				"NoTries", s.db.NoTries(),
+			)
+		}
+		if storageData, ok := ret.storages[debugAddrHash]; ok {
+			log.Info("DEBUG StateUpdate storage summary",
+				"block", block,
+				"addr", debugAddr.Hex(),
+				"addrHash", debugAddrHash.Hex(),
+				"slots", len(storageData),
+				"originRoot", ret.originRoot.Hex(),
+				"newRoot", ret.root.Hex(),
+				"NoTries", s.db.NoTries(),
+			)
+			for slotHash, value := range storageData {
+				log.Info("DEBUG StateUpdate storage slot",
+					"block", block,
+					"addr", debugAddr.Hex(),
+					"slotHash", slotHash.Hex(),
+					"value", common.Bytes2Hex(value),
+				)
+			}
+		}
+	}
 	// Commit dirty contract code if any exists
 	if db := s.db.TrieDB().Disk(); db != nil && len(ret.codes) > 0 {
 		batch := db.NewBatch()
