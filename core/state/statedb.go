@@ -1289,6 +1289,15 @@ func (s *StateDB) handleDestruction(noStorageWiping bool) (map[common.Hash]*acco
 		if prev == nil {
 			continue
 		}
+		debugAddr := common.HexToAddress("0x000000aC89e4A66919059f45Bf3e8d1700B4273")
+		if addr == debugAddr {
+			log.Info("DEBUG handleDestruction target",
+				"prevNil", prev == nil,
+				"prevRoot", prev.Root.Hex(),
+				"noStorageWiping", noStorageWiping,
+				"noTries", s.db.NoTries(),
+			)
+		}
 		// The account was existent, it can be either case (c) or (d).
 		addrHash := crypto.Keccak256Hash(addr.Bytes())
 		op := &accountDelete{
