@@ -1518,6 +1518,36 @@ func (s *StateDB) commitAndFlush(block uint64, deleteEmptyObjects bool, noStorag
 	if !ret.empty() {
 		// If snapshotting is enabled, update the snapshot tree with this new version
 		if snap := s.db.Snapshot(); snap != nil && snap.Snapshot(ret.originRoot) != nil {
+			// Debug: print target address info before snap.Update
+			debugAddr := common.HexToAddress("0x000000aC89e4A66919059f45Bf3e8d1700B4273")
+			debugAddrHash := crypto.Keccak256Hash(debugAddr.Bytes())
+			if accountData, ok := ret.accounts[debugAddrHash]; ok {
+				log.Info("DEBUG snap.Update: target address account update",
+					"addr", debugAddr.Hex(),
+					"addrHash", debugAddrHash.Hex(),
+					"accountData", common.Bytes2Hex(accountData),
+					"fromRoot", ret.originRoot.Hex(),
+					"toRoot", ret.root.Hex(),
+					"NoTries", s.db.NoTries(),
+				)
+			}
+			if storageData, ok := ret.storages[debugAddrHash]; ok {
+				log.Info("DEBUG snap.Update: target address storage update",
+					"addr", debugAddr.Hex(),
+					"addrHash", debugAddrHash.Hex(),
+					"storageSlots", len(storageData),
+					"fromRoot", ret.originRoot.Hex(),
+					"toRoot", ret.root.Hex(),
+					"NoTries", s.db.NoTries(),
+				)
+				for slotHash, value := range storageData {
+					log.Info("DEBUG snap.Update: target addr storage slot",
+						"slotHash", slotHash.Hex(),
+						"value", common.Bytes2Hex(value),
+					)
+				}
+			}
+
 			start := time.Now()
 			if err := snap.Update(ret.root, ret.originRoot, ret.accounts, ret.storages); err != nil {
 				log.Warn("Failed to update snapshot tree", "from", ret.originRoot, "to", ret.root, "err", err)
