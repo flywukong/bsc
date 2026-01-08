@@ -40,7 +40,11 @@ func (f *FilterMaps) indexerLoop() {
 		close(f.disabledCh)
 		return
 	}
-	log.Info("Started log indexer")
+	if f.history > 0 {
+		log.Info("Started log indexer", "historyBlocks", f.history, "mode", "limited")
+	} else {
+		log.Info("Started log indexer", "mode", "full-chain")
+	}
 
 	for !f.stop {
 		// Note: acquiring the indexLock read lock is unnecessary here,

@@ -400,27 +400,44 @@ func (f *FilterMaps) init() error {
 	var initBlockNumber uint64
 	if bestLen > 0 {
 		initBlockNumber = checkpoints[bestIdx][bestLen-1].BlockNumber
+		log.Info("Log indexer found matching checkpoint", "epochs", bestLen, "block", initBlockNumber)
+	} else {
+		log.Info("Log indexer no matching checkpoint found, starting from beginning")
 	}
+	
+	log.Info("Log indexer initialization", "historyCutoff", f.historyCutoff, "headBlock", f.targetView.HeadNumber(), "initialBlock", initBlockNumber)
+	
 	if initBlockNumber < f.historyCutoff {
 		// Start from the history cutoff point on pruned nodes
-		log.Info("Starting log indexer from history cutoff point on pruned node", "block", f.historyCutoff)
+		log.Info("Adjusting log indexer start to history cutoff point (pruned node)", 
+			"requestedBlock", initBlockNumber, "adjustedBlock", f.historyCutoff, "reason", "blocks before cutoff are pruned")
 		initBlockNumber = f.historyCutoff
 	}
 	if initBlockNumber < f.targetView.headNumber {
 		// genesis block still exists even after pruning
 		if initBlockNumber == 0 {
+			log.Info("Log indexer starting from genesis, adjusting to block 1")
 			initBlockNumber = 1
 		}
 		// On pruned nodes, start from the history cutoff point if earlier blocks are unavailable
 		if initBlockNumber < f.historyCutoff {
-			log.Info("Adjusting log indexer start to history cutoff point", "block", f.historyCutoff)
+			log.Info("Re-adjusting log indexer start to history cutoff point", 
+				"previousBlock", initBlockNumber, "adjustedBlock", f.historyCutoff, "reason", "previous block is below cutoff")
 			initBlockNumber = f.historyCutoff
 		}
-		if f.indexedView.chain.GetCanonicalHash(initBlockNumber) == (common.Hash{}) {
+		
+		// Verify the block exists
+		blockHash := f.indexedView.chain.GetCanonicalHash(initBlockNumber)
+		if blockHash == (common.Hash{}) {
+			log.Error("Log indexer initialization block not found", "block", initBlockNumber, "historyCutoff", f.historyCutoff)
 			return fmt.Errorf("cannot start indexing: blockNumber=%d is pruned", initBlockNumber)
 		}
+		log.Info("Log indexer verified start block exists", "block", initBlockNumber, "hash", blockHash.Hex())
 	}
 	batch := f.db.NewBatch()
+	if bestLen > 0 {
+		log.Info("Log indexer loading checkpoint data", "epochs", bestLen)
+	}
 	for epoch := range bestLen {
 		cp := checkpoints[bestIdx][epoch]
 		f.storeLastBlockOfMap(batch, f.lastEpochMap(uint32(epoch)), cp.BlockNumber, cp.BlockId)
@@ -433,9 +450,18 @@ func (f *FilterMaps) init() error {
 		cp := checkpoints[bestIdx][bestLen-1]
 		fmr.blocks = common.NewRange(cp.BlockNumber+1, 0)
 		fmr.maps = common.NewRange(f.firstEpochMap(uint32(bestLen)), 0)
+		log.Info("Log indexer range initialized from checkpoint", 
+			"startBlock", cp.BlockNumber+1, "checkpointBlock", cp.BlockNumber, "maps", fmr.maps.Count())
+	} else {
+		log.Info("Log indexer range initialized without checkpoint", "startBlock", initBlockNumber)
 	}
 	f.setRange(batch, f.targetView, fmr, false)
-	return batch.Write()
+	if err := batch.Write(); err != nil {
+		log.Error("Log indexer failed to write initialization batch", "error", err)
+		return err
+	}
+	log.Info("Log indexer initialization completed successfully", "initBlock", initBlockNumber, "headBlock", f.targetView.HeadNumber())
+	return nil
 }
 
 // removeBloomBits removes old bloom bits data from the database.
