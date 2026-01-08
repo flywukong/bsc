@@ -402,12 +402,19 @@ func (f *FilterMaps) init() error {
 		initBlockNumber = checkpoints[bestIdx][bestLen-1].BlockNumber
 	}
 	if initBlockNumber < f.historyCutoff {
-		return errors.New("cannot start indexing before history cutoff point")
+		// Start from the history cutoff point on pruned nodes
+		log.Info("Starting log indexer from history cutoff point on pruned node", "block", f.historyCutoff)
+		initBlockNumber = f.historyCutoff
 	}
 	if initBlockNumber < f.targetView.headNumber {
 		// genesis block still exists even after pruning
 		if initBlockNumber == 0 {
 			initBlockNumber = 1
+		}
+		// On pruned nodes, start from the history cutoff point if earlier blocks are unavailable
+		if initBlockNumber < f.historyCutoff {
+			log.Info("Adjusting log indexer start to history cutoff point", "block", f.historyCutoff)
+			initBlockNumber = f.historyCutoff
 		}
 		if f.indexedView.chain.GetCanonicalHash(initBlockNumber) == (common.Hash{}) {
 			return fmt.Errorf("cannot start indexing: blockNumber=%d is pruned", initBlockNumber)
