@@ -382,17 +382,74 @@ func (f *FilterMaps) init() error {
 
 	var bestIdx, bestLen int
 	for idx, checkpointList := range checkpoints {
+		chainName := getCheckpointChainName(idx)
+		if len(checkpointList) == 0 {
+			continue
+		}
+		
+		log.Info("Checkpoint binary search starting",
+			"chain", chainName,
+			"totalCheckpoints", len(checkpointList),
+			"firstCpBlock", checkpointList[0].BlockNumber,
+			"lastCpBlock", checkpointList[len(checkpointList)-1].BlockNumber,
+			"targetHead", f.targetView.HeadNumber())
+		
 		// binary search for the last matching epoch head
 		min, max := 0, len(checkpointList)
+		iteration := 0
 		for min < max {
+			iteration++
 			mid := (min + max + 1) / 2
 			cp := checkpointList[mid-1]
-			if cp.BlockNumber <= f.targetView.HeadNumber() && f.targetView.BlockId(cp.BlockNumber) == cp.BlockId {
+			
+			blockNumberOk := cp.BlockNumber <= f.targetView.HeadNumber()
+			var blockIdOk bool
+			var actualBlockId common.Hash
+			if blockNumberOk {
+				actualBlockId = f.targetView.BlockId(cp.BlockNumber)
+				blockIdOk = actualBlockId == cp.BlockId
+			}
+			
+			log.Info("Checkpoint binary search iteration",
+				"chain", chainName,
+				"iteration", iteration,
+				"min", min,
+				"max", max,
+				"mid", mid,
+				"cpIndex", mid-1,
+				"cpBlockNumber", cp.BlockNumber,
+				"cpBlockId", cp.BlockId.Hex()[:18],
+				"blockNumberOk", blockNumberOk,
+				"blockIdOk", blockIdOk,
+				"actualBlockId", func() string { if blockNumberOk { return actualBlockId.Hex()[:18] }; return "N/A" }())
+			
+			if blockNumberOk && blockIdOk {
 				min = mid
+				log.Info("Checkpoint binary search: MATCH, search right",
+					"chain", chainName,
+					"newMin", min,
+					"newMax", max)
 			} else {
 				max = mid - 1
+				log.Info("Checkpoint binary search: NO MATCH, search left",
+					"chain", chainName,
+					"reason", func() string {
+						if !blockNumberOk {
+							return fmt.Sprintf("blockNumber %d > head %d", cp.BlockNumber, f.targetView.HeadNumber())
+						}
+						return fmt.Sprintf("blockId mismatch: expected %s, got %s", cp.BlockId.Hex()[:18], actualBlockId.Hex()[:18])
+					}(),
+					"newMin", min,
+					"newMax", max)
 			}
 		}
+		
+		log.Info("Checkpoint binary search finished",
+			"chain", chainName,
+			"iterations", iteration,
+			"matchedCount", max,
+			"lastMatchedBlock", func() uint64 { if max > 0 { return checkpointList[max-1].BlockNumber }; return 0 }())
+		
 		if max > bestLen {
 			bestIdx, bestLen = idx, max
 		}
@@ -404,6 +461,37 @@ func (f *FilterMaps) init() error {
 	if initBlockNumber < f.historyCutoff {
 		return errors.New("cannot start indexing before history cutoff point")
 	}
+	log.Info("Log indexer checking history.logs setting",
+		"history", f.history,
+		"headBlock", f.targetView.headNumber,
+		"initBlockNumber", initBlockNumber,
+		"bestLen", bestLen)
+	/*
+		if f.history > 0 {
+			tailTarget := f.tailTargetBlock()
+			log.Info("Log indexer calculated tail target",
+				"tailTarget", tailTarget,
+				"initBlockNumber", initBlockNumber,
+				"willAdjust", initBlockNumber < tailTarget)
+
+			if initBlockNumber < tailTarget {
+				log.Info("Adjusting log indexer init block to match history.logs setting",
+					"bestLen", bestLen,
+					"checkpointBlock", initBlockNumber,
+					"tailTargetBlock", tailTarget,
+					"history", f.history,
+					"headBlock", f.targetView.headNumber,
+					"reason", "only indexing recent blocks as configured")
+				initBlockNumber = tailTarget
+			} else {
+				log.Info("Log indexer no adjustment needed",
+					"initBlockNumber", initBlockNumber,
+					"tailTarget", tailTarget,
+					"reason", "checkpoint is already within history range")
+			}
+		}
+	*/
+
 	if initBlockNumber < f.targetView.headNumber {
 		// genesis block still exists even after pruning
 		if initBlockNumber == 0 {
