@@ -458,7 +458,7 @@ func (f *FilterMaps) init() error {
 		initialized: true,
 	}
 
-	if bestLen > 0 {
+	if bestLen > 0 && !useHistoryLog {
 		// Case 1: We have matching checkpoint data and it's still valid.
 		// Store checkpoint data and start indexing from the block right after the last checkpoint.
 		for epoch := range bestLen {
