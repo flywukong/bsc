@@ -406,12 +406,50 @@ func (f *FilterMaps) init() error {
 	}
 	if initBlockNumber < f.targetView.headNumber {
 		// genesis block still exists even after pruning
+		originalInitBlock := initBlockNumber
+		isGenesis := (initBlockNumber == 0)
+		
 		if initBlockNumber == 0 {
+			log.Info("Log indexer adjusting from genesis block",
+				"originalBlock", 0,
+				"adjustedBlock", 1,
+				"reason", "genesis block exists but log indexing starts from block 1")
 			initBlockNumber = 1
 		}
-		if f.indexedView.chain.GetCanonicalHash(initBlockNumber) == (common.Hash{}) {
+		
+		// Check if the block exists in the database
+		blockHash := f.indexedView.chain.GetCanonicalHash(initBlockNumber)
+		dbTail, _ := f.db.Tail()
+		
+		log.Info("Log indexer verifying init block availability",
+			"initBlock", initBlockNumber,
+			"wasGenesis", isGenesis,
+			"originalBlock", originalInitBlock,
+			"blockHashFound", blockHash != (common.Hash{}),
+			"blockHash", func() string {
+				if blockHash != (common.Hash{}) {
+					return blockHash.Hex()[:10]
+				}
+				return "not found"
+			}(),
+			"historyCutoff", f.historyCutoff,
+			"dbTail", dbTail,
+			"headBlock", f.targetView.headNumber)
+		
+		if blockHash == (common.Hash{}) {
+			log.Error("Log indexer init block not available",
+				"requestedBlock", initBlockNumber,
+				"originalBlock", originalInitBlock,
+				"wasGenesis", isGenesis,
+				"historyCutoff", f.historyCutoff,
+				"dbTail", dbTail,
+				"explanation", "Comment says 'genesis block exists after pruning', but we need block 1+ which may be pruned")
 			return fmt.Errorf("cannot start indexing: blockNumber=%d is pruned", initBlockNumber)
 		}
+		
+		log.Info("Log indexer init block verified successfully",
+			"initBlock", initBlockNumber,
+			"blockHash", blockHash.Hex()[:10])
 	}
 	batch := f.db.NewBatch()
 	for epoch := range bestLen {
