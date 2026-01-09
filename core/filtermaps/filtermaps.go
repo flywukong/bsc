@@ -401,61 +401,32 @@ func (f *FilterMaps) init() error {
 	if bestLen > 0 {
 		initBlockNumber = checkpoints[bestIdx][bestLen-1].BlockNumber
 	}
+	
+	// If history.logs is set, adjust init block to respect the setting
+	if f.history > 0 {
+		tailTarget := f.tailTargetBlock()
+		if initBlockNumber < tailTarget {
+			log.Info("Adjusting log indexer init block to match history.logs setting",
+				"checkpointBlock", initBlockNumber,
+				"tailTargetBlock", tailTarget,
+				"history", f.history,
+				"headBlock", f.targetView.headNumber,
+				"reason", "only indexing recent blocks as configured")
+			initBlockNumber = tailTarget
+		}
+	}
+	
 	if initBlockNumber < f.historyCutoff {
 		return errors.New("cannot start indexing before history cutoff point")
 	}
 	if initBlockNumber < f.targetView.headNumber {
 		// genesis block still exists even after pruning
-		originalInitBlock := initBlockNumber
-		isGenesis := (initBlockNumber == 0)
-		
 		if initBlockNumber == 0 {
-			log.Info("Log indexer adjusting from genesis block",
-				"originalBlock", 0,
-				"adjustedBlock", 1,
-				"reason", "genesis block exists but log indexing starts from block 1")
 			initBlockNumber = 1
 		}
-		
-		// Check if the block exists in the database
-		blockHash := f.indexedView.chain.GetCanonicalHash(initBlockNumber)
-		
-		// Get database tail (earliest available block in ancient store)
-		// f.db is ethdb.KeyValueStore but the actual instance is ethdb.Database which has Tail()
-		var dbTail uint64
-		if ancientDB, ok := f.db.(interface{ Tail() (uint64, error) }); ok {
-			dbTail, _ = ancientDB.Tail()
-		}
-		
-		log.Info("Log indexer verifying init block availability",
-			"initBlock", initBlockNumber,
-			"wasGenesis", isGenesis,
-			"originalBlock", originalInitBlock,
-			"blockHashFound", blockHash != (common.Hash{}),
-			"blockHash", func() string {
-				if blockHash != (common.Hash{}) {
-					return blockHash.Hex()[:10]
-				}
-				return "not found"
-			}(),
-			"historyCutoff", f.historyCutoff,
-			"dbTail", dbTail,
-			"headBlock", f.targetView.headNumber)
-		
-		if blockHash == (common.Hash{}) {
-			log.Error("Log indexer init block not available",
-				"requestedBlock", initBlockNumber,
-				"originalBlock", originalInitBlock,
-				"wasGenesis", isGenesis,
-				"historyCutoff", f.historyCutoff,
-				"dbTail", dbTail,
-				"explanation", "Comment says 'genesis block exists after pruning', but we need block 1+ which may be pruned")
+		if f.indexedView.chain.GetCanonicalHash(initBlockNumber) == (common.Hash{}) {
 			return fmt.Errorf("cannot start indexing: blockNumber=%d is pruned", initBlockNumber)
 		}
-		
-		log.Info("Log indexer init block verified successfully",
-			"initBlock", initBlockNumber,
-			"blockHash", blockHash.Hex()[:10])
 	}
 	batch := f.db.NewBatch()
 	for epoch := range bestLen {
