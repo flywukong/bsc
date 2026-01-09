@@ -594,9 +594,21 @@ func (bc *BlockChain) StateIndexProgress() (uint64, error) {
 // Blocks before this might not be available in the database.
 func (bc *BlockChain) HistoryPruningCutoff() (uint64, common.Hash) {
 	pt := bc.historyPrunePoint.Load()
+	dbTail, _ := bc.db.Tail()
+	
 	if pt == nil {
+		log.Debug("HistoryPruningCutoff called",
+			"historyPrunePoint", "nil",
+			"returning", 0,
+			"dbTail", dbTail,
+			"note", "returning 0 because historyPrunePoint was not set")
 		return 0, bc.genesisBlock.Hash()
 	}
+	
+	log.Debug("HistoryPruningCutoff called",
+		"historyPrunePoint", pt.BlockNumber,
+		"dbTail", dbTail,
+		"returning", pt.BlockNumber)
 	return pt.BlockNumber, pt.BlockHash
 }
 

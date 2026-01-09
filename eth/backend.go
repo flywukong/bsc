@@ -260,6 +260,15 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		chainConfig.MendelTime = config.OverrideMendel
 		overrides.OverrideMendel = config.OverrideMendel
 	}
+	if config.OverrideBPO1 != nil {
+		overrides.OverrideBPO1 = config.OverrideBPO1
+	}
+	if config.OverrideBPO2 != nil {
+		overrides.OverrideBPO2 = config.OverrideBPO2
+	}
+	if config.OverrideVerkle != nil {
+		overrides.OverrideVerkle = config.OverrideVerkle
+	}
 	if config.OverrideVerkle != nil {
 		chainConfig.VerkleTime = config.OverrideVerkle
 		overrides.OverrideVerkle = config.OverrideVerkle
@@ -344,7 +353,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			StateScheme:           config.StateScheme,
 			PathSyncFlush:         config.PathSyncFlush,
 			JournalFilePath:       journalFilePath,
-			JournalFile:           config.JournalFileEnabled,
 			EnableIncr:            config.EnableIncrSnapshots,
 			IncrHistoryPath:       config.IncrSnapshotPath,
 			IncrHistory:           config.IncrSnapshotBlockInterval,
@@ -356,8 +364,16 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			TxLookupLimit:         int64(min(config.TransactionHistory, math.MaxInt64)),
 			VmConfig: vm.Config{
 				EnablePreimageRecording:   config.EnablePreimageRecording,
+				EnableWitnessStats:        config.EnableWitnessStats,
+				StatelessSelfValidation:   config.StatelessSelfValidation,
 				EnableOpcodeOptimizations: config.EnableOpcodeOptimizing,
 			},
+			// Enables file journaling for the trie database. The journal files will be stored
+			// within the data directory. The corresponding paths will be either:
+			// - DATADIR/triedb/merkle.journal
+			// - DATADIR/triedb/verkle.journal
+			TrieJournalDirectory: stack.ResolvePath("triedb"),
+			StateSizeTracking:    config.EnableStateSizeTracking,
 		}
 	)
 	if config.DisableTxIndexer {
@@ -381,6 +397,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if stack.Config().EnableDoubleSignMonitor {
 		bcOps = append(bcOps, core.EnableDoubleSignChecker)
 	}
+	// Override the chain config with provided settings.
 	options.Overrides = &overrides
 	eth.blockchain, err = core.NewBlockChain(chainDb, config.Genesis, eth.engine, options, bcOps...)
 	if err != nil {
@@ -395,11 +412,23 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		HashScheme:     config.StateScheme == rawdb.HashScheme,
 	}
 	chainView := eth.newChainView(eth.blockchain.CurrentBlock())
-	historyCutoff, _ := eth.blockchain.HistoryPruningCutoff()
+	historyCutoff, historyCutoffHash := eth.blockchain.HistoryPruningCutoff()
+	dbTail, _ := chainDb.Tail()
 	var finalBlock uint64
 	if fb := eth.blockchain.CurrentFinalBlock(); fb != nil {
 		finalBlock = fb.Number.Uint64()
 	}
+
+	log.Info("Initializing FilterMaps log indexer",
+		"logHistory", config.LogHistory,
+		"disabled", config.LogNoHistory,
+		"currentBlock", eth.blockchain.CurrentBlock().Number.Uint64(),
+		"historyCutoff", historyCutoff,
+		"historyCutoffHash", historyCutoffHash.Hex()[:10],
+		"dbTail", dbTail,
+		"finalBlock", finalBlock,
+		"note", "historyCutoff comes from blockchain.HistoryPruningCutoff()")
+
 	filterMaps, err := filtermaps.NewFilterMaps(chainDb, chainView, historyCutoff, finalBlock, filtermaps.DefaultParams, fmConfig)
 	if err != nil {
 		return nil, err
@@ -897,7 +926,7 @@ func (s *Ethereum) updateFilterMapsHeads() {
 		if head == nil || newHead.Hash() != head.Hash() {
 			head = newHead
 			chainView := s.newChainView(head)
-			historyCutoff, _ := s.blockchain.HistoryPruningCutoff()
+			historyCutoff, historyCutoffHash := s.blockchain.HistoryPruningCutoff()
 			var finalBlock, currentBlock int64
 			if fb := s.blockchain.CurrentFinalBlock(); fb != nil {
 				finalBlock = fb.Number.Int64()
@@ -908,6 +937,14 @@ func (s *Ethereum) updateFilterMapsHeads() {
 
 			// TODO(Nathan): use BlockChainAPI.getFinalizedNumber instead?
 			finalBlock = max(finalBlock, currentBlock-16*21) // turnlength:16, validatorNum:21
+
+			log.Debug("FilterMaps SetTarget update",
+				"newHead", head.Number.Uint64(),
+				"historyCutoff", historyCutoff,
+				"historyCutoffHash", historyCutoffHash.Hex()[:10],
+				"finalBlock", finalBlock,
+				"currentBlock", currentBlock)
+
 			s.filterMaps.SetTarget(chainView, historyCutoff, uint64(finalBlock))
 		}
 	}

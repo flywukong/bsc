@@ -478,43 +478,65 @@ func (f *FilterMaps) init() error {
 		log.Info("Log indexer no matching checkpoint found, starting from beginning")
 	}
 	
-	log.Info("Log indexer initialization", "historyCutoff", f.historyCutoff, "headBlock", f.targetView.HeadNumber(), "initialBlock", initBlockNumber)
+	// 🔍 DIAGNOSTIC: Check db.Tail() to understand the real prune point
+	// historyCutoff may be 0 even on pruned nodes due to BSC's disabled history pruning initialization
+	dbTail, dbTailErr := f.db.Tail()
+	effectiveCutoff := max(f.historyCutoff, dbTail)
 	
-	// 🔧 FIX TEMPORARILY COMMENTED OUT FOR DEBUGGING
-	// TODO: Uncomment after analyzing logs
-	/*
-	if initBlockNumber < f.historyCutoff {
-		// Start from the history cutoff point on pruned nodes
-		log.Info("Adjusting log indexer start to history cutoff point (pruned node)", 
-			"requestedBlock", initBlockNumber, "adjustedBlock", f.historyCutoff, "reason", "blocks before cutoff are pruned")
-		initBlockNumber = f.historyCutoff
+	log.Info("Log indexer initialization - checking prune status", 
+		"historyCutoff", f.historyCutoff, 
+		"dbTail", dbTail,
+		"dbTailErr", dbTailErr,
+		"effectiveCutoff", effectiveCutoff,
+		"headBlock", f.targetView.HeadNumber(), 
+		"initialBlock", initBlockNumber)
+	
+	// 🔍 DIAGNOSTIC: Log what we WOULD do with the fix
+	if initBlockNumber < effectiveCutoff {
+		log.Warn("Log indexer DIAGNOSTIC: initBlock is below effective cutoff",
+			"initBlock", initBlockNumber,
+			"effectiveCutoff", effectiveCutoff,
+			"wouldAdjustTo", effectiveCutoff,
+			"note", "FIX NOT APPLIED - will trigger error to verify logic")
+		// TODO: Uncomment after verifying logs
+		// initBlockNumber = effectiveCutoff
+	} else {
+		log.Info("Log indexer DIAGNOSTIC: initBlock is at or above effective cutoff",
+			"initBlock", initBlockNumber,
+			"effectiveCutoff", effectiveCutoff,
+			"note", "no adjustment needed")
 	}
-	*/
+	
 	if initBlockNumber < f.targetView.headNumber {
 		// genesis block still exists even after pruning
 		if initBlockNumber == 0 {
 			log.Info("Log indexer starting from genesis, adjusting to block 1")
 			initBlockNumber = 1
+			
+			// 🔍 DIAGNOSTIC: Check again after genesis adjustment
+			if initBlockNumber < effectiveCutoff {
+				log.Warn("Log indexer DIAGNOSTIC: after genesis adjustment, still below cutoff",
+					"initBlock", initBlockNumber,
+					"effectiveCutoff", effectiveCutoff,
+					"wouldAdjustTo", effectiveCutoff,
+					"note", "FIX NOT APPLIED - will trigger error")
+				// TODO: Uncomment after verifying logs
+				// initBlockNumber = effectiveCutoff
+			}
 		}
 		
-		// 🔧 FIX TEMPORARILY COMMENTED OUT FOR DEBUGGING
-		// TODO: Uncomment after analyzing logs
-		/*
-		// On pruned nodes, start from the history cutoff point if earlier blocks are unavailable
-		if initBlockNumber < f.historyCutoff {
-			log.Info("Re-adjusting log indexer start to history cutoff point", 
-				"previousBlock", initBlockNumber, "adjustedBlock", f.historyCutoff, "reason", "previous block is below cutoff")
-			initBlockNumber = f.historyCutoff
-		}
-		*/
-		
-		// Verify the block exists
+		// Final verification: check if the block actually exists
 		blockHash := f.indexedView.chain.GetCanonicalHash(initBlockNumber)
 		if blockHash == (common.Hash{}) {
-			log.Error("Log indexer initialization block not found", "block", initBlockNumber, "historyCutoff", f.historyCutoff)
+			log.Error("Log indexer initialization block not found", 
+				"block", initBlockNumber, 
+				"historyCutoff", f.historyCutoff,
+				"dbTail", dbTail,
+				"effectiveCutoff", effectiveCutoff,
+				"note", "This error would be prevented by using effectiveCutoff")
 			return fmt.Errorf("cannot start indexing: blockNumber=%d is pruned", initBlockNumber)
 		}
-		log.Info("Log indexer verified start block exists", "block", initBlockNumber, "hash", blockHash.Hex())
+		log.Info("Log indexer verified start block exists", "block", initBlockNumber, "hash", blockHash.Hex()[:10])
 	}
 	batch := f.db.NewBatch()
 	if bestLen > 0 {

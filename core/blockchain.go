@@ -866,30 +866,65 @@ func (bc *BlockChain) loadLastState() error {
 
 // initializeHistoryPruning sets bc.historyPrunePoint.
 func (bc *BlockChain) initializeHistoryPruning(latest uint64) error {
-	freezerTail, _ := bc.db.Tail()
+	freezerTail, tailErr := bc.db.Tail()
+	
+	log.Info("Initializing history pruning", 
+		"mode", bc.cfg.ChainHistoryMode.String(),
+		"latest", latest,
+		"freezerTail", freezerTail,
+		"tailErr", tailErr,
+		"genesisHash", bc.genesisBlock.Hash().Hex()[:10])
 
 	switch bc.cfg.ChainHistoryMode {
 	case history.KeepAll:
+		log.Info("History mode: KeepAll", "freezerTail", freezerTail)
+		
 		// TODO(Nathan): BSC currently supports `history.blocks`, but enabling history pruning
 		// will cause startup failures. Temporarily disable history pruning until fixed.
 		enableHistoryPruning := false
+		
+		log.Info("History pruning check", 
+			"enableHistoryPruning", enableHistoryPruning,
+			"freezerTail", freezerTail,
+			"note", "enableHistoryPruning is hardcoded to false")
+		
 		if !enableHistoryPruning {
+			log.Warn("History pruning disabled by hardcoded flag",
+				"freezerTail", freezerTail,
+				"historyPrunePointWillBeSet", false,
+				"impact", "HistoryPruningCutoff() will return 0 even if blocks are pruned")
 			return nil
 		}
+		
 		if freezerTail == 0 {
+			log.Info("FreezerTail is 0, no pruning needed", "historyPrunePointSet", false)
 			return nil
 		}
+		
 		// The database was pruned somehow, so we need to figure out if it's a known
 		// configuration or an error.
 		predefinedPoint := history.PrunePoints[bc.genesisBlock.Hash()]
+		log.Info("Checking predefined prune point",
+			"genesisHash", bc.genesisBlock.Hash().Hex()[:10],
+			"predefinedPoint", predefinedPoint,
+			"freezerTail", freezerTail)
+		
 		if predefinedPoint == nil || freezerTail != predefinedPoint.BlockNumber {
-			log.Error("Chain history database is pruned with unknown configuration", "tail", freezerTail)
+			log.Error("Chain history database is pruned with unknown configuration", 
+				"tail", freezerTail,
+				"predefinedPoint", predefinedPoint)
 			return fmt.Errorf("unexpected database tail")
 		}
+		
 		bc.historyPrunePoint.Store(predefinedPoint)
+		log.Info("History prune point set from predefined point",
+			"block", predefinedPoint.BlockNumber,
+			"hash", predefinedPoint.BlockHash.Hex()[:10])
 		return nil
 
 	case history.KeepPostMerge:
+		log.Info("History mode: KeepPostMerge", "freezerTail", freezerTail, "latest", latest)
+		
 		if freezerTail == 0 && latest != 0 {
 			// This is the case where a user is trying to run with --history.chain
 			// postmerge directly on an existing DB. We could just trigger the pruning
@@ -899,18 +934,30 @@ func (bc *BlockChain) initializeHistoryPruning(latest uint64) error {
 			log.Error(fmt.Sprintf("Run 'geth prune-history' to prune pre-merge history."))
 			return fmt.Errorf("history pruning requested via configuration")
 		}
+		
 		predefinedPoint := history.PrunePoints[bc.genesisBlock.Hash()]
+		log.Info("Looking up predefined prune point for KeepPostMerge",
+			"genesisHash", bc.genesisBlock.Hash().Hex()[:10],
+			"found", predefinedPoint != nil)
+		
 		if predefinedPoint == nil {
 			log.Error("Chain history pruning is not supported for this network", "genesis", bc.genesisBlock.Hash())
 			return fmt.Errorf("history pruning requested for unknown network")
 		} else if freezerTail > 0 && freezerTail != predefinedPoint.BlockNumber {
-			log.Error("Chain history database is pruned to unknown block", "tail", freezerTail)
+			log.Error("Chain history database is pruned to unknown block", 
+				"tail", freezerTail,
+				"expected", predefinedPoint.BlockNumber)
 			return fmt.Errorf("unexpected database tail")
 		}
+		
 		bc.historyPrunePoint.Store(predefinedPoint)
+		log.Info("History prune point set for KeepPostMerge",
+			"block", predefinedPoint.BlockNumber,
+			"hash", predefinedPoint.BlockHash.Hex()[:10])
 		return nil
 
 	default:
+		log.Error("Invalid history mode", "mode", bc.cfg.ChainHistoryMode)
 		return fmt.Errorf("invalid history mode: %d", bc.cfg.ChainHistoryMode)
 	}
 }
