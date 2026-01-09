@@ -419,7 +419,13 @@ func (f *FilterMaps) init() error {
 		
 		// Check if the block exists in the database
 		blockHash := f.indexedView.chain.GetCanonicalHash(initBlockNumber)
-		dbTail, _ := f.db.Tail()
+		
+		// Get database tail (earliest available block in ancient store)
+		// f.db is ethdb.KeyValueStore but the actual instance is ethdb.Database which has Tail()
+		var dbTail uint64
+		if ancientDB, ok := f.db.(interface{ Tail() (uint64, error) }); ok {
+			dbTail, _ = ancientDB.Tail()
+		}
 		
 		log.Info("Log indexer verifying init block availability",
 			"initBlock", initBlockNumber,
