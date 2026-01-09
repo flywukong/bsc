@@ -397,50 +397,92 @@ func (f *FilterMaps) init() error {
 			bestIdx, bestLen = idx, max
 		}
 	}
+	// Calculate initial block number from checkpoint (if available)
 	var initBlockNumber uint64
+	var useHistoryLog bool
+
 	if bestLen > 0 {
 		initBlockNumber = checkpoints[bestIdx][bestLen-1].BlockNumber
+		log.Info("Log indexer found matching checkpoints",
+			"matchedCheckpoints", bestLen,
+			"checkpointBlock", initBlockNumber)
+	} else {
+		log.Info("Log indexer found no matching checkpoints, starting from beginning",
+			"totalChainsChecked", len(checkpoints))
 	}
-	
-	// If history.logs is set, adjust init block to respect the setting
+
+	// If --history.logs is set, adjust init block to respect the setting.
+	// This ensures we only index the most recent N blocks as configured,
+	// rather than indexing from checkpoint/genesis and later deleting old data.
+	// Example: if history=100000 and head=906615, we start from block 806616.
 	if f.history > 0 {
 		tailTarget := f.tailTargetBlock()
 		if initBlockNumber < tailTarget {
 			log.Info("Adjusting log indexer init block to match history.logs setting",
+				"bestLen", bestLen,
 				"checkpointBlock", initBlockNumber,
 				"tailTargetBlock", tailTarget,
 				"history", f.history,
 				"headBlock", f.targetView.headNumber,
 				"reason", "only indexing recent blocks as configured")
 			initBlockNumber = tailTarget
+			useHistoryLog = true
 		}
 	}
-	
+
+	// Verify that initBlockNumber is not before the history cutoff point
 	if initBlockNumber < f.historyCutoff {
 		return errors.New("cannot start indexing before history cutoff point")
 	}
+
+	// Perform final validation of the init block
 	if initBlockNumber < f.targetView.headNumber {
-		// genesis block still exists even after pruning
+		// Genesis block (block 0) always exists even after pruning,
+		// but we don't index it as it contains no transaction logs.
+		// Adjust to block 1 if starting from genesis.
 		if initBlockNumber == 0 {
 			initBlockNumber = 1
 		}
+
+		// Verify that the init block actually exists in the database.
+		// If it doesn't exist, it means the block has been pruned or is otherwise unavailable.
 		if f.indexedView.chain.GetCanonicalHash(initBlockNumber) == (common.Hash{}) {
 			return fmt.Errorf("cannot start indexing: blockNumber=%d is pruned", initBlockNumber)
 		}
 	}
 	batch := f.db.NewBatch()
-	for epoch := range bestLen {
-		cp := checkpoints[bestIdx][epoch]
-		f.storeLastBlockOfMap(batch, f.lastEpochMap(uint32(epoch)), cp.BlockNumber, cp.BlockId)
-		f.storeBlockLvPointer(batch, cp.BlockNumber, cp.FirstIndex)
-	}
+
+	// Initialize the filter maps range structure.
+	// This defines the starting point for log indexing.
 	fmr := filterMapsRange{
 		initialized: true,
 	}
+
 	if bestLen > 0 {
+		// Case 1: We have matching checkpoint data and it's still valid.
+		// Store checkpoint data and start indexing from the block right after the last checkpoint.
+		for epoch := range bestLen {
+			cp := checkpoints[bestIdx][epoch]
+			f.storeLastBlockOfMap(batch, f.lastEpochMap(uint32(epoch)), cp.BlockNumber, cp.BlockId)
+			f.storeBlockLvPointer(batch, cp.BlockNumber, cp.FirstIndex)
+		}
+
 		cp := checkpoints[bestIdx][bestLen-1]
 		fmr.blocks = common.NewRange(cp.BlockNumber+1, 0)
 		fmr.maps = common.NewRange(f.firstEpochMap(uint32(bestLen)), 0)
+		log.Info("Log indexer initialized with checkpoint",
+			"bestLen", bestLen,
+			"startBlock", cp.BlockNumber+1,
+			"epochs", bestLen)
+	} else {
+		if useHistoryLog {
+			fmr.blocks = common.NewRange(initBlockNumber, 0)
+			fmr.maps = common.NewRange(0, 0)
+			log.Info("Log indexer initialized without checkpoint",
+				"bestLen", bestLen,
+				"startBlock", initBlockNumber,
+				"headBlock", f.targetView.headNumber)
+		}
 	}
 	f.setRange(batch, f.targetView, fmr, false)
 	return batch.Write()
