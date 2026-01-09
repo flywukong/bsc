@@ -377,6 +377,11 @@ func (f *FilterMaps) init() error {
 		return err
 	}
 
+	log.Info("Log indexer init() called",
+		"history", f.history,
+		"targetHead", f.targetView.HeadNumber(),
+		"historyCutoff", f.historyCutoff)
+
 	f.indexLock.Lock()
 	defer f.indexLock.Unlock()
 
@@ -420,14 +425,14 @@ func (f *FilterMaps) init() error {
 		"headBlock", f.targetView.headNumber,
 		"initBlockNumber", initBlockNumber,
 		"bestLen", bestLen)
-	
+
 	if f.history > 0 {
 		tailTarget := f.tailTargetBlock()
 		log.Info("Log indexer calculated tail target",
 			"tailTarget", tailTarget,
 			"initBlockNumber", initBlockNumber,
 			"willAdjust", initBlockNumber < tailTarget)
-		
+
 		if initBlockNumber < tailTarget {
 			log.Info("Adjusting log indexer init block to match history.logs setting",
 				"bestLen", bestLen,
@@ -481,14 +486,14 @@ func (f *FilterMaps) init() error {
 		"bestLen", bestLen,
 		"useHistoryLog", useHistoryLog,
 		"initBlockNumber", initBlockNumber)
-	
+
 	if bestLen > 0 && !useHistoryLog {
 		// Case 1: We have matching checkpoint data and it's still valid.
 		// Store checkpoint data and start indexing from the block right after the last checkpoint.
 		log.Info("Log indexer using checkpoint",
 			"bestLen", bestLen,
 			"epochs", bestLen)
-		
+
 		for epoch := range bestLen {
 			cp := checkpoints[bestIdx][epoch]
 			f.storeLastBlockOfMap(batch, f.lastEpochMap(uint32(epoch)), cp.BlockNumber, cp.BlockId)
@@ -509,10 +514,10 @@ func (f *FilterMaps) init() error {
 			"bestLen", bestLen,
 			"useHistoryLog", useHistoryLog,
 			"initBlockNumber", initBlockNumber)
-		
+
 		fmr.blocks = common.NewRange(initBlockNumber, 0)
 		fmr.maps = common.NewRange(uint32(0), 0)
-		
+
 		if useHistoryLog {
 			log.Info("Log indexer initialized without checkpoint (adjusted by history.logs)",
 				"bestLen", bestLen,
