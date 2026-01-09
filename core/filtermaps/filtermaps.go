@@ -480,24 +480,33 @@ func (f *FilterMaps) init() error {
 	
 	log.Info("Log indexer initialization", "historyCutoff", f.historyCutoff, "headBlock", f.targetView.HeadNumber(), "initialBlock", initBlockNumber)
 	
+	// 🔧 FIX TEMPORARILY COMMENTED OUT FOR DEBUGGING
+	// TODO: Uncomment after analyzing logs
+	/*
 	if initBlockNumber < f.historyCutoff {
 		// Start from the history cutoff point on pruned nodes
 		log.Info("Adjusting log indexer start to history cutoff point (pruned node)", 
 			"requestedBlock", initBlockNumber, "adjustedBlock", f.historyCutoff, "reason", "blocks before cutoff are pruned")
 		initBlockNumber = f.historyCutoff
 	}
+	*/
 	if initBlockNumber < f.targetView.headNumber {
 		// genesis block still exists even after pruning
 		if initBlockNumber == 0 {
 			log.Info("Log indexer starting from genesis, adjusting to block 1")
 			initBlockNumber = 1
 		}
+		
+		// 🔧 FIX TEMPORARILY COMMENTED OUT FOR DEBUGGING
+		// TODO: Uncomment after analyzing logs
+		/*
 		// On pruned nodes, start from the history cutoff point if earlier blocks are unavailable
 		if initBlockNumber < f.historyCutoff {
 			log.Info("Re-adjusting log indexer start to history cutoff point", 
 				"previousBlock", initBlockNumber, "adjustedBlock", f.historyCutoff, "reason", "previous block is below cutoff")
 			initBlockNumber = f.historyCutoff
 		}
+		*/
 		
 		// Verify the block exists
 		blockHash := f.indexedView.chain.GetCanonicalHash(initBlockNumber)
