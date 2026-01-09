@@ -477,7 +477,7 @@ func (f *FilterMaps) init() error {
 	} else {
 		if useHistoryLog {
 			fmr.blocks = common.NewRange(initBlockNumber, 0)
-			fmr.maps = common.NewRange(0, 0)
+			fmr.maps = common.NewRange(uint32(0), 0)
 			log.Info("Log indexer initialized without checkpoint",
 				"bestLen", bestLen,
 				"startBlock", initBlockNumber,
