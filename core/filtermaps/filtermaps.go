@@ -380,22 +380,95 @@ func (f *FilterMaps) init() error {
 	f.indexLock.Lock()
 	defer f.indexLock.Unlock()
 
+	log.Info("Log indexer searching for matching checkpoints", 
+		"totalChains", len(checkpoints), 
+		"targetHead", f.targetView.HeadNumber())
+	
 	var bestIdx, bestLen int
 	for idx, checkpointList := range checkpoints {
+		chainName := getCheckpointChainName(idx)
+		
+		if len(checkpointList) == 0 {
+			log.Debug("Log indexer checkpoint list empty", "chain", chainName, "index", idx)
+			continue
+		}
+		
+		log.Info("Log indexer checking checkpoint list", 
+			"chain", chainName,
+			"checkpoints", len(checkpointList),
+			"firstBlock", checkpointList[0].BlockNumber,
+			"lastBlock", checkpointList[len(checkpointList)-1].BlockNumber)
+		
 		// binary search for the last matching epoch head
 		min, max := 0, len(checkpointList)
+		var lastChecked *epochCheckpoint
+		var lastMatchReason string
+		
 		for min < max {
 			mid := (min + max + 1) / 2
 			cp := checkpointList[mid-1]
-			if cp.BlockNumber <= f.targetView.HeadNumber() && f.targetView.BlockId(cp.BlockNumber) == cp.BlockId {
+			lastChecked = &cp
+			
+			// Check conditions
+			blockNumberOk := cp.BlockNumber <= f.targetView.HeadNumber()
+			var blockIdOk bool
+			var actualBlockId common.Hash
+			
+			if blockNumberOk {
+				actualBlockId = f.targetView.BlockId(cp.BlockNumber)
+				blockIdOk = actualBlockId == cp.BlockId
+			}
+			
+			if blockNumberOk && blockIdOk {
 				min = mid
+				lastMatchReason = "matched"
 			} else {
 				max = mid - 1
+				if !blockNumberOk {
+					lastMatchReason = fmt.Sprintf("blockNumber too high: %d > %d", cp.BlockNumber, f.targetView.HeadNumber())
+				} else {
+					lastMatchReason = fmt.Sprintf("blockId mismatch: expected=%s, actual=%s", 
+						cp.BlockId.Hex()[:10], actualBlockId.Hex()[:10])
+				}
 			}
 		}
+		
+		if max > 0 {
+			matchedCp := checkpointList[max-1]
+			log.Info("Log indexer found matching checkpoints in list", 
+				"chain", chainName,
+				"matchedCount", max,
+				"lastMatchedBlock", matchedCp.BlockNumber,
+				"lastMatchedHash", matchedCp.BlockId.Hex()[:10])
+		} else {
+			log.Info("Log indexer no matching checkpoints in list", 
+				"chain", chainName,
+				"reason", lastMatchReason,
+				"lastCheckedBlock", func() uint64 {
+					if lastChecked != nil {
+						return lastChecked.BlockNumber
+					}
+					return 0
+				}())
+		}
+		
 		if max > bestLen {
 			bestIdx, bestLen = idx, max
 		}
+	}
+	
+	if bestLen > 0 {
+		selectedCp := checkpoints[bestIdx][bestLen-1]
+		log.Info("Log indexer selected best checkpoint list", 
+			"chain", getCheckpointChainName(bestIdx),
+			"matchedCheckpoints", bestLen,
+			"lastCheckpointBlock", selectedCp.BlockNumber,
+			"lastCheckpointHash", selectedCp.BlockId.Hex()[:10])
+	} else {
+		log.Warn("Log indexer found no matching checkpoints in any chain", 
+			"totalChainsChecked", len(checkpoints),
+			"targetHead", f.targetView.HeadNumber(),
+			"hint", "This is normal for opBNB or newly synced nodes")
 	}
 	var initBlockNumber uint64
 	if bestLen > 0 {

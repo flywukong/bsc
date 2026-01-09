@@ -19,6 +19,7 @@ package filtermaps
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -72,4 +73,20 @@ func decodeCheckpoints(encoded []byte) (result checkpointList) {
 		panic(err)
 	}
 	return
+}
+
+// getCheckpointChainName returns a human-readable name for the checkpoint chain index.
+func getCheckpointChainName(idx int) string {
+	names := []string{
+		"Mainnet",
+		"Sepolia", 
+		"Holesky",
+		"Hoodi",
+		"BSC Chapel",
+		"BSC Mainnet",
+	}
+	if idx >= 0 && idx < len(names) {
+		return names[idx]
+	}
+	return fmt.Sprintf("Unknown_%d", idx)
 }

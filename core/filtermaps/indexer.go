@@ -46,6 +46,21 @@ func (f *FilterMaps) indexerLoop() {
 		log.Info("Started log indexer", "mode", "full-chain")
 	}
 
+	// Log existing index status if already initialized
+	if f.indexedRange.initialized {
+		if f.indexedRange.hasIndexedBlocks() {
+			log.Info("Log indexer using existing index data", 
+				"firstBlock", f.indexedRange.blocks.First(), 
+				"lastBlock", f.indexedRange.blocks.Last(),
+				"totalBlocks", f.indexedRange.blocks.Count(),
+				"firstMap", f.indexedRange.maps.First(),
+				"lastMap", f.indexedRange.maps.Last(),
+				"headIndexed", f.indexedRange.headIndexed)
+		} else {
+			log.Info("Log indexer previously initialized but no blocks indexed yet")
+		}
+	}
+
 	for !f.stop {
 		// Note: acquiring the indexLock read lock is unnecessary here,
 		// as the `indexedRange` is accessed within the indexerLoop.
