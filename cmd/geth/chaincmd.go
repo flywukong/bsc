@@ -156,6 +156,7 @@ if one is set.  Otherwise it prints the genesis from the datadir.`,
 			utils.TransactionHistoryFlag,
 			utils.LogHistoryFlag,
 			utils.LogNoHistoryFlag,
+			utils.LogExportCheckpointsFlag,
 			utils.StateHistoryFlag,
 		}, utils.DatabaseFlags, debug.Flags),
 		Before: func(ctx *cli.Context) error {
