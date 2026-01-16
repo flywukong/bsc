@@ -398,12 +398,18 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		CheckpointFileName: checkpointFile,
 		HashScheme:         config.StateScheme == rawdb.HashScheme,
 	}
-	chainView := eth.newChainView(eth.blockchain.CurrentBlock())
+	currentBlock := eth.blockchain.CurrentBlock()
+	chainView := eth.newChainView(currentBlock)
 	historyCutoff, _ := eth.blockchain.HistoryPruningCutoff()
 	var finalBlock uint64
 	if fb := eth.blockchain.CurrentFinalBlock(); fb != nil {
 		finalBlock = fb.Number.Uint64()
 	}
+	log.Info("Initializing FilterMaps",
+		"currentBlockNil", currentBlock == nil,
+		"chainViewNil", chainView == nil,
+		"historyCutoff", historyCutoff,
+		"finalBlock", finalBlock)
 	filterMaps, err := filtermaps.NewFilterMaps(chainDb, chainView, historyCutoff, finalBlock, filtermaps.DefaultParams, fmConfig)
 	if err != nil {
 		return nil, err

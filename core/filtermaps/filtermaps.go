@@ -307,6 +307,10 @@ func (f *FilterMaps) Stop() {
 // checkRevertRange checks whether the existing index is consistent with the
 // current indexed view and reverts inconsistent maps if necessary.
 func (f *FilterMaps) checkRevertRange() {
+	log.Info("checkRevertRange called",
+		"mapsCount", f.indexedRange.maps.Count(),
+		"initialized", f.indexedRange.initialized,
+		"indexedViewNil", f.indexedView == nil)
 	if f.indexedRange.maps.Count() == 0 {
 		return
 	}
