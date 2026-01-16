@@ -378,6 +378,7 @@ func (f *FilterMaps) checkRevertRange() {
 // guarantee though that the next init() will not return successfully until the
 // entire database has been cleaned.
 func (f *FilterMaps) reset() {
+	log.Info("rest filtermaps")
 	f.indexLock.Lock()
 	f.indexedRange = filterMapsRange{}
 	f.indexedView = nil
