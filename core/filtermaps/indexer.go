@@ -64,6 +64,7 @@ func (f *FilterMaps) indexerLoop() {
 			}
 		} else {
 			if f.finalBlock != f.lastFinal {
+				log.Debug("Final block updated", "lastFinal", f.lastFinal, "finalBlock", f.finalBlock, "checkpointFile", f.checkpointFile)
 				if f.checkpointFile != "" {
 					f.exportCheckpoints()
 				}

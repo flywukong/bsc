@@ -405,33 +405,48 @@ func (f *FilterMaps) init() error {
 		}
 	}
 
+	headNumber := f.targetView.HeadNumber()
+	log.Info("Searching for matching checkpoints", "headNumber", headNumber, "checkpointLists", len(checkpoints))
+
 	var bestIdx, bestLen int
 	for idx, checkpointList := range checkpoints {
+		if len(checkpointList) == 0 {
+			continue
+		}
 		// binary search to find the last checkpoint that is <= headNumber
 		min, max := 0, len(checkpointList)
 		for min < max {
 			mid := (min + max + 1) / 2
-			if checkpointList[mid-1].BlockNumber <= f.targetView.HeadNumber() {
+			if checkpointList[mid-1].BlockNumber <= headNumber {
 				min = mid
 			} else {
 				max = mid - 1
 			}
 		}
 		if max == 0 {
+			log.Debug("Checkpoint list skipped: all blocks > headNumber", "listIndex", idx, "firstBlock", checkpointList[0].BlockNumber)
 			continue
 		}
 		// verify the latest checkpoint within range
 		cp := checkpointList[max-1]
-		if f.targetView.BlockId(cp.BlockNumber) != cp.BlockId {
+		actualBlockId := f.targetView.BlockId(cp.BlockNumber)
+		if actualBlockId != cp.BlockId {
+			log.Debug("Checkpoint list skipped: blockId mismatch", "listIndex", idx, "blockNumber", cp.BlockNumber,
+				"expected", cp.BlockId.Hex()[:10], "actual", actualBlockId.Hex()[:10])
 			continue
 		}
+		log.Debug("Checkpoint list matched", "listIndex", idx, "matchedCount", max, "latestBlock", cp.BlockNumber)
 		if max > bestLen {
 			bestIdx, bestLen = idx, max
 		}
 	}
+	log.Info("Checkpoint search completed", "bestListIndex", bestIdx, "matchedCount", bestLen)
 	var initBlockNumber uint64
 	if bestLen > 0 {
 		initBlockNumber = checkpoints[bestIdx][bestLen-1].BlockNumber
+		log.Info("Using checkpoint for initialization", "listIndex", bestIdx, "epochs", bestLen, "initBlock", initBlockNumber)
+	} else {
+		log.Info("No matching checkpoint found, starting from genesis")
 	}
 	if initBlockNumber < f.historyCutoff {
 		return errors.New("cannot start indexing before history cutoff point")
@@ -442,6 +457,7 @@ func (f *FilterMaps) init() error {
 			initBlockNumber = 1
 		}
 		if f.indexedView.chain.GetCanonicalHash(initBlockNumber) == (common.Hash{}) {
+			log.Error("Init block is pruned", "initBlock", initBlockNumber, "headNumber", f.targetView.headNumber)
 			return fmt.Errorf("cannot start indexing: blockNumber=%d is pruned", initBlockNumber)
 		}
 	}
@@ -460,6 +476,7 @@ func (f *FilterMaps) init() error {
 		fmr.maps = common.NewRange(f.firstEpochMap(uint32(bestLen)), 0)
 	}
 	f.setRange(batch, f.targetView, fmr, false)
+	log.Info("Log index initialized", "initBlock", initBlockNumber, "usedCheckpoint", bestLen > 0)
 	return batch.Write()
 }
 
@@ -900,7 +917,9 @@ func (f *FilterMaps) exportCheckpoints() {
 		return
 	}
 	epochCount := uint32(finalLvPtr >> (f.logValuesPerMap + f.logMapsPerEpoch))
+	log.Debug("Export checkpoint check", "finalBlock", f.finalBlock, "finalLvPtr", finalLvPtr, "epochCount", epochCount, "lastFinalEpoch", f.lastFinalEpoch)
 	if epochCount == f.lastFinalEpoch {
+		log.Debug("Skipping export: epoch count unchanged", "epochCount", epochCount)
 		return
 	}
 	w, err := os.Create(f.checkpointFile)
@@ -931,4 +950,5 @@ func (f *FilterMaps) exportCheckpoints() {
 	}
 	w.WriteString("]\n")
 	f.lastFinalEpoch = epochCount
+	log.Info("Checkpoint export completed", "epochs", epochCount, "file", f.checkpointFile)
 }
