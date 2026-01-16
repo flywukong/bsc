@@ -317,13 +317,35 @@ func (f *FilterMaps) checkRevertRange() {
 		f.reset()
 		return
 	}
+
+	headNumber := f.indexedView.HeadNumber()
+	log.Info("checkRevertRange started",
+		"lastMap", lastMap,
+		"lastBlockNumber", lastBlockNumber,
+		"lastBlockId", lastBlockId.Hex()[:10],
+		"headNumber", headNumber,
+		"mapsCount", f.indexedRange.maps.Count())
+
+	revertCount := 0
 	for lastBlockNumber > f.indexedView.HeadNumber() || f.indexedView.BlockId(lastBlockNumber) != lastBlockId {
+		actualBlockId := f.indexedView.BlockId(lastBlockNumber)
+		beyondHead := lastBlockNumber > f.indexedView.HeadNumber()
+		log.Info("checkRevertRange: need revert",
+			"lastMap", lastMap,
+			"lastBlockNumber", lastBlockNumber,
+			"storedBlockId", lastBlockId.Hex()[:10],
+			"actualBlockId", actualBlockId.Hex()[:10],
+			"beyondHead", beyondHead,
+			"mapsCount", f.indexedRange.maps.Count())
+
 		// revert last map
 		if f.indexedRange.maps.Count() == 1 {
+			log.Warn("checkRevertRange: only 1 map left, calling reset")
 			f.reset() // reset database if no rendered maps remained
 			return
 		}
 		lastMap--
+		revertCount++
 		newRange := f.indexedRange
 		newRange.maps.SetLast(lastMap)
 		lastBlockNumber, lastBlockId, err = f.getLastBlockOfMap(lastMap)
@@ -337,6 +359,10 @@ func (f *FilterMaps) checkRevertRange() {
 		newRange.headDelimiter = 0
 		// only shorten range and leave map data; next head render will overwrite it
 		f.setRange(f.db, f.indexedView, newRange, false)
+	}
+
+	if revertCount > 0 {
+		log.Info("checkRevertRange finished", "revertedMaps", revertCount, "finalMap", lastMap, "finalBlock", lastBlockNumber)
 	}
 }
 
