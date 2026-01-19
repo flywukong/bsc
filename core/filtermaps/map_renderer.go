@@ -335,6 +335,14 @@ func (r *mapRenderer) renderCurrentMap(stopCb func() bool) (bool, error) {
 	rowMappingCache := lru.NewCache[common.Hash, lvPos](cachedRowMappings)
 	defer rowMappingCache.Purge()
 
+	loopEndLvIndex := uint64(r.currentMap.mapIndex+1) << r.f.logValuesPerMap
+	log.Info("renderCurrentMap: entering loop",
+		"mapIndex", r.currentMap.mapIndex,
+		"lvIndex", r.iterator.lvIndex,
+		"loopEndLvIndex", loopEndLvIndex,
+		"iteratorFinished", r.iterator.finished,
+		"willEnterLoop", r.iterator.lvIndex < loopEndLvIndex && !r.iterator.finished)
+
 	var progressLogCnt int
 	for r.iterator.lvIndex < uint64(r.currentMap.mapIndex+1)<<r.f.logValuesPerMap && !r.iterator.finished {
 		waitCnt++
@@ -396,6 +404,13 @@ func (r *mapRenderer) renderCurrentMap(stopCb func() bool) (bool, error) {
 			}
 		}
 	}
+	log.Info("renderCurrentMap: loop finished",
+		"mapIndex", r.currentMap.mapIndex,
+		"iteratorFinished", r.iterator.finished,
+		"lvIndex", r.iterator.lvIndex,
+		"lastBlock", r.currentMap.lastBlock,
+		"logValuesProcessed", logValuesProcessed,
+		"blocksProcessed", blocksProcessed)
 	if r.iterator.finished {
 		r.currentMap.finished = true
 		r.currentMap.headDelimiter = r.iterator.lvIndex
