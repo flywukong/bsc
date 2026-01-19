@@ -278,26 +278,30 @@ func (r *mapRenderer) makeSnapshot() {
 // been written to disk and the index range has been updated accordingly.
 func (r *mapRenderer) run(stopCb func() bool, writeCb func()) (bool, error) {
 	for {
-		log.Info("mapRenderer.run: rendering map", "mapIndex", r.currentMap.mapIndex, "lastBlock", r.currentMap.lastBlock)
+		// Log every 100 maps to reduce log frequency
+		if r.currentMap.mapIndex%100 == 0 {
+			log.Info("mapRenderer.run: rendering map", "mapIndex", r.currentMap.mapIndex, "lastBlock", r.currentMap.lastBlock)
+		}
 
 		if done, err := r.renderCurrentMap(stopCb); !done {
-			log.Info("mapRenderer.run: renderCurrentMap returned", "done", done, "error", err)
+			log.Info("mapRenderer.run: renderCurrentMap interrupted or failed", "done", done, "error", err, "mapIndex", r.currentMap.mapIndex)
 			return done, err // stopped or failed
 		}
 		// map finished
 		r.finishedMaps[r.currentMap.mapIndex] = r.currentMap
 		r.finished.SetLast(r.finished.AfterLast())
 		if len(r.finishedMaps) >= maxMapsPerBatch || r.f.mapGroupOffset(r.finished.AfterLast()) == 0 {
-			log.Info("mapRenderer.run: writing finished maps", "count", len(r.finishedMaps), "afterLast", r.finished.AfterLast())
 			if err := r.writeFinishedMaps(stopCb); err != nil {
 				log.Error("mapRenderer.run: writeFinishedMaps failed", "error", err)
 				return false, err
 			}
 			writeCb()
-			log.Info("mapRenderer.run: writeFinishedMaps done")
 		}
 		if r.finished.AfterLast() == r.renderBefore || r.iterator.finished {
-			log.Info("mapRenderer.run: final write", "afterLast", r.finished.AfterLast(), "renderBefore", r.renderBefore, "iteratorFinished", r.iterator.finished)
+			log.Info("mapRenderer.run: rendering complete",
+				"afterLast", r.finished.AfterLast(),
+				"renderBefore", r.renderBefore,
+				"iteratorFinished", r.iterator.finished)
 			if err := r.writeFinishedMaps(stopCb); err != nil {
 				log.Error("mapRenderer.run: final writeFinishedMaps failed", "error", err)
 				return false, err
@@ -336,6 +340,10 @@ func (r *mapRenderer) renderCurrentMap(stopCb func() bool) (bool, error) {
 		if waitCnt >= valuesPerCallback {
 			totalTime += time.Since(start)
 			if stopCb() {
+				log.Info("renderCurrentMap: stopCb returned true, interrupting",
+					"mapIndex", r.currentMap.mapIndex,
+					"lastBlock", r.currentMap.lastBlock,
+					"lvIndex", r.iterator.lvIndex)
 				return false, nil
 			}
 			start = time.Now()
