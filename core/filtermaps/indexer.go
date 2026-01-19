@@ -58,7 +58,7 @@ func (f *FilterMaps) indexerLoop() {
 			}
 		}
 		headIndexed := f.targetHeadIndexed()
-		log.Debug("indexer: targetHeadIndexed check",
+		log.Info("indexer: targetHeadIndexed check",
 			"result", headIndexed,
 			"targetHead", f.targetView.HeadNumber(),
 			"indexedHead", f.indexedView.HeadNumber(),
@@ -69,7 +69,7 @@ func (f *FilterMaps) indexerLoop() {
 				return
 			}
 		} else {
-			log.Debug("indexer: head indexed, checking export",
+			log.Info("indexer: head indexed, checking export",
 				"finalBlock", f.finalBlock,
 				"lastFinal", f.lastFinal,
 				"checkpointFile", f.checkpointFile)
