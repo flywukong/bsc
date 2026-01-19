@@ -57,12 +57,22 @@ func (f *FilterMaps) indexerLoop() {
 				return
 			}
 		}
-		if !f.targetHeadIndexed() {
+		headIndexed := f.targetHeadIndexed()
+		log.Debug("indexer: targetHeadIndexed check",
+			"result", headIndexed,
+			"targetHead", f.targetView.HeadNumber(),
+			"indexedHead", f.indexedView.HeadNumber(),
+			"headIndexedFlag", f.indexedRange.headIndexed)
+		if !headIndexed {
 			if err := f.tryIndexHead(); err != nil && err != errChainUpdate {
 				f.disableForError("head rendering", err)
 				return
 			}
 		} else {
+			log.Debug("indexer: head indexed, checking export",
+				"finalBlock", f.finalBlock,
+				"lastFinal", f.lastFinal,
+				"checkpointFile", f.checkpointFile)
 			if f.finalBlock != f.lastFinal {
 				if f.checkpointFile != "" {
 					f.exportCheckpoints()
