@@ -335,10 +335,20 @@ func (r *mapRenderer) renderCurrentMap(stopCb func() bool) (bool, error) {
 	rowMappingCache := lru.NewCache[common.Hash, lvPos](cachedRowMappings)
 	defer rowMappingCache.Purge()
 
+	var progressLogCnt int
 	for r.iterator.lvIndex < uint64(r.currentMap.mapIndex+1)<<r.f.logValuesPerMap && !r.iterator.finished {
 		waitCnt++
 		if waitCnt >= valuesPerCallback {
 			totalTime += time.Since(start)
+			progressLogCnt++
+			// Log progress every 10 callbacks (roughly every 10 seconds)
+			if progressLogCnt%10 == 1 {
+				log.Info("renderCurrentMap: progress",
+					"mapIndex", r.currentMap.mapIndex,
+					"lvIndex", r.iterator.lvIndex,
+					"blockNumber", r.iterator.blockNumber,
+					"lastBlock", r.currentMap.lastBlock)
+			}
 			if stopCb() {
 				log.Info("renderCurrentMap: stopCb returned true, interrupting",
 					"mapIndex", r.currentMap.mapIndex,
@@ -348,6 +358,9 @@ func (r *mapRenderer) renderCurrentMap(stopCb func() bool) (bool, error) {
 			}
 			start = time.Now()
 			if !r.iterator.updateChainView(r.f.targetView) {
+				log.Info("renderCurrentMap: chain view update failed",
+					"mapIndex", r.currentMap.mapIndex,
+					"lvIndex", r.iterator.lvIndex)
 				return false, errChainUpdate
 			}
 			waitCnt = 0
