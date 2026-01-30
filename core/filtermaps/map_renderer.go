@@ -22,6 +22,7 @@ import (
 	"math"
 	"slices"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -98,6 +99,14 @@ func (f *FilterMaps) renderMapsBefore(renderBefore uint32) (*mapRenderer, error)
 // snapshot made at a block boundary.
 func (f *FilterMaps) renderMapsFromSnapshot(cp *renderedMap) (*mapRenderer, error) {
 	f.testSnapshotUsed = true
+
+	estimatedSize := estimateFilterMapSize(cp.filterMap)
+	log.Debug("FilterMaps using cached snapshot to resume rendering",
+		"mapIndex", cp.mapIndex,
+		"lastBlock", cp.lastBlock,
+		"snapshotSizeMB", float64(estimatedSize)/(1024*1024),
+		"cacheSize", f.renderSnapshots.Len())
+
 	iter, err := f.newLogIteratorFromBlockDelimiter(cp.lastBlock, cp.headDelimiter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create log iterator from block delimiter %d: %v", cp.lastBlock, err)
@@ -244,6 +253,15 @@ func (f *FilterMaps) loadHeadSnapshot() error {
 			return fmt.Errorf("failed to retrieve log value pointer of head snapshot block %d: %v", firstBlock+uint64(i), err)
 		}
 	}
+
+	// Estimate size and log
+	estimatedSize := estimateFilterMapSize(fm)
+	log.Info("FilterMaps loading head snapshot from DB",
+		"mapIndex", f.indexedRange.maps.Last(),
+		"lastBlock", f.indexedRange.blocks.Last(),
+		"filterMapSizeMB", float64(estimatedSize)/(1024*1024),
+		"blockCount", len(lvPtrs))
+
 	f.renderSnapshots.Add(f.indexedRange.blocks.Last(), &renderedMap{
 		filterMap:     fm.fullCopy(),
 		mapIndex:      f.indexedRange.maps.Last(),
@@ -256,11 +274,34 @@ func (f *FilterMaps) loadHeadSnapshot() error {
 	return nil
 }
 
+// snapshot statistics for debugging
+var (
+	snapshotCount     uint64
+	snapshotLastLog   time.Time
+	snapshotLogMutex  sync.Mutex
+	snapshotLogPeriod = time.Second * 30 // log every 30 seconds
+)
+
+// estimateFilterMapSize estimates the memory size of a filterMap in bytes
+func estimateFilterMapSize(fm filterMap) int64 {
+	var size int64
+	size += int64(len(fm)) * 24 // slice header per row (24 bytes on 64-bit)
+	for _, row := range fm {
+		size += int64(len(row)) * 4 // uint32 = 4 bytes
+		size += 24                  // slice header
+	}
+	return size
+}
+
 // makeSnapshot creates a snapshot of the current state of the rendered map.
 func (r *mapRenderer) makeSnapshot() {
 	if r.iterator.blockNumber != r.currentMap.lastBlock || r.iterator.chainView != r.f.targetView {
 		panic("iterator state inconsistent with current rendered map")
 	}
+
+	// Estimate size before copy
+	estimatedSize := estimateFilterMapSize(r.currentMap.filterMap)
+
 	r.f.renderSnapshots.Add(r.currentMap.lastBlock, &renderedMap{
 		filterMap:     r.currentMap.filterMap.fastCopy(),
 		mapIndex:      r.currentMap.mapIndex,
@@ -270,6 +311,23 @@ func (r *mapRenderer) makeSnapshot() {
 		finished:      true,
 		headDelimiter: r.iterator.lvIndex,
 	})
+
+	// Log statistics periodically
+	snapshotLogMutex.Lock()
+	snapshotCount++
+	now := time.Now()
+	if now.Sub(snapshotLastLog) >= snapshotLogPeriod {
+		cacheLen := r.f.renderSnapshots.Len()
+		log.Info("FilterMaps snapshot statistics",
+			"snapshotsCreated", snapshotCount,
+			"cacheSize", cacheLen,
+			"lastSnapshotSizeMB", float64(estimatedSize)/(1024*1024),
+			"mapIndex", r.currentMap.mapIndex,
+			"lastBlock", r.currentMap.lastBlock,
+			"period", snapshotLogPeriod)
+		snapshotLastLog = now
+	}
+	snapshotLogMutex.Unlock()
 }
 
 // run does the actual map rendering. It periodically calls the stopCb callback
