@@ -595,36 +595,38 @@ func (f *BlockFetcher) loop() {
 					defer timeout.Stop()
 
 					select {
-					case res := <-resCh:
-						res.Done <- nil
-						// Ignoring withdrawals here, will set it to empty later if EmptyWithdrawalsHash in header.
-						bodies := *res.Res.(*eth.BlockBodiesResponse)
-						txs := make([][]*types.Transaction, len(bodies))
-						uncles := make([][]*types.Header, len(bodies))
-						sidecars := make([]types.BlobSidecars, len(bodies))
-						for i, body := range bodies {
-							var err error
-							if txs[i], err = body.Transactions.Items(); err != nil {
-								log.Debug("Failed to decode block body transactions", "peer", peer, "err", err)
-								f.dropPeer(peer)
-								return
-							}
-							if uncles[i], err = body.Uncles.Items(); err != nil {
-								log.Debug("Failed to decode block body uncles", "peer", peer, "err", err)
-								f.dropPeer(peer)
-								return
-							}
-							if body.Sidecars != nil {
-								if sidecars[i], err = body.Sidecars.Items(); err != nil {
-									log.Debug("Failed to decode block body sidecars", "peer", peer, "err", err)
-									f.dropPeer(peer)
-									return
-								}
-							} else {
-								sidecars[i] = nil
-							}
+				case res := <-resCh:
+					res.Done <- nil
+					// Ignoring withdrawals here, will set it to empty later if EmptyWithdrawalsHash in header.
+					bodies := *res.Res.(*eth.BlockBodiesResponse)
+					txs := make([][]*types.Transaction, len(bodies))
+					uncles := make([][]*types.Header, len(bodies))
+					sidecars := make([]types.BlobSidecars, len(bodies))
+					decodeStart := time.Now()
+					for i, body := range bodies {
+						var err error
+						if txs[i], err = body.Transactions.Items(); err != nil {
+							log.Debug("Failed to decode block body transactions", "peer", peer, "err", err)
+							f.dropPeer(peer)
+							return
 						}
-						f.FilterBodies(peer, txs, uncles, sidecars, time.Now())
+						if uncles[i], err = body.Uncles.Items(); err != nil {
+							log.Debug("Failed to decode block body uncles", "peer", peer, "err", err)
+							f.dropPeer(peer)
+							return
+						}
+						if body.Sidecars != nil {
+							if sidecars[i], err = body.Sidecars.Items(); err != nil {
+								log.Debug("Failed to decode block body sidecars", "peer", peer, "err", err)
+								f.dropPeer(peer)
+								return
+							}
+						} else {
+							sidecars[i] = nil
+						}
+					}
+					log.Info("Delayed decode BlockFetcher bodies", "peer", peer, "bodies", len(bodies), "elapsed", time.Since(decodeStart))
+					f.FilterBodies(peer, txs, uncles, sidecars, time.Now())
 
 					case <-timeout.C:
 						// The peer didn't respond in time. The request

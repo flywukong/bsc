@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
@@ -415,14 +416,19 @@ func handleBlockHeaders(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(res); err != nil {
 		return err
 	}
-	tresp := tracker.Response{ID: res.RequestId, MsgCode: BlockHeadersMsg, Size: res.List.Len()}
+	rawLen := res.List.Len()
+	rawSize := len(res.List.Content())
+	tresp := tracker.Response{ID: res.RequestId, MsgCode: BlockHeadersMsg, Size: rawLen}
 	if err := peer.tracker.Fulfil(tresp); err != nil {
 		return fmt.Errorf("BlockHeaders: %w", err)
 	}
+	decodeStart := time.Now()
 	headers, err := res.List.Items()
 	if err != nil {
 		return fmt.Errorf("BlockHeaders: %w", err)
 	}
+	log.Info("Delayed decode BlockHeaders", "peer", peer.ID(), "reqId", res.RequestId,
+		"rawItems", rawLen, "rawBytes", rawSize, "decoded", len(headers), "elapsed", time.Since(decodeStart))
 
 	metadata := func() interface{} {
 		hashes := make([]common.Hash, len(headers))
@@ -447,16 +453,21 @@ func handleBlockBodies(backend Backend, msg Decoder, peer *Peer) error {
 
 	// Check against the request.
 	length := res.List.Len()
+	rawSize := len(res.List.Content())
 	tresp := tracker.Response{ID: res.RequestId, MsgCode: BlockBodiesMsg, Size: length}
 	if err := peer.tracker.Fulfil(tresp); err != nil {
 		return fmt.Errorf("BlockBodies: %w", err)
 	}
 
 	// Collect items and dispatch.
+	decodeStart := time.Now()
 	items, err := res.List.Items()
 	if err != nil {
 		return fmt.Errorf("BlockBodies: %w", err)
 	}
+	log.Info("Delayed decode BlockBodies", "peer", peer.ID(), "reqId", res.RequestId,
+		"rawItems", length, "rawBytes", rawSize, "decoded", len(items), "elapsed", time.Since(decodeStart))
+
 	metadata := func() any { return hashBodyParts(items) }
 	return peer.dispatchResponse(&Response{
 		id:   res.RequestId,
@@ -659,9 +670,11 @@ func handleTransactions(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(&txs); err != nil {
 		return err
 	}
-	if txs.Len() > maxTransactionAnnouncements {
+	rawLen := txs.Len()
+	if rawLen > maxTransactionAnnouncements {
 		return fmt.Errorf("too many transactions")
 	}
+	log.Info("Delayed decode Transactions (pre-Handle)", "peer", peer.ID(), "rawItems", rawLen, "rawBytes", len(txs.Content()))
 	return backend.Handle(peer, &txs)
 }
 
@@ -676,14 +689,18 @@ func handlePooledTransactions(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(&resp); err != nil {
 		return err
 	}
+	rawLen := resp.List.Len()
+	rawSize := len(resp.List.Content())
 	tresp := tracker.Response{
 		ID:      resp.RequestId,
 		MsgCode: PooledTransactionsMsg,
-		Size:    resp.List.Len(),
+		Size:    rawLen,
 	}
 	if err := peer.tracker.Fulfil(tresp); err != nil {
 		return fmt.Errorf("PooledTransactions: %w", err)
 	}
+	log.Info("Delayed decode PooledTransactions (pre-Handle)", "peer", peer.ID(), "reqId", resp.RequestId,
+		"rawItems", rawLen, "rawBytes", rawSize)
 
 	return backend.Handle(peer, &resp)
 }

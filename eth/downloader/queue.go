@@ -820,6 +820,7 @@ func (q *queue) DeliverBodies(id string, hashes eth.BlockBodyHashes, bodies []et
 		}
 
 		// decode
+		decodeStart := time.Now()
 		txs, err := bodies[index].Transactions.Items()
 		if err != nil {
 			return fmt.Errorf("%w: bad transactions: %v", errInvalidBody, err)
@@ -839,6 +840,7 @@ func (q *queue) DeliverBodies(id string, hashes eth.BlockBodyHashes, bodies []et
 		} else {
 			withdrawalLists = append(withdrawalLists, nil)
 		}
+		var sidecarCount int
 		if bodies[index].Sidecars != nil {
 			sidecars, err := bodies[index].Sidecars.Items()
 			if err != nil {
@@ -849,10 +851,13 @@ func (q *queue) DeliverBodies(id string, hashes eth.BlockBodyHashes, bodies []et
 					return err
 				}
 			}
+			sidecarCount = len(sidecars)
 			sidecarLists = append(sidecarLists, sidecars)
 		} else {
 			sidecarLists = append(sidecarLists, nil)
 		}
+		log.Info("Delayed decode DeliverBodies", "peer", id, "block", header.Number,
+			"txs", len(txs), "uncles", len(uncles), "sidecars", sidecarCount, "elapsed", time.Since(decodeStart))
 		return nil
 	}
 
