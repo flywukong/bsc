@@ -420,6 +420,8 @@ func handleBlockHeaders(backend Backend, msg Decoder, peer *Peer) error {
 	rawSize := len(res.List.Content())
 	tresp := tracker.Response{ID: res.RequestId, MsgCode: BlockHeadersMsg, Size: rawLen}
 	if err := peer.tracker.Fulfil(tresp); err != nil {
+		log.Warn("Tracker rejected BlockHeaders", "peer", peer.ID(), "reqId", res.RequestId,
+			"rawItems", rawLen, "rawBytes", rawSize, "err", err)
 		return fmt.Errorf("BlockHeaders: %w", err)
 	}
 	decodeStart := time.Now()
@@ -427,7 +429,7 @@ func handleBlockHeaders(backend Backend, msg Decoder, peer *Peer) error {
 	if err != nil {
 		return fmt.Errorf("BlockHeaders: %w", err)
 	}
-	log.Info("Delayed decode BlockHeaders", "peer", peer.ID(), "reqId", res.RequestId,
+	log.Debug("Delayed decode BlockHeaders", "peer", peer.ID(), "reqId", res.RequestId,
 		"rawItems", rawLen, "rawBytes", rawSize, "decoded", len(headers), "elapsed", time.Since(decodeStart))
 
 	metadata := func() interface{} {
@@ -456,17 +458,19 @@ func handleBlockBodies(backend Backend, msg Decoder, peer *Peer) error {
 	rawSize := len(res.List.Content())
 	tresp := tracker.Response{ID: res.RequestId, MsgCode: BlockBodiesMsg, Size: length}
 	if err := peer.tracker.Fulfil(tresp); err != nil {
+		log.Warn("Tracker rejected BlockBodies", "peer", peer.ID(), "reqId", res.RequestId,
+			"rawItems", length, "rawBytes", rawSize, "err", err)
 		return fmt.Errorf("BlockBodies: %w", err)
 	}
 
-	// Collect items and dispatch.
+	// Collect items and dispatch — decode happens here, after tracker validation.
 	decodeStart := time.Now()
 	items, err := res.List.Items()
 	if err != nil {
 		return fmt.Errorf("BlockBodies: %w", err)
 	}
 	log.Info("Delayed decode BlockBodies", "peer", peer.ID(), "reqId", res.RequestId,
-		"rawItems", length, "rawBytes", rawSize, "decoded", len(items), "elapsed", time.Since(decodeStart))
+		"rawBytes", rawSize, "decoded", len(items), "elapsed", time.Since(decodeStart))
 
 	metadata := func() any { return hashBodyParts(items) }
 	return peer.dispatchResponse(&Response{
@@ -674,7 +678,6 @@ func handleTransactions(backend Backend, msg Decoder, peer *Peer) error {
 	if rawLen > maxTransactionAnnouncements {
 		return fmt.Errorf("too many transactions")
 	}
-	log.Info("Delayed decode Transactions (pre-Handle)", "peer", peer.ID(), "rawItems", rawLen, "rawBytes", len(txs.Content()))
 	return backend.Handle(peer, &txs)
 }
 
@@ -697,11 +700,10 @@ func handlePooledTransactions(backend Backend, msg Decoder, peer *Peer) error {
 		Size:    rawLen,
 	}
 	if err := peer.tracker.Fulfil(tresp); err != nil {
+		log.Warn("Tracker rejected PooledTransactions", "peer", peer.ID(), "reqId", resp.RequestId,
+			"rawItems", rawLen, "rawBytes", rawSize, "err", err)
 		return fmt.Errorf("PooledTransactions: %w", err)
 	}
-	log.Info("Delayed decode PooledTransactions (pre-Handle)", "peer", peer.ID(), "reqId", resp.RequestId,
-		"rawItems", rawLen, "rawBytes", rawSize)
-
 	return backend.Handle(peer, &resp)
 }
 

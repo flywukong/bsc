@@ -179,11 +179,12 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		rawSize := len(res.Accounts.Content())
 		tresp := tracker.Response{ID: res.ID, MsgCode: AccountRangeMsg, Size: rawSize}
 		if err := peer.tracker.Fulfil(tresp); err != nil {
+			log.Warn("Tracker rejected AccountRange", "peer", peer.ID(), "reqId", res.ID,
+				"rawBytes", rawSize, "err", err)
 			return err
 		}
 
-		// Decode.
-		decodeStart := time.Now()
+		// Decode — only after tracker validation passed.
 		accounts, err := res.Accounts.Items()
 		if err != nil {
 			return fmt.Errorf("AccountRange: invalid accounts list: %v", err)
@@ -192,8 +193,6 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		if err != nil {
 			return fmt.Errorf("AccountRange: invalid proof: %v", err)
 		}
-		log.Info("Delayed decode AccountRange", "peer", peer.ID(), "reqId", res.ID,
-			"accounts", len(accounts), "proofs", len(proof), "rawBytes", rawSize, "elapsed", time.Since(decodeStart))
 
 		// Ensure the range is monotonically increasing
 		for i := 1; i < len(accounts); i++ {
@@ -232,11 +231,12 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		rawSize := len(res.Slots.Content())
 		tresp := tracker.Response{ID: res.ID, MsgCode: StorageRangesMsg, Size: rawSize}
 		if err := peer.tracker.Fulfil(tresp); err != nil {
+			log.Warn("Tracker rejected StorageRanges", "peer", peer.ID(), "reqId", res.ID,
+				"rawBytes", rawSize, "err", err)
 			return fmt.Errorf("StorageRangesMsg: %w", err)
 		}
 
-		// Decode.
-		decodeStart := time.Now()
+		// Decode — only after tracker validation passed.
 		slotLists, err := res.Slots.Items()
 		if err != nil {
 			return fmt.Errorf("AccountRange: invalid accounts list: %v", err)
@@ -245,13 +245,6 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		if err != nil {
 			return fmt.Errorf("AccountRange: invalid proof: %v", err)
 		}
-		var totalSlots int
-		for _, slots := range slotLists {
-			totalSlots += len(slots)
-		}
-		log.Info("Delayed decode StorageRanges", "peer", peer.ID(), "reqId", res.ID,
-			"slotLists", len(slotLists), "totalSlots", totalSlots, "proofs", len(proof),
-			"rawBytes", rawSize, "elapsed", time.Since(decodeStart))
 
 		// Ensure the ranges are monotonically increasing
 		for i, slots := range slotLists {
@@ -287,16 +280,15 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		length := res.Codes.Len()
 		tresp := tracker.Response{ID: res.ID, MsgCode: ByteCodesMsg, Size: length}
 		if err := peer.tracker.Fulfil(tresp); err != nil {
+			log.Warn("Tracker rejected ByteCodes", "peer", peer.ID(), "reqId", res.ID,
+				"rawItems", length, "err", err)
 			return fmt.Errorf("ByteCodes: %w", err)
 		}
 
-		decodeStart := time.Now()
 		codes, err := res.Codes.Items()
 		if err != nil {
 			return fmt.Errorf("ByteCodes: %w", err)
 		}
-		log.Info("Delayed decode ByteCodes", "peer", peer.ID(), "reqId", res.ID,
-			"codes", len(codes), "rawItems", length, "elapsed", time.Since(decodeStart))
 
 		return backend.Handle(peer, &ByteCodesPacket{res.ID, codes})
 
@@ -325,15 +317,14 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		rawLen := res.Nodes.Len()
 		tresp := tracker.Response{ID: res.ID, MsgCode: TrieNodesMsg, Size: rawLen}
 		if err := peer.tracker.Fulfil(tresp); err != nil {
+			log.Warn("Tracker rejected TrieNodes", "peer", peer.ID(), "reqId", res.ID,
+				"rawItems", rawLen, "err", err)
 			return fmt.Errorf("TrieNodes: %w", err)
 		}
-		decodeStart := time.Now()
 		nodes, err := res.Nodes.Items()
 		if err != nil {
 			return fmt.Errorf("TrieNodes: %w", err)
 		}
-		log.Info("Delayed decode TrieNodes", "peer", peer.ID(), "reqId", res.ID,
-			"nodes", len(nodes), "rawItems", rawLen, "elapsed", time.Since(decodeStart))
 
 		return backend.Handle(peer, &TrieNodesPacket{res.ID, nodes})
 

@@ -72,24 +72,20 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
 		return h.txFetcher.Notify(peer.ID(), packet.Types, packet.Sizes, packet.Hashes)
 
 	case *eth.TransactionsPacket:
-		decodeStart := time.Now()
 		txs, err := packet.Items()
 		if err != nil {
 			return fmt.Errorf("Transactions: %v", err)
 		}
-		log.Info("Delayed decode Transactions", "peer", peer.ID(), "decoded", len(txs), "elapsed", time.Since(decodeStart))
 		if err := handleTransactions(peer, txs, true); err != nil {
 			return fmt.Errorf("Transactions: %v", err)
 		}
 		return h.txFetcher.Enqueue(peer.ID(), txs, false)
 
 	case *eth.PooledTransactionsPacket:
-		decodeStart := time.Now()
 		txs, err := packet.List.Items()
 		if err != nil {
 			return fmt.Errorf("PooledTransactions: %v", err)
 		}
-		log.Info("Delayed decode PooledTransactions", "peer", peer.ID(), "decoded", len(txs), "elapsed", time.Since(decodeStart))
 		if err := handleTransactions(peer, txs, false); err != nil {
 			return fmt.Errorf("PooledTransactions: %v", err)
 		}
