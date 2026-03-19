@@ -625,7 +625,7 @@ func (f *BlockFetcher) loop() {
 							sidecars[i] = nil
 						}
 					}
-					log.Debug("Delayed decode BlockFetcher bodies", "peer", peer, "bodies", len(bodies), "elapsed", time.Since(decodeStart))
+					log.Info("Delayed decode BlockFetcher bodies", "peer", peer, "bodies", len(bodies), "elapsed", time.Since(decodeStart))
 					f.FilterBodies(peer, txs, uncles, sidecars, time.Now())
 
 					case <-timeout.C:
