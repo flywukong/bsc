@@ -1087,12 +1087,12 @@ func (r *BidRuntime) commitTransaction(chain *core.BlockChain, chainConfig *para
 			if err := <-ch; err != nil {
 				return err
 			}
-			log.Info("BidSimulator: blob tx validated async", "tx", tx.Hash())
+			log.Info("BidSimulator: blob tx validated async", "bidHash", r.bid.Hash(), "tx", tx.Hash())
 		} else {
 			if err := txpool.ValidateBlobTx(tx, env.header, nil); err != nil {
 				return err
 			}
-			log.Info("BidSimulator: blob tx validated sync (fallback)", "tx", tx.Hash())
+			log.Info("BidSimulator: blob tx validated sync (fallback)", "bidHash", r.bid.Hash(), "tx", tx.Hash())
 		}
 
 		// Checking against blob gas limit: It's kind of ugly to perform this check here, but there
