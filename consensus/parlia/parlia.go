@@ -1667,6 +1667,17 @@ func (p *Parlia) Authorize(val common.Address, signFn SignerFn, signTxFn SignerT
 	p.signTxFn = signTxFn
 }
 
+// SignSystemTx signs an unsigned system transaction with the validator's private key.
+// Used in BidBlock (zero-simulate MEV) path: builder provides unsigned system txs, validator signs them.
+func (p *Parlia) SignSystemTx(tx *types.Transaction, chainID *big.Int) (*types.Transaction, error) {
+	p.lock.RLock()
+	defer p.lock.RUnlock()
+	if p.signTxFn == nil {
+		return nil, errors.New("signTxFn not set")
+	}
+	return p.signTxFn(accounts.Account{Address: p.val}, tx, chainID)
+}
+
 // Argument leftOver is the time reserved for block finalize(calculate root, distribute income...)
 func (p *Parlia) Delay(chain consensus.ChainReader, header *types.Header, leftOver *time.Duration) *time.Duration {
 	snap, err := p.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
