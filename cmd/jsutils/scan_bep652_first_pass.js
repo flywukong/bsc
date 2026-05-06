@@ -63,7 +63,8 @@ function usage() {
     console.log("Notes:");
     console.log(`  Default start block: ${BEP652_ACTIVATION_BLOCK}.`);
     console.log(`  Default filterMode: ${DEFAULT_FILTER_MODE}.`);
-    console.log("  strictCap: receipt.status = 0 AND tx.gas > 16,777,216 (above BEP-652 protocol cap).");
+    console.log("  strictCap: receipt.status = 0 AND (tx.gas > 16,777,216 OR near-cap tx runs out of gas).");
+    console.log("  Near-cap OOG rule: tx.gas >= gasThreshold and receipt.gasUsed == tx.gas.");
     console.log("  Summary also tracks likelyRevertCount (status=0 and gasUsed < gasLimit) and gasUsed > cap.");
     console.log("  nearCap: receipt.status = 0 AND receipt.gasUsed >= gasThreshold.");
     console.log(`  Parallelism: --workers (default ${DEFAULT_WORKERS}) controls how many batches run in parallel.`);
@@ -255,11 +256,14 @@ async function findFirstBlockAtOrAfter(provider, timestamp, latestBlock) {
     return low;
 }
 
-function classifyTx(tx) {
+function classifyTx(tx, gasThreshold) {
     if (tx.gasLimit > MAX_TX_GAS) {
         return tx.gasUsed === tx.gasLimit
             ? "status0_gas_limit_above_cap_oog_like"
             : "status0_gas_limit_above_cap_likely_revert";
+    }
+    if (tx.gasUsed === tx.gasLimit && tx.gasLimit >= gasThreshold) {
+        return "status0_oog_like_near_cap";
     }
     if (tx.gasUsed === tx.gasLimit) {
         return "status0_oog_like_below_protocol_cap";
@@ -272,7 +276,9 @@ function shouldKeepFinding({ failed, gasLimit, gasUsed, gasThreshold, filterMode
         return false;
     }
     if (filterMode === "strictCap") {
-        return gasLimit > MAX_TX_GAS;
+        const aboveProtocolCap = gasLimit > MAX_TX_GAS;
+        const nearCapExhausted = gasLimit >= gasThreshold && gasUsed === gasLimit;
+        return aboveProtocolCap || nearCapExhausted;
     }
     if (filterMode === "nearCap") {
         return gasUsed >= gasThreshold;
@@ -567,7 +573,9 @@ async function scan() {
                 }
                 const gasLimit = toNumber(tx.gas);
                 const meetsCandidate =
-                    filterMode === "strictCap" ? gasLimit > MAX_TX_GAS : gasLimit >= gasThreshold;
+                    filterMode === "strictCap"
+                        ? (gasLimit > MAX_TX_GAS || gasLimit >= gasThreshold)
+                        : gasLimit >= gasThreshold;
                 if (meetsCandidate) {
                     candidates.push({ block, tx, gasLimit });
                 }
@@ -609,7 +617,7 @@ async function scan() {
             }
 
             const finding = {
-                category: classifyTx({ gasLimit, gasUsed }),
+                category: classifyTx({ gasLimit, gasUsed }, gasThreshold),
                 blockNumber: toNumber(block.number),
                 blockTime: toNumber(block.timestamp),
                 hash: tx.hash,
