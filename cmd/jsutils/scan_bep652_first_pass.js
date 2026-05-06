@@ -63,8 +63,8 @@ function usage() {
     console.log("Notes:");
     console.log(`  Default start block: ${BEP652_ACTIVATION_BLOCK}.`);
     console.log(`  Default filterMode: ${DEFAULT_FILTER_MODE}.`);
-    console.log("  strictCap: receipt.status = 0 AND (tx.gas > 16,777,216 OR tx.gas >= gasThreshold).");
-    console.log("  Near-cap OOG is a subset: tx.gas >= gasThreshold and receipt.gasUsed == tx.gas.");
+    console.log("  strictCap: receipt.status = 0 AND tx.gas >= gasThreshold AND gasUsed >= gasThreshold.");
+    console.log("  This keeps only high-gas failures near the configured cap threshold.");
     console.log("  Summary also tracks likelyRevertCount (status=0 and gasUsed < gasLimit) and gasUsed > cap.");
     console.log("  nearCap: receipt.status = 0 AND receipt.gasUsed >= gasThreshold.");
     console.log(`  Parallelism: --workers (default ${DEFAULT_WORKERS}) controls how many batches run in parallel.`);
@@ -279,7 +279,7 @@ function shouldKeepFinding({ failed, gasLimit, gasUsed, gasThreshold, filterMode
         return false;
     }
     if (filterMode === "strictCap") {
-        return gasLimit > MAX_TX_GAS || gasLimit >= gasThreshold;
+        return gasLimit >= gasThreshold && gasUsed >= gasThreshold;
     }
     if (filterMode === "nearCap") {
         return gasUsed >= gasThreshold;
