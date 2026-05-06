@@ -63,8 +63,8 @@ function usage() {
     console.log("Notes:");
     console.log(`  Default start block: ${BEP652_ACTIVATION_BLOCK}.`);
     console.log(`  Default filterMode: ${DEFAULT_FILTER_MODE}.`);
-    console.log("  strictCap: receipt.status = 0 AND (tx.gas > 16,777,216 OR near-cap tx runs out of gas).");
-    console.log("  Near-cap OOG rule: tx.gas >= gasThreshold and receipt.gasUsed == tx.gas.");
+    console.log("  strictCap: receipt.status = 0 AND (tx.gas > 16,777,216 OR tx.gas >= gasThreshold).");
+    console.log("  Near-cap OOG is a subset: tx.gas >= gasThreshold and receipt.gasUsed == tx.gas.");
     console.log("  Summary also tracks likelyRevertCount (status=0 and gasUsed < gasLimit) and gasUsed > cap.");
     console.log("  nearCap: receipt.status = 0 AND receipt.gasUsed >= gasThreshold.");
     console.log(`  Parallelism: --workers (default ${DEFAULT_WORKERS}) controls how many batches run in parallel.`);
@@ -262,6 +262,9 @@ function classifyTx(tx, gasThreshold) {
             ? "status0_gas_limit_above_cap_oog_like"
             : "status0_gas_limit_above_cap_likely_revert";
     }
+    if (tx.gasLimit >= gasThreshold && tx.gasUsed < tx.gasLimit) {
+        return "status0_gas_limit_near_cap_not_exhausted";
+    }
     if (tx.gasUsed === tx.gasLimit && tx.gasLimit >= gasThreshold) {
         return "status0_oog_like_near_cap";
     }
@@ -276,9 +279,7 @@ function shouldKeepFinding({ failed, gasLimit, gasUsed, gasThreshold, filterMode
         return false;
     }
     if (filterMode === "strictCap") {
-        const aboveProtocolCap = gasLimit > MAX_TX_GAS;
-        const nearCapExhausted = gasLimit >= gasThreshold && gasUsed === gasLimit;
-        return aboveProtocolCap || nearCapExhausted;
+        return gasLimit > MAX_TX_GAS || gasLimit >= gasThreshold;
     }
     if (filterMode === "nearCap") {
         return gasUsed >= gasThreshold;
