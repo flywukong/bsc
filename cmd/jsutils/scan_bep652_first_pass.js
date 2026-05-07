@@ -362,6 +362,13 @@ function emptyRecovery() {
             selectors: {},
             sampleTxs: [],
         },
+        crossContractSameSelectorSuccessAfterFailure: {
+            count: 0,
+            first: null,
+            latest: null,
+            targets: {},
+            sampleTxs: [],
+        },
     };
 }
 
@@ -397,6 +404,13 @@ async function scanRecoveries({
     }
 
     const groupByKey = new Map(groups.map((group) => [`${group.to}:${group.selector}`, group]));
+    const groupsBySelector = new Map();
+    for (const group of groups) {
+        if (!groupsBySelector.has(group.selector)) {
+            groupsBySelector.set(group.selector, []);
+        }
+        groupsBySelector.get(group.selector).push(group);
+    }
     const affectedContracts = new Set(groups.map((group) => group.to));
     const recoveriesByGroup = Object.fromEntries(
         groups.map((group) => [`${group.to}:${group.selector}`, emptyRecovery()])
@@ -404,6 +418,7 @@ async function scanRecoveries({
     const recoveryTransactionsByCategory = {
         recovered_success_same_selector: [],
         contract_success_other_selector: [],
+        recovered_success_cross_contract_same_selector: [],
     };
     const recoveryStartBlock = Math.min(...groups.map((group) => group.firstBlock));
 
@@ -430,16 +445,44 @@ async function scanRecoveries({
                 continue;
             }
             for (const tx of block.transactions) {
-                const to = normalizeAddress(tx.to);
-                if (!affectedContracts.has(to)) {
+                if (!tx) {
                     continue;
                 }
+                const blockNumber = toNumber(block.number);
+                const to = normalizeAddress(tx.to);
+                const from = normalizeAddress(tx.from);
+                const selector = methodSelector(tx.input || "0x");
+
+                const sameContractCandidate = affectedContracts.has(to);
+                const crossContractGroupKeys = [];
+                const selectorGroups = groupsBySelector.get(selector) || [];
+                for (const group of selectorGroups) {
+                    if (blockNumber <= group.firstBlock) {
+                        continue;
+                    }
+                    if (to === group.to) {
+                        continue;
+                    }
+                    if (!(from in (group.callers || {}))) {
+                        continue;
+                    }
+                    crossContractGroupKeys.push(`${group.to}:${group.selector}`);
+                }
+
+                if (!sameContractCandidate && crossContractGroupKeys.length === 0) {
+                    continue;
+                }
+
                 candidates.push({
                     block,
                     tx,
+                    from,
                     to,
-                    selector: methodSelector(tx.input || "0x"),
+                    selector,
                     gasLimit: toNumber(tx.gas),
+                    blockNumber,
+                    sameContractCandidate,
+                    crossContractGroupKeys,
                 });
             }
         }
@@ -459,10 +502,10 @@ async function scanRecoveries({
             }
 
             const txInfo = {
-                blockNumber: toNumber(candidate.block.number),
+                blockNumber: candidate.blockNumber,
                 blockTime: toNumber(candidate.block.timestamp),
                 hash: candidate.tx.hash,
-                from: normalizeAddress(candidate.tx.from),
+                from: candidate.from,
                 to: candidate.to,
                 selector: candidate.selector,
                 status: 1,
@@ -471,26 +514,35 @@ async function scanRecoveries({
                 gasPrice: candidate.tx.gasPrice ? toNumber(candidate.tx.gasPrice).toString() : null,
             };
 
-            for (const group of groups) {
-                if (group.to !== txInfo.to || txInfo.blockNumber <= group.firstBlock) {
-                    continue;
-                }
+            if (candidate.sameContractCandidate) {
+                for (const group of groups) {
+                    if (group.to !== txInfo.to || txInfo.blockNumber <= group.firstBlock) {
+                        continue;
+                    }
 
-                const groupKey = `${group.to}:${group.selector}`;
-                updateRecoveryBucket(
-                    recoveriesByGroup[groupKey].sameContractSuccessAfterFailure,
-                    txInfo
-                );
-
-                if (groupByKey.has(`${txInfo.to}:${txInfo.selector}`)) {
+                    const groupKey = `${group.to}:${group.selector}`;
                     updateRecoveryBucket(
-                        recoveriesByGroup[groupKey].sameSelectorSuccessAfterFailure,
+                        recoveriesByGroup[groupKey].sameContractSuccessAfterFailure,
                         txInfo
                     );
-                    recoveryTransactionsByCategory.recovered_success_same_selector.push(txInfo);
-                } else {
-                    recoveryTransactionsByCategory.contract_success_other_selector.push(txInfo);
+
+                    if (groupByKey.has(`${txInfo.to}:${txInfo.selector}`)) {
+                        updateRecoveryBucket(
+                            recoveriesByGroup[groupKey].sameSelectorSuccessAfterFailure,
+                            txInfo
+                        );
+                        recoveryTransactionsByCategory.recovered_success_same_selector.push(txInfo);
+                    } else {
+                        recoveryTransactionsByCategory.contract_success_other_selector.push(txInfo);
+                    }
                 }
+            }
+
+            for (const groupKey of candidate.crossContractGroupKeys) {
+                const bucket = recoveriesByGroup[groupKey].crossContractSameSelectorSuccessAfterFailure;
+                updateRecoveryBucket(bucket, txInfo);
+                bucket.targets[txInfo.to] = (bucket.targets[txInfo.to] || 0) + 1;
+                recoveryTransactionsByCategory.recovered_success_cross_contract_same_selector.push(txInfo);
             }
         }
     }
