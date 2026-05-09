@@ -145,8 +145,8 @@ type bidBlockTaskInfo struct {
 // carried into Stage 2 of the two-stage bid selection.
 // Exactly one of (env, bidBlock) is non-nil.
 type bidCandidate struct {
-	env             *environment            // non-nil: simBid path
-	bidBlock        *types.DecodedBidBlock  // non-nil: bidBlock path
+	env             *environment           // non-nil: simBid path
+	bidBlock        *types.DecodedBidBlock // non-nil: bidBlock path
 	blockReward     *uint256.Int
 	validatorReward *uint256.Int
 	builder         common.Address
@@ -211,6 +211,7 @@ type worker struct {
 	chainConfig *params.ChainConfig
 	engine      consensus.Engine
 	eth         Backend
+	permMgr     *BidBlockPermissionManager
 	prio        []common.Address // A list of senders to prioritize
 	chain       *core.BlockChain
 
@@ -256,7 +257,10 @@ type worker struct {
 	resubmitHook func(time.Duration, time.Duration) // Method to call upon updating resubmitting interval.
 }
 
-func newWorker(config *minerconfig.Config, engine consensus.Engine, eth Backend, mux *event.TypeMux) *worker {
+func newWorker(config *minerconfig.Config, engine consensus.Engine, eth Backend, mux *event.TypeMux, permMgr *BidBlockPermissionManager) *worker {
+	if permMgr == nil {
+		permMgr = NewBidBlockPermissionManager()
+	}
 	chainConfig := eth.BlockChain().Config()
 	prefetcher := core.NewStatePrefetcher(chainConfig, eth.BlockChain().HeadChain())
 	if config.Mev.Enabled != nil && *config.Mev.Enabled {
@@ -268,6 +272,7 @@ func newWorker(config *minerconfig.Config, engine consensus.Engine, eth Backend,
 		chainConfig:        chainConfig,
 		engine:             engine,
 		eth:                eth,
+		permMgr:            permMgr,
 		chain:              eth.BlockChain(),
 		mux:                mux,
 		coinbase:           config.Etherbase,
@@ -725,8 +730,9 @@ func (w *worker) handleBidBlockResult(block *types.Block, task *task) {
 			"number", block.Number(),
 			"hash", hash,
 			"builder", task.bidBlockInfo.builder,
-			"err", err)
-		// TODO: mark builder dishonest and revoke BidBlock permission.
+			"err", err,
+			"revokeReason", RevokeReasonInsertChainFailed)
+		w.permMgr.Revoke(task.bidBlockInfo.builder, RevokeReasonInsertChainFailed, hash, block.NumberU64())
 		return
 	}
 
@@ -738,8 +744,9 @@ func (w *worker) handleBidBlockResult(block *types.Block, task *task) {
 			"builder", task.bidBlockInfo.builder,
 			"claimed", task.bidBlockInfo.gasFee,
 			"actual", actualGasFee,
-			"err", err)
-		// TODO: mark builder dishonest and revoke BidBlock permission.
+			"err", err,
+			"revokeReason", RevokeReasonGasFeeOverClaim)
+		w.permMgr.Revoke(task.bidBlockInfo.builder, RevokeReasonGasFeeOverClaim, hash, block.NumberU64())
 		return
 	}
 
