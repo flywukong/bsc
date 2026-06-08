@@ -127,12 +127,7 @@ func prune(snaptree *snapshot.Tree, root common.Hash, maindb ethdb.Database, sta
 	// that the false-positive is low enough(~0.05%). The probability of the
 	// dangling node is the state root is super low. So the dangling nodes in
 	// theory will never ever be visited again.
-	var pruneDB ethdb.Database
-	if maindb != nil && maindb.HasSeparateStateStore() {
-		pruneDB = maindb.GetStateStore()
-	} else {
-		pruneDB = maindb
-	}
+	pruneDB := maindb
 	var (
 		skipped, count int
 		size           common.StorageSize
@@ -273,13 +268,7 @@ func (p *Pruner) Prune(root common.Hash) error {
 		// Use the bottom-most diff layer as the target
 		root = layers[len(layers)-1].Root()
 	}
-	// if the separated state db has been set, use this db to prune data
-	var trienodedb ethdb.Database
-	if p.db != nil && p.db.HasSeparateStateStore() {
-		trienodedb = p.db.GetStateStore()
-	} else {
-		trienodedb = p.db
-	}
+	trienodedb := p.db
 	// Ensure the root is really present. The weak assumption
 	// is the presence of root can indicate the presence of the
 	// entire trie.

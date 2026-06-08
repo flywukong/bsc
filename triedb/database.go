@@ -97,7 +97,7 @@ func NewDatabase(diskdb ethdb.Database, config *Config) *Database {
 	// Sanitize the config and use the default one if it's not specified.
 	var triediskdb ethdb.Database
 	if diskdb != nil {
-		triediskdb = diskdb.GetStateStore()
+		triediskdb = diskdb
 	}
 
 	dbScheme := rawdb.ReadStateScheme(diskdb)
