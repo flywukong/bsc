@@ -63,6 +63,7 @@ func (miner *Miner) bidBlockEnabled() bool {
 }
 
 func (miner *Miner) SendBidBlock(ctx context.Context, args *types.BidBlockArgs) (common.Hash, error) {
+	start := time.Now()
 	if !miner.bidBlockEnabled() {
 		return common.Hash{}, types.NewInvalidBidError("BidBlock disabled, fallback to SendBid")
 	}
@@ -71,10 +72,37 @@ func (miner *Miner) SendBidBlock(ctx context.Context, args *types.BidBlockArgs) 
 	bb := args.BidBlock
 	bidHash := bb.Hash()
 
+	// Per-stage elapsed time in µs; -1 means the bid died before reaching that
+	// stage. Each milestone below records its duration with a single stage()
+	// call, so failed bids still show where their time went.
+	authUs, checkUs, decodeTxsUs, presealUs, queueUs := int64(-1), int64(-1), int64(-1), int64(-1), int64(-1)
+	mark := start
+	stage := func() int64 {
+		now := time.Now()
+		us := now.Sub(mark).Microseconds()
+		mark = now
+		return us
+	}
+	defer func() {
+		log.Info("[BID BLOCK STAGES]",
+			"block", bb.Header.Number,
+			"bidHash", bidHash.TerminalString(),
+			"txs", len(bb.Transactions),
+			"sidecars", len(bb.Sidecars),
+			"ok", queueUs >= 0,
+			"authUs", authUs,
+			"checkUs", checkUs,
+			"decodeTxsUs", decodeTxsUs,
+			"presealUs", presealUs,
+			"queueUs", queueUs,
+			"totalUs", time.Since(start).Microseconds())
+	}()
+
 	builder, err := args.EcrecoverSender()
 	if err != nil {
 		return common.Hash{}, types.NewInvalidBidError(fmt.Sprintf("invalid signature: bidHash=%s, err=%v", bidHash, err))
 	}
+	authUs = stage()
 
 	if !miner.bidSimulator.ExistBuilder(builder) {
 		return common.Hash{}, types.NewInvalidBidError(fmt.Sprintf("builder is not registered: builder=%s, bidHash=%s", builder, bidHash))
@@ -102,11 +130,13 @@ func (miner *Miner) SendBidBlock(ctx context.Context, args *types.BidBlockArgs) 
 		return common.Hash{}, types.NewBidBlockTooLateError(fmt.Sprintf("too late, expected before %s, appeared %s later, bidHash=%s",
 			bidMustBefore, common.PrettyDuration(timeout), bidHash))
 	}
+	checkUs = stage()
 
 	decoded, err := args.ToDecodedBidBlock(builder)
 	if err != nil {
 		return common.Hash{}, types.NewInvalidBidError(fmt.Sprintf("failed to decode bid block: bidHash=%s, err=%v", bidHash, err))
 	}
+	decodeTxsUs = stage()
 
 	// Validator owns the entire Extra: overwrite builder's bytes with the operator-configured
 	// vanity and let SetExtraData rebuild forkhash + validators + turnLength + reserved seal
@@ -133,10 +163,12 @@ func (miner *Miner) SendBidBlock(ctx context.Context, args *types.BidBlockArgs) 
 			"err", err)
 		return common.Hash{}, types.NewBidBlockPreSealVerifyError(fmt.Sprintf("pre-seal verify failed: bidHash=%s, err=%v", bidHash, err))
 	}
+	presealUs = stage()
 
 	if err := miner.bidSimulator.sendBidBlock(ctx, decoded); err != nil {
 		return common.Hash{}, err
 	}
+	queueUs = stage()
 
 	return bidHash, nil
 }

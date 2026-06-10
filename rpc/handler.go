@@ -526,9 +526,15 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage) *jsonrpcMessage 
 		return msg.errorResponse(&methodNotFoundError{method: msg.Method})
 	}
 
+	decodeStart := time.Now()
 	args, err := parsePositionalArguments(msg.Params, callb.argTypes)
 	if err != nil {
 		return msg.errorResponse(&invalidParamsError{err.Error()})
+	}
+	// Params decode happens before the handler runs, so its cost is invisible to
+	// per-method logs. Surface it only when it is large enough to matter.
+	if decodeElapsed := time.Since(decodeStart); decodeElapsed > 5*time.Millisecond {
+		h.log.Info("Slow RPC params decode", "method", msg.Method, "paramsBytes", len(msg.Params), "elapsed", decodeElapsed)
 	}
 	start := time.Now()
 	answer := h.runMethod(cp.ctx, msg, callb, args)
