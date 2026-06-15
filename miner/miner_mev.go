@@ -72,6 +72,11 @@ func (miner *Miner) SendBidBlock(ctx context.Context, args *types.BidBlockArgs) 
 	bb := args.BidBlock
 	bidHash := bb.Hash()
 
+	// Earliest point the handler can log: RPC framework has already read the
+	// body and decoded params by now. Pairs with the sentry's [BID BLOCK SENT]
+	// (same block + bidHash) to measure the one-way sentry->validator delay.
+	log.Info("[BID BLOCK RECEIVED]", "block", bb.Header.Number, "bidHash", bidHash.TerminalString())
+
 	// Per-stage elapsed time in µs; -1 means the bid died before reaching that
 	// stage. Each milestone below records its duration with a single stage()
 	// call, so failed bids still show where their time went.
