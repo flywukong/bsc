@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
@@ -61,5 +62,34 @@ func TestBidBlockArgsToDecodedBidBlockCopiesHeader(t *testing.T) {
 	}
 	if args.BidBlock.Header.Extra[0] != 1 {
 		t.Fatalf("original header extra mutated: got %d, want 1", args.BidBlock.Header.Extra[0])
+	}
+}
+
+func TestBidBlockHashCommitsToHeaderOnly(t *testing.T) {
+	header := &types.Header{
+		Difficulty: big.NewInt(1),
+		Number:     big.NewInt(1),
+		Extra:      make([]byte, 32),
+		TxHash:     common.HexToHash("0x01"),
+	}
+	bidBlock := &BidBlock{
+		Header:       header,
+		Transactions: []hexutil.Bytes{[]byte{0x01}},
+	}
+	hash := bidBlock.Hash()
+
+	bodyMutated := &BidBlock{
+		Header:       types.CopyHeader(header),
+		Transactions: []hexutil.Bytes{[]byte{0x02}},
+		Sidecars:     types.BlobSidecars{&types.BlobSidecar{}},
+	}
+	if got := bodyMutated.Hash(); got != hash {
+		t.Fatalf("BidBlock hash changed after body mutation: got %s want %s", got, hash)
+	}
+
+	headerMutated := &BidBlock{Header: types.CopyHeader(header)}
+	headerMutated.Header.TxHash = common.HexToHash("0x02")
+	if got := headerMutated.Hash(); got == hash {
+		t.Fatal("BidBlock hash should change when header TxHash changes")
 	}
 }
