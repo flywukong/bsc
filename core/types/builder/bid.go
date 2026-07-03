@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
@@ -264,11 +265,19 @@ type BidBlock struct {
 }
 
 // Hash returns rlpHash over all BidBlock fields. This is what the builder signs.
-func (b *BidBlock) Hash() common.Hash {
+func (b *BidBlock) Hash() (h common.Hash) {
+	start := time.Now()
+	cached := false
+	defer func() {
+		log.Info("BidBlock Hash() finished", "number", b.Header.Number, "elapsed", time.Since(start),
+			"cached", cached, "txs", len(b.Transactions), "sidecars", len(b.Sidecars))
+	}()
+
 	if hash := b.hash.Load(); hash != nil {
+		cached = true
 		return hash.(common.Hash)
 	}
-	h := rlpHash(b)
+	h = rlpHash(b)
 	b.hash.Store(h)
 	return h
 }
