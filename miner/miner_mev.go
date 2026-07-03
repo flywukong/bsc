@@ -80,7 +80,7 @@ func (miner *Miner) SendBidBlock(ctx context.Context, args *buildertypes.BidBloc
 	bb := args.BidBlock
 	bidHash := bb.Hash()
 
-	builder, err := args.EcrecoverSender()
+	builder, err := args.EcrecoverSender(bidHash)
 	if err != nil {
 		return common.Hash{}, buildertypes.NewInvalidBidError(fmt.Sprintf("invalid signature: bidHash=%s, err=%v", bidHash, err))
 	}
@@ -133,6 +133,7 @@ func (miner *Miner) SendBidBlock(ctx context.Context, args *buildertypes.BidBloc
 	if err != nil {
 		return common.Hash{}, buildertypes.NewInvalidBidError(fmt.Sprintf("failed to decode bid block: bidHash=%s, err=%v", bidHash, err))
 	}
+	decoded.BidHash = bidHash
 
 	// Validator owns the entire Extra: overwrite builder's bytes with the operator-configured
 	// vanity and let SetExtraData rebuild forkhash + validators + turnLength + reserved seal

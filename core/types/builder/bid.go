@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
@@ -210,9 +211,9 @@ type BidBlockArgs struct {
 	Signature hexutil.Bytes `json:"signature"`
 }
 
-// EcrecoverSender recovers the builder address from the signature over BidBlock.Hash().
-func (b *BidBlockArgs) EcrecoverSender() (common.Address, error) {
-	pk, err := crypto.SigToPub(b.BidBlock.Hash().Bytes(), b.Signature)
+// EcrecoverSender recovers the builder address from the signature over bidHash.
+func (b *BidBlockArgs) EcrecoverSender(bidHash common.Hash) (common.Address, error) {
+	pk, err := crypto.SigToPub(bidHash.Bytes(), b.Signature)
 	if err != nil {
 		return common.Address{}, err
 	}
@@ -237,7 +238,6 @@ func (b *BidBlockArgs) ToDecodedBidBlock(builder common.Address) (*DecodedBidBlo
 		Header:   types.CopyHeader(b.BidBlock.Header),
 		Txs:      txs,
 		Sidecars: sidecars,
-		bidHash:  b.BidBlock.Hash(),
 	}, nil
 }
 
@@ -263,12 +263,21 @@ type BidBlock struct {
 	hash atomic.Value
 }
 
-// Hash returns rlpHash over all BidBlock fields. This is what the builder signs.
-func (b *BidBlock) Hash() common.Hash {
+// Hash returns the BidBlock signing hash. The header carries TxHash, and the
+// validator checks TxHash against Transactions before blind-signing.
+func (b *BidBlock) Hash() (h common.Hash) {
+	start := time.Now()
+	cached := false
+	defer func() {
+		log.Info("BidBlock Hash() finished", "number", b.Header.Number, "elapsed", time.Since(start),
+			"cached", cached, "txs", len(b.Transactions), "sidecars", len(b.Sidecars))
+	}()
+
 	if hash := b.hash.Load(); hash != nil {
+		cached = true
 		return hash.(common.Hash)
 	}
-	h := rlpHash(b)
+	h = rlpHash(b.Header)
 	b.hash.Store(h)
 	return h
 }
@@ -282,12 +291,12 @@ type DecodedBidBlock struct {
 	GasFee        *big.Int
 	SystemTxStart int // index in Txs where the unsigned trailing system-tx region begins; set during admission.
 
-	bidHash common.Hash
+	BidHash common.Hash
 }
 
 // Hash returns the hash of the original BidBlock payload.
 func (d *DecodedBidBlock) Hash() common.Hash {
-	return d.bidHash
+	return d.BidHash
 }
 
 // BlockNumber returns the block number from the header.
