@@ -70,7 +70,7 @@ func (g *GateModular) notifyMigrateSwapOutHandler(w http.ResponseWriter, r *http
 	}
 }
 
-func (g *GateModular) checkMigratePieceAuth(reqCtx *RequestContext, migrateGVGHeader string) (bool, error) {
+func (g *GateModular) checkMigratePieceAuth(reqCtx *RequestContext, migrateGVGHeader string) (bool, *gfsptask.GfSpMigrateGVGTask, error) {
 	var (
 		err           error
 		migrateGVGMsg []byte
@@ -78,38 +78,38 @@ func (g *GateModular) checkMigratePieceAuth(reqCtx *RequestContext, migrateGVGHe
 	migrateGVGMsg, err = hex.DecodeString(migrateGVGHeader)
 	if err != nil {
 		log.Errorw("failed to parse migrate gvg header", "migrate_gvg_header", migrateGVGHeader, "error", err)
-		return false, ErrDecodeMsg
+		return false, nil, ErrDecodeMsg
 	}
 	migrateGVG := gfsptask.GfSpMigrateGVGTask{}
 	err = json.Unmarshal(migrateGVGMsg, &migrateGVG)
 	if err != nil {
 		log.Errorw("failed to unmarshal migrate gvg msg", "error", err)
-		return false, ErrDecodeMsg
+		return false, nil, ErrDecodeMsg
 	}
 	if migrateGVG.GetExpireTime() < time.Now().Unix() {
 		log.Errorw("failed to check migrate gvg expire time", "gvg_task", migrateGVG)
-		return false, ErrNoPermission
+		return false, nil, ErrNoPermission
 	}
 	destSPAddr, err := reqCtx.verifyTaskSignature(migrateGVG.GetSignBytes(), migrateGVG.GetSignature())
 	if err != nil {
 		log.Errorw("failed to verify task signature", "gvg_task", migrateGVG, "error", err)
-		return false, err
+		return false, nil, err
 	}
 	sp, err := g.spCachePool.QuerySPByAddress(destSPAddr.String())
 	if err != nil {
 		log.Errorw("failed to query sp", "gvg_task", migrateGVG, "dest_sp_addr", destSPAddr.String(), "error", err)
-		return false, err
+		return false, nil, err
 	}
 	effect, err := g.baseApp.GfSpClient().VerifyMigrateGVGPermission(reqCtx.Context(), migrateGVG.GetBucketID(), migrateGVG.GetSrcGvg().GetId(), sp.GetId())
 	if effect == nil || err != nil {
 		log.Errorw("failed to verify migrate gvg permission", "gvg_bucket_id", migrateGVG.GetBucketID(),
 			"src_gvg_id", migrateGVG.GetSrcGvg().GetId(), "dest_sp", sp.GetId(), "effect", effect, "error", err)
-		return false, err
+		return false, nil, err
 	}
 	if *effect == permissiontypes.EFFECT_ALLOW {
-		return true, nil
+		return true, &migrateGVG, nil
 	}
-	return false, nil
+	return false, &migrateGVG, nil
 }
 
 // checkMigrateBucketQuotaAuth parse migrateBucketMsgHeader to GfSpBucketMigrationInfo and check if request has permission
@@ -209,7 +209,8 @@ func (g *GateModular) migratePieceHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if allowMigrate, err = g.checkMigratePieceAuth(reqCtx, r.Header.Get(GnfdMigrateGVGMsgHeader)); err != nil {
+	var migrateGVG *gfsptask.GfSpMigrateGVGTask
+	if allowMigrate, migrateGVG, err = g.checkMigratePieceAuth(reqCtx, r.Header.Get(GnfdMigrateGVGMsgHeader)); err != nil {
 		log.CtxErrorw(reqCtx.Context(), "failed to check migrate piece auth", "migrate_piece", migratePiece, "error", err)
 		return
 	}
@@ -230,6 +231,28 @@ func (g *GateModular) migratePieceHandler(w http.ResponseWriter, r *http.Request
 		log.CtxErrorw(reqCtx.Context(), "failed to get object on chain meta", "error", err)
 		err = ErrInvalidHeader
 		return
+	}
+
+	// SECURITY (SRC-915): bind the served piece to the scope of the signed migration approval.
+	// The requested object is taken from an unsigned piece header; without this cross-check a valid
+	// approval for one bucket/GVG could be replayed to read pieces of unrelated objects on this SP.
+	if migrateGVG.GetBucketID() != 0 {
+		// bucket migration: the object must belong to the approved bucket.
+		if bucketInfo.Id.Uint64() != migrateGVG.GetBucketID() {
+			log.CtxErrorw(reqCtx.Context(), "object's bucket does not match signed migration approval",
+				"approval_bucket_id", migrateGVG.GetBucketID(), "requested_bucket_id", bucketInfo.Id.Uint64())
+			err = ErrNoPermission
+			return
+		}
+	} else if migrateGVG.GetSrcGvg() != nil {
+		// swap-out: the object's bucket must be served by the same family as the migrated GVG.
+		if bucketInfo.GetGlobalVirtualGroupFamilyId() != migrateGVG.GetSrcGvg().GetFamilyId() {
+			log.CtxErrorw(reqCtx.Context(), "object's family does not match signed swap-out approval",
+				"approval_family_id", migrateGVG.GetSrcGvg().GetFamilyId(),
+				"requested_family_id", bucketInfo.GetGlobalVirtualGroupFamilyId())
+			err = ErrNoPermission
+			return
+		}
 	}
 
 	redundancyNumber := int32(migratePiece.GetStorageParams().GetRedundantDataChunkNum()+migratePiece.GetStorageParams().GetRedundantParityChunkNum()) - 1

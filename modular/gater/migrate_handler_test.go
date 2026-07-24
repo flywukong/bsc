@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	sdkmath "cosmossdk.io/math"
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
@@ -824,4 +825,55 @@ func TestGateModular_getSwapOutApproval(t *testing.T) {
 			assert.Contains(t, w.Body.String(), tt.wantedResult)
 		})
 	}
+}
+
+func makeMockMigrateGVGTaskHeaderWithBucket(t *testing.T, bucketID uint64) string {
+	mockTask := &gfsptask.GfSpMigrateGVGTask{BucketId: bucketID, ExpireTime: time.Now().Unix() + 5*60}
+	mockKM, err := keys.NewPrivateKeyManager(util.RandHexKey())
+	assert.Nil(t, err)
+	signature, err := mockKM.Sign(mockTask.GetSignBytes())
+	assert.Nil(t, err)
+	mockTask.SetSignature(signature)
+	msg, err := json.Marshal(mockTask)
+	assert.Nil(t, err)
+	return hex.EncodeToString(msg)
+}
+
+// TestGateModular_migratePieceHandler_crossBucketDenied is a regression test for SRC-915:
+// a valid migration approval for one bucket must not authorize serving pieces of an object
+// that belongs to a different bucket.
+func TestGateModular_migratePieceHandler_crossBucketDenied(t *testing.T) {
+	g := setup(t)
+	ctrl := gomock.NewController(t)
+	clientMock := gfspclient.NewMockGfSpClientAPI(ctrl)
+	clientMock.EXPECT().VerifyGNFD1EddsaSignature(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+	mockEffect := permissiontypes.EFFECT_ALLOW
+	clientMock.EXPECT().VerifyMigrateGVGPermission(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(&mockEffect, nil).AnyTimes()
+	g.baseApp.SetGfSpClient(clientMock)
+
+	consensusMock := consensus.NewMockConsensus(ctrl)
+	consensusMock.EXPECT().QueryObjectInfo(gomock.Any(), gomock.Any(), gomock.Any()).Return(&storagetypes.ObjectInfo{
+		ObjectName: mockObjectName, CreateAt: 1}, nil).AnyTimes()
+	// The requested object belongs to bucket id 42, which differs from the signed approval (id 999).
+	consensusMock.EXPECT().QueryBucketInfo(gomock.Any(), gomock.Any()).Return(&storagetypes.BucketInfo{
+		BucketName: mockBucketName, Id: sdkmath.NewUint(42)}, nil).AnyTimes()
+	consensusMock.EXPECT().QueryStorageParamsByTimestamp(gomock.Any(), gomock.Any()).Return(&storagetypes.Params{
+		MaxPayloadSize: DefaultMaxPayloadSize}, nil).AnyTimes()
+	g.baseApp.SetConsensus(consensusMock)
+	chainMock := consensus.NewMockConsensus(ctrl)
+	chainMock.EXPECT().QuerySP(gomock.Any(), gomock.Any()).Return(&sptypes.StorageProvider{}, nil).AnyTimes()
+	g.spCachePool = NewSPCachePool(chainMock)
+
+	router := mockMigratePieceHandlerRoute(t, g)
+	path := fmt.Sprintf("%s%s%s", scheme, testDomain, MigratePiecePath)
+	req := httptest.NewRequest(http.MethodGet, path, strings.NewReader(""))
+	validExpiryDateStr := time.Now().Add(time.Hour * 60).Format(ExpiryDateFormat)
+	req.Header.Set(commonhttp.HTTPHeaderExpiryTimestamp, validExpiryDateStr)
+	req.Header.Set(GnfdAuthorizationHeader, "GNFD1-EDDSA,Signature=48656c6c6f20476f7068657221")
+	req.Header.Set(GnfdMigratePieceMsgHeader, "7b227461736b223a7b7d2c226f626a6563745f696e666f223a7b226f626a6563745f6e616d65223a226d6f636b2d6f626a6563742d6e616d65222c226964223a2231227d2c2273746f726167655f706172616d73223a7b2276657273696f6e65645f706172616d73223a7b226d61785f7365676d656e745f73697a65223a31302c22726564756e64616e745f646174615f6368756e6b5f6e756d223a342c22726564756e64616e745f7061726974795f6368756e6b5f6e756d223a327d7d7d")
+	req.Header.Set(GnfdMigrateGVGMsgHeader, makeMockMigrateGVGTaskHeaderWithBucket(t, 999))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Contains(t, w.Body.String(), "no permission")
 }
