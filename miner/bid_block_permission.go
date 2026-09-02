@@ -22,39 +22,14 @@ import (
 const RevokeReasonManual = "manual"
 
 const (
-	// bidBlockRevokeDuration is the default lockout window for invalid BidBlocks,
-	// and the first step of the escalating ladder below.
+	// bidBlockRevokeDuration is the lockout window for invalid BidBlocks.
 	bidBlockRevokeDuration = 24 * time.Hour
 	// bidBlockGasPriceLowRevokeDuration is one epoch for gas-price policy revokes.
 	bidBlockGasPriceLowRevokeDuration = 450 * time.Second
 
-	// Repeats cost more, so a broken or hostile builder cannot burn one slot per
-	// validator per day at a flat price:
-	//
-	//	lockout(n) = min(24h + n*12h, 7d)   n = prior violations still on record
-	//
-	// Capped at the 13th violation, ~52 days of relentless attacking away.
-	bidBlockRevokeEscalationStep = 12 * time.Hour
-	bidBlockRevokeMaxDuration    = 7 * 24 * time.Hour
-
-	// bidBlockViolationRetention is how long a violation outlives its lockout.
-	// Staying clean this long clears the count, which an attacker cannot exploit:
-	// idling for a week to earn a 24h lockout is slower than the 7d cap it escapes.
+	// bidBlockViolationRetention is how long a violation count outlives its lockout.
 	bidBlockViolationRetention = 7 * 24 * time.Hour
 )
-
-// escalatedRevokeDuration returns the lockout for a builder's violation count
-// (1-based), following the ladder documented above.
-func escalatedRevokeDuration(violationCount int) time.Duration {
-	if violationCount < 1 {
-		violationCount = 1
-	}
-	d := bidBlockRevokeDuration + time.Duration(violationCount-1)*bidBlockRevokeEscalationStep
-	if d > bidBlockRevokeMaxDuration {
-		return bidBlockRevokeMaxDuration
-	}
-	return d
-}
 
 // The revoke map is persisted as a single JSON file under the node's datadir
 // (a whole-map snapshot, atomically replaced on every change) so that lockouts
@@ -102,7 +77,7 @@ type BidBlockRevokeRecord struct {
 	Reason    string        `json:"reason"` // err detail for auto revokes (InsertChain failure), or RevokeReasonManual
 	BlockHash common.Hash   `json:"blockHash"`
 	BlockNum  uint64        `json:"blockNum"`
-	// ViolationCount tracks retained on-chain violations used to escalate future revokes.
+	// ViolationCount tracks retained on-chain violations for logging and persistence.
 	ViolationCount int `json:"violationCount,omitempty"`
 }
 
@@ -259,26 +234,24 @@ func (m *BidBlockPermissionManager) IsAllowed(builder common.Address) bool {
 	return !found
 }
 
-// RevokeForViolation records a violation and applies the corresponding escalating lockout.
+// RevokeForViolation records a violation and applies the standard lockout.
 func (m *BidBlockPermissionManager) RevokeForViolation(
 	builder common.Address,
 	reason string,
 	blockHash common.Hash,
 	blockNum uint64,
-) (time.Duration, int) {
+) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	now := m.clock()
 	violationCount := m.carriedViolationCount(builder, now) + 1
-	duration := escalatedRevokeDuration(violationCount)
-	m.applyRevokeLocked(builder, reason, blockHash, blockNum, duration, violationCount, now)
-	return duration, violationCount
+	m.applyRevokeLocked(builder, reason, blockHash, blockNum, bidBlockRevokeDuration, violationCount, now)
+	return violationCount
 }
 
 // RevokeFor denies builder for the supplied duration and records the reason
-// exposed by the permission RPC. The violation count is carried over untouched,
-// so a short policy lockout neither escalates nor clears the ladder.
+// exposed by the permission RPC. The violation count is carried over unchanged.
 func (m *BidBlockPermissionManager) RevokeFor(
 	builder common.Address,
 	reason string,
@@ -299,8 +272,7 @@ func (m *BidBlockPermissionManager) RevokeFor(
 // applyRevokeLocked stores one revoke and schedules persistence. Must be called
 // with m.mu held.
 //
-// An active lockout is never shortened, so a 450s gas-price revoke landing on a
-// builder serving a multi-day one only refreshes its reason and violation count.
+// An active lockout is never shortened by a shorter policy revoke.
 func (m *BidBlockPermissionManager) applyRevokeLocked(
 	builder common.Address,
 	reason string,
@@ -360,10 +332,7 @@ func (m *BidBlockPermissionManager) ActiveRevokeCount() int {
 	return count
 }
 
-// SetAllowed is the operator override. Allowing a builder clears its violation
-// count as well as its lockout: a manual release is a judgement that the
-// builder is clean, so the next automatic revoke starts at the base duration.
-// Manual denial does not escalate and does not add a violation.
+// SetAllowed is the operator override; allowing clears the lockout and violation count.
 func (m *BidBlockPermissionManager) SetAllowed(builder common.Address, allowed bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -372,8 +341,7 @@ func (m *BidBlockPermissionManager) SetAllowed(builder common.Address, allowed b
 		m.markDirtyLocked()
 		return
 	}
-	// Via applyRevokeLocked so denying an already-denied builder — a natural
-	// operator action — cannot cut short a longer escalated lockout.
+	// Do not let a manual denial shorten an active lockout.
 	now := m.clock()
 	m.applyRevokeLocked(builder, RevokeReasonManual, common.Hash{}, 0, bidBlockRevokeDuration, m.carriedViolationCount(builder, now), now)
 }
@@ -383,9 +351,7 @@ func isRevokeActive(rec BidBlockRevokeRecord, now time.Time) bool {
 	return now.Before(revokeResetAt(rec))
 }
 
-// isViolationRetained reports whether rec still carries a usable violation
-// count. It outlives the lockout itself by bidBlockViolationRetention, which
-// makes the escalation survive between attacks instead of resetting on unban.
+// isViolationRetained reports whether rec still carries a retained violation count.
 func isViolationRetained(rec BidBlockRevokeRecord, now time.Time) bool {
 	return now.Before(revokeResetAt(rec).Add(bidBlockViolationRetention))
 }
